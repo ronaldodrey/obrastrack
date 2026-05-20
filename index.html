@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ObrasTrack</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ════ LOGIN ════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">OBRAS<span>TRACK</span></div>
+    <div class="login-sub">Sistema de acompanhamento de obras</div>
+    <div class="fg"><label>E-mail</label><input type="email" id="lgEmail" placeholder="seu@email.com" autocomplete="username"></div>
+    <div class="fg"><label>Senha</label><input type="password" id="lgPass" placeholder="••••••••" autocomplete="current-password"></div>
+    <div class="login-err" id="lgErr"></div>
+    <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- ════ APP ════ -->
+<div id="appScreen" style="display:none">
+  <header>
+    <div class="h-logo">OBRAS<span>TRACK</span></div>
+    <div class="h-right">
+      <div class="h-user">Olá, <strong id="hName"></strong></div>
+      <span class="role-badge" id="hRole"></span>
+      <button class="btn btn-secondary btn-sm" onclick="doLogout()">Sair</button>
+    </div>
+  </header>
+  <div class="tabs" id="tabBar"></div>
+
+  <!-- DASHBOARD -->
+  <div class="page" id="pgDash">
+    <div class="kpi-strip">
+      <div class="kpi-card c1"><div class="kpi-lbl">Total de Obras</div><div class="kpi-val" id="k1">—</div><div class="kpi-sub">cadastradas</div></div>
+      <div class="kpi-card c2"><div class="kpi-lbl">Aguard. Fiscalização</div><div class="kpi-val" id="k2">—</div><div class="kpi-sub">concluídas sem vistoria</div></div>
+      <div class="kpi-card c3"><div class="kpi-lbl">Aguard. Kaffa</div><div class="kpi-val" id="k3">—</div><div class="kpi-sub">fiscalizadas sem kaffa</div></div>
+      <div class="kpi-card c4"><div class="kpi-lbl">Aguard. Medição</div><div class="kpi-val" id="k4">—</div><div class="kpi-sub">kaffa sem medição</div></div>
+    </div>
+    <div class="sect-title">Velocidade Média por Fiscal</div>
+    <div class="vel-grid" id="velGrid"><div class="loading">Carregando...</div></div>
+  </div>
+
+  <!-- OBRAS -->
+  <div class="page" id="pgObras">
+    <div class="tbl-head">
+      <div class="page-title" id="obrasTit">Obras</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div class="search-wrap"><span class="search-ico">🔍</span><input type="text" id="srch" placeholder="Buscar…" oninput="renderObras()"></div>
+        <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Nº</th><th>Cidade</th><th>Empreiteira</th><th>Fiscal</th><th>Status</th>
+          <th>Conclusão</th><th>Fiscalização</th><th>Δ</th>
+          <th>Kaffa</th><th>Δ</th><th>Medição</th><th>Δ</th><th></th>
+        </tr></thead>
+        <tbody id="obrasBody"><tr><td colspan="13"><div class="loading">Carregando obras...</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- USUÁRIOS -->
+  <div class="page" id="pgUsers">
+    <div class="tbl-head">
+      <div class="page-title">Usuários</div>
+      <button class="btn btn-primary btn-sm" onclick="openUserModal()">+ Novo Usuário</button>
+    </div>
+    <div class="users-table">
+      <div class="ut-row ut-header">
+        <div class="ut-name">Nome</div>
+        <div class="ut-email">E-mail</div>
+        <div class="ut-role">Perfil</div>
+        <div class="ut-vinc">Vínculo</div>
+        <div class="ut-acts"></div>
+      </div>
+      <div id="usersList"><div class="loading">Carregando...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL OBRA -->
+<div class="overlay" id="ovObra">
+  <div class="modal">
+    <h2 id="obraModalTit">Nova Obra</h2>
+    <input type="hidden" id="obraId">
+    <div id="blkIdentif">
+      <div class="sect-title">Identificação</div>
+      <div class="fg-grid">
+        <div class="fg"><label>Nº da Obra</label><input type="text" id="oNum" placeholder="2024-001"></div>
+        <div class="fg"><label>Cidade</label><input type="text" id="oCid" placeholder="Florianópolis"></div>
+        <div class="fg"><label>Empreiteira</label>
+          <select id="oEmp">
+            <option value="">— selecione —</option>
+            <option value="CS ELETRICIDADE">CS ELETRICIDADE</option>
+            <option value="ELETELSUL">ELETELSUL</option>
+          </select>
+        </div>
+        <div class="fg"><label>Fiscal Responsável</label><input type="text" id="oFiscalNome" placeholder="Nome do fiscal"></div>
+      </div>
+      <hr class="divider">
+    </div>
+    <div id="blkEmp">
+      <div class="sect-title">Datas — Empreiteira</div>
+      <div class="fg-grid">
+        <div class="fg"><label>Data Conclusão</label><input type="date" id="oConc"></div>
+        <div class="fg"><label>Data Kaffa</label><input type="date" id="oKaff"></div>
+      </div>
+      <hr class="divider">
+    </div>
+    <div id="blkFis">
+      <div class="sect-title">Datas — Fiscal</div>
+      <div class="fg-grid">
+        <div class="fg"><label>Data Fiscalização</label><input type="date" id="oFisc"></div>
+        <div class="fg"><label>Data Medição</label><input type="date" id="oMed"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeObraModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarObra" onclick="saveObra()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL USUÁRIO -->
+<div class="overlay" id="ovUser">
+  <div class="modal" style="width:440px">
+    <h2 id="userModalTit">Novo Usuário</h2>
+    <input type="hidden" id="userId">
+    <div class="fg"><label>Nome completo</label><input type="text" id="uNome" placeholder="João Silva"></div>
+    <div class="fg"><label>E-mail (usado para login)</label><input type="email" id="uEmail" placeholder="joao@email.com"></div>
+    <div class="fg"><label>Senha inicial</label><input type="password" id="uSenha" placeholder="mínimo 6 caracteres"></div>
+    <div class="fg">
+      <label>Perfil</label>
+      <select id="uPerfil" onchange="onPerfilChange()">
+        <option value="">— selecione —</option>
+        <option value="gerente">Gerente</option>
+        <option value="fiscal">Fiscal</option>
+        <option value="empreiteira">Empreiteira</option>
+      </select>
+    </div>
+    <div class="fg" id="fgVincEmp" style="display:none">
+      <label>Empreiteira</label>
+      <select id="uVincEmp">
+        <option value="">— selecione —</option>
+        <option value="CS ELETRICIDADE">CS ELETRICIDADE</option>
+        <option value="ELETELSUL">ELETELSUL</option>
+      </select>
+    </div>
+    <div class="fg" id="fgVincFis" style="display:none">
+      <label>Nome do fiscal (deve bater com o cadastro nas obras)</label>
+      <input type="text" id="uVincFis" placeholder="Ex: João Silva">
+    </div>
+    <div class="modal-note" id="userNote" style="display:none"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeUserModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarUser" onclick="saveUser()">Criar Usuário</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

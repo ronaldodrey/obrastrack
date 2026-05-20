@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Função helper: busca o perfil do usuário logado
+    function perfil() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.perfil;
+    }
+    function vinculo() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.vinculo;
+    }
+
+    // ── OBRAS ──────────────────────────────────────────
+    match /obras/{obraId} {
+      // Leitura: qualquer usuário autenticado
+      allow read: if request.auth != null;
+
+      // Criação: apenas gerente
+      allow create: if request.auth != null && perfil() == 'gerente';
+
+      // Atualização: gerente (tudo), empreiteira (só conclusao/kaffa),
+      //              fiscal (só fiscalizacao/medicao — das suas obras)
+      allow update: if request.auth != null && (
+        perfil() == 'gerente'
+        ||
+        (perfil() == 'empreiteira'
+          && resource.data.empreiteira == vinculo()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['conclusao', 'kaffa', 'atualizadaEm']))
+        ||
+        (perfil() == 'fiscal'
+          && resource.data.fiscal == vinculo()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['fiscalizacao', 'medicao', 'atualizadaEm']))
+      );
+
+      // Exclusão: apenas gerente
+      allow delete: if request.auth != null && perfil() == 'gerente';
+    }
+
+    // ── USUÁRIOS ───────────────────────────────────────
+    match /usuarios/{uid} {
+      // Cada usuário pode ler o próprio perfil; gerente lê todos
+      allow read: if request.auth != null &&
+        (request.auth.uid == uid || perfil() == 'gerente');
+
+      // Criação e edição: apenas gerente
+      allow write: if request.auth != null && perfil() == 'gerente';
+    }
+  }
+}
