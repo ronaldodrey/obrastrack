@@ -8,25 +8,30 @@ import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPas
 import { getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, query, orderBy }
                                   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import firebaseConfig             from "./firebase-config.js";
-
+ 
 // ── INIT ──────────────────────────────────────────────
-const fbApp = initializeApp(firebaseConfig);
+// App principal — gerente logado
+const fbApp = initializeApp(firebaseConfig, 'main');
 const auth  = getAuth(fbApp);
 const db    = getFirestore(fbApp);
-
+ 
+// App secundário — usado APENAS para criar novos usuários sem deslogar o gerente
+const fbApp2 = initializeApp(firebaseConfig, 'secondary');
+const auth2  = getAuth(fbApp2);
+ 
 // ── ESTADO ────────────────────────────────────────────
 const EMPREITEIRAS = ['CS ELETRICIDADE', 'ELETELSUL'];
 const COLORS = ['#00e5a0','#7c6af7','#ff6b35','#f5c542','#ff4d6d','#38bdf8','#a3e635','#fb7185','#e879f9','#67e8f9'];
 const fColor = {}; let cIdx = 0;
-
-let me       = null;   // perfil do usuário logado (doc do Firestore)
-let obras    = [];     // cache local
-let users    = [];     // cache local
-let unsubObras = null; // listener tempo real
-
+ 
+let me         = null;
+let obras      = [];
+let users      = [];
+let unsubObras = null;
+ 
 function gc(k) { if (!fColor[k]) fColor[k] = COLORS[cIdx++ % COLORS.length]; return fColor[k]; }
 function ini(n) { return n.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(); }
-
+ 
 // ── HELPERS DATAS ──────────────────────────────────────
 function fmt(s) {
   if (!s) return '<span style="color:var(--muted)">—</span>';
@@ -50,20 +55,19 @@ function statusOf(o) {
   if (o.conclusao)    return { l: 'Concluída',    c: 'p-conc' };
   return { l: 'Pendente', c: 'p-pend' };
 }
-
+ 
 // ── TOAST ─────────────────────────────────────────────
 function toast(msg, type = 'ok') {
   const el = document.createElement('div');
   el.className = `toast-item toast-${type}`;
   el.innerHTML = (type === 'ok' ? '✅' : '❌') + ' ' + msg;
   document.getElementById('toast').appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  setTimeout(() => el.remove(), 4000);
 }
-
+ 
 // ── AUTH ──────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   if (user) {
-    // buscar perfil no Firestore
     const snap = await getDoc(doc(db, 'usuarios', user.uid));
     if (!snap.exists()) { await signOut(auth); return; }
     me = { uid: user.uid, email: user.email, ...snap.data() };
@@ -75,7 +79,7 @@ onAuthStateChanged(auth, async user => {
     if (unsubObras) { unsubObras(); unsubObras = null; }
   }
 });
-
+ 
 async function doLogin() {
   const email = document.getElementById('lgEmail').value.trim();
   const senha  = document.getElementById('lgPass').value;
@@ -95,7 +99,7 @@ async function doLogin() {
 document.getElementById('lgPass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 window.doLogin  = doLogin;
 window.doLogout = () => signOut(auth);
-
+ 
 // ── APP INIT ──────────────────────────────────────────
 function iniciarApp() {
   document.getElementById('loginScreen').style.display = 'none';
@@ -104,29 +108,27 @@ function iniciarApp() {
   const rb = document.getElementById('hRole');
   rb.textContent = me.perfil.charAt(0).toUpperCase() + me.perfil.slice(1);
   rb.className   = 'role-badge role-' + me.perfil;
-
-  // tabs por perfil
+ 
   const tabs = [['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
   if (me.perfil === 'gerente') tabs.push(['pgUsers','👥 Usuários']);
   document.getElementById('tabBar').innerHTML = tabs
     .map(([id, lbl]) => `<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`)
     .join('');
-
+ 
   document.getElementById('btnNovaObra').style.display =
     me.perfil === 'gerente' ? 'inline-flex' : 'none';
-
-  // listener tempo real para obras
+ 
   const q = query(collection(db, 'obras'), orderBy('criadaEm', 'desc'));
   unsubObras = onSnapshot(q, snap => {
     obras = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    // atualizar página ativa
     const active = document.querySelector('.page.active');
     if (active?.id === 'pgDash')  renderDash();
     if (active?.id === 'pgObras') renderObras();
   });
-
+ 
   showPage('pgDash');
 }
+ 
 window.showPage = function(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.page === id));
@@ -135,15 +137,15 @@ window.showPage = function(id) {
   if (id === 'pgObras') renderObras();
   if (id === 'pgUsers') renderUsers();
 };
-
+ 
 // ── FILTRO POR PERFIL ─────────────────────────────────
 function visibleObras() {
   if (me.perfil === 'gerente') return obras;
-  if (me.perfil === 'fiscal')  return obras; // vê todas, edita só as suas
+  if (me.perfil === 'fiscal')  return obras;
   if (me.perfil === 'empreiteira') return obras.filter(o => o.empreiteira === me.vinculo);
   return [];
 }
-
+ 
 // ── DASHBOARD ─────────────────────────────────────────
 function renderDash() {
   const list = visibleObras();
@@ -151,7 +153,7 @@ function renderDash() {
   document.getElementById('k2').textContent = list.filter(o => o.conclusao && !o.fiscalizacao).length;
   document.getElementById('k3').textContent = list.filter(o => o.fiscalizacao && !o.kaffa).length;
   document.getElementById('k4').textContent = list.filter(o => o.kaffa && !o.medicao).length;
-
+ 
   const fis = {};
   list.forEach(o => {
     if (!o.fiscal) return;
@@ -182,7 +184,7 @@ function renderDash() {
   document.getElementById('velGrid').innerHTML = html ||
     `<div class="empty"><div class="ico">📊</div><p>Sem dados de velocidade ainda.</p></div>`;
 }
-
+ 
 // ── TABELA OBRAS ──────────────────────────────────────
 function renderObras() {
   const srch = document.getElementById('srch').value.toLowerCase();
@@ -202,7 +204,7 @@ function renderObras() {
     const dm = diff(o.kaffa, o.medicao);
     const canEdit =
       me.perfil === 'gerente' ||
-      (me.perfil === 'fiscal'      && o.fiscal     === me.vinculo) ||
+      (me.perfil === 'fiscal'      && o.fiscal      === me.vinculo) ||
       (me.perfil === 'empreiteira' && o.empreiteira === me.vinculo);
     const actBtns = canEdit
       ? `<div style="display:flex;gap:6px">
@@ -227,49 +229,47 @@ function renderObras() {
   }).join('');
 }
 window.renderObras = renderObras;
-
+ 
 // ── MODAL OBRA ────────────────────────────────────────
 window.openObraModal = function(obraId) {
-  const obra    = obraId ? obras.find(o => o.id === obraId) : null;
-  const isEdit  = !!obra;
+  const obra   = obraId ? obras.find(o => o.id === obraId) : null;
+  const isEdit = !!obra;
   document.getElementById('obraModalTit').textContent = isEdit ? 'Editar Obra' : 'Nova Obra';
   document.getElementById('obraId').value = obraId || '';
-
-  const flds = ['oNum','oCid','oConc','oKaff','oFisc','oMed','oFiscalNome'];
-  flds.forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+ 
+  ['oNum','oCid','oConc','oKaff','oFisc','oMed','oFiscalNome'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
   document.getElementById('oEmp').value = '';
-
+ 
   if (isEdit) {
-    document.getElementById('oNum').value       = obra.numero        || '';
-    document.getElementById('oCid').value       = obra.cidade        || '';
-    document.getElementById('oEmp').value       = obra.empreiteira   || '';
-    document.getElementById('oFiscalNome').value= obra.fiscal        || '';
-    document.getElementById('oConc').value      = obra.conclusao     || '';
-    document.getElementById('oKaff').value      = obra.kaffa         || '';
-    document.getElementById('oFisc').value      = obra.fiscalizacao  || '';
-    document.getElementById('oMed').value       = obra.medicao       || '';
+    document.getElementById('oNum').value        = obra.numero       || '';
+    document.getElementById('oCid').value        = obra.cidade       || '';
+    document.getElementById('oEmp').value        = obra.empreiteira  || '';
+    document.getElementById('oFiscalNome').value = obra.fiscal       || '';
+    document.getElementById('oConc').value       = obra.conclusao    || '';
+    document.getElementById('oKaff').value       = obra.kaffa        || '';
+    document.getElementById('oFisc').value       = obra.fiscalizacao || '';
+    document.getElementById('oMed').value        = obra.medicao      || '';
   }
-
-  // blocos visíveis por perfil
-  document.getElementById('blkIdentif').style.display = me.perfil === 'gerente'   ? 'block' : 'none';
-  document.getElementById('blkEmp').style.display     = me.perfil !== 'fiscal'    ? 'block' : 'none';
-  document.getElementById('blkFis').style.display     = me.perfil !== 'empreiteira' ? 'block' : 'none';
-
-  // desabilitar campos do outro perfil
+ 
+  document.getElementById('blkIdentif').style.display  = me.perfil === 'gerente'      ? 'block' : 'none';
+  document.getElementById('blkEmp').style.display      = me.perfil !== 'fiscal'       ? 'block' : 'none';
+  document.getElementById('blkFis').style.display      = me.perfil !== 'empreiteira'  ? 'block' : 'none';
+ 
   ['oConc','oKaff'].forEach(id => document.getElementById(id).disabled = me.perfil === 'fiscal');
-  ['oFisc','oMed'].forEach(id => document.getElementById(id).disabled  = me.perfil === 'empreiteira');
-
+  ['oFisc','oMed'].forEach(id  => document.getElementById(id).disabled = me.perfil === 'empreiteira');
+ 
   document.getElementById('ovObra').classList.add('open');
 };
 window.closeObraModal = function() { document.getElementById('ovObra').classList.remove('open'); };
-
+ 
 window.saveObra = async function() {
   const btn = document.getElementById('btnSalvarObra');
   btn.disabled = true; btn.textContent = 'Salvando…';
   try {
     const obraId = document.getElementById('obraId').value;
     const isEdit = !!obraId;
-
     if (isEdit) {
       const patch = {};
       if (me.perfil === 'gerente') {
@@ -316,7 +316,7 @@ window.saveObra = async function() {
     btn.disabled = false; btn.textContent = 'Salvar';
   }
 };
-
+ 
 window.delObra = async function(obraId) {
   if (!confirm('Remover esta obra permanentemente?')) return;
   try {
@@ -324,17 +324,20 @@ window.delObra = async function(obraId) {
     toast('Obra removida.');
   } catch(e) { toast('Erro: ' + e.message, 'err'); }
 };
-
+ 
 // ── USUÁRIOS ──────────────────────────────────────────
 async function loadUsers() {
   const snap = await getDocs(collection(db, 'usuarios'));
   users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
 }
-
+ 
 async function renderUsers() {
   await loadUsers();
   const list = document.getElementById('usersList');
-  if (!users.length) { list.innerHTML = `<div class="empty"><div class="ico">👥</div><p>Nenhum usuário.</p></div>`; return; }
+  if (!users.length) {
+    list.innerHTML = `<div class="empty"><div class="ico">👥</div><p>Nenhum usuário.</p></div>`;
+    return;
+  }
   list.innerHTML = users.map(u => {
     const rc = u.perfil === 'gerente' ? 'role-gerente' : u.perfil === 'fiscal' ? 'role-fiscal' : 'role-empreiteira';
     return `<div class="ut-row">
@@ -350,53 +353,56 @@ async function renderUsers() {
   }).join('');
 }
 window.renderUsers = renderUsers;
-
+ 
 window.openUserModal = async function(uid) {
   const isEdit = !!uid;
-  document.getElementById('userModalTit').textContent = isEdit ? 'Editar Usuário' : 'Novo Usuário';
-  document.getElementById('userId').value  = uid || '';
+  document.getElementById('userModalTit').textContent  = isEdit ? 'Editar Usuário' : 'Novo Usuário';
+  document.getElementById('userId').value              = uid || '';
   document.getElementById('btnSalvarUser').textContent = isEdit ? 'Salvar' : 'Criar Usuário';
-
-  ['uNome','uEmail','uSenha','uVincFis'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-  document.getElementById('uPerfil').value = '';
+ 
+  ['uNome','uEmail','uSenha','uVincFis'].forEach(id => {
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  document.getElementById('uPerfil').value  = '';
   document.getElementById('uVincEmp').value = '';
   document.getElementById('fgVincEmp').style.display = 'none';
   document.getElementById('fgVincFis').style.display = 'none';
-
+ 
   const note = document.getElementById('userNote');
   if (isEdit) {
+    await loadUsers();
     const u = users.find(u => u.uid === uid);
     if (u) {
-      document.getElementById('uNome').value  = u.nome   || '';
-      document.getElementById('uEmail').value = u.email  || '';
-      document.getElementById('uPerfil').value= u.perfil || '';
+      document.getElementById('uNome').value   = u.nome   || '';
+      document.getElementById('uEmail').value  = u.email  || '';
+      document.getElementById('uPerfil').value = u.perfil || '';
       onPerfilChange();
-      if (u.perfil === 'empreiteira') document.getElementById('uVincEmp').value = u.vinculo||'';
-      if (u.perfil === 'fiscal')      document.getElementById('uVincFis').value  = u.vinculo||'';
+      if (u.perfil === 'empreiteira') document.getElementById('uVincEmp').value = u.vinculo || '';
+      if (u.perfil === 'fiscal')      document.getElementById('uVincFis').value  = u.vinculo || '';
     }
-    note.textContent = 'Deixe a senha em branco para não alterá-la.';
-    note.style.display = 'block';
+    note.textContent    = 'Deixe a senha em branco para não alterá-la.';
+    note.style.display  = 'block';
   } else {
     note.style.display = 'none';
   }
   document.getElementById('ovUser').classList.add('open');
 };
 window.closeUserModal = function() { document.getElementById('ovUser').classList.remove('open'); };
-
+ 
 window.onPerfilChange = function() {
   const p = document.getElementById('uPerfil').value;
   document.getElementById('fgVincEmp').style.display = p === 'empreiteira' ? 'flex' : 'none';
   document.getElementById('fgVincFis').style.display = p === 'fiscal'      ? 'flex' : 'none';
 };
-
+ 
 window.saveUser = async function() {
-  const btn = document.getElementById('btnSalvarUser');
+  const btn    = document.getElementById('btnSalvarUser');
   btn.disabled = true; btn.textContent = 'Salvando…';
   try {
     const uid    = document.getElementById('userId').value;
     const isEdit = !!uid;
     const nome   = document.getElementById('uNome').value.trim();
-    const email  = document.getElementById('uEmail').value.trim();
+    const email  = document.getElementById('uEmail').value.trim().toLowerCase();
     const senha  = document.getElementById('uSenha').value;
     const perfil = document.getElementById('uPerfil').value;
     const vinculo = perfil === 'empreiteira'
@@ -404,50 +410,59 @@ window.saveUser = async function() {
       : perfil === 'fiscal'
         ? document.getElementById('uVincFis').value.trim()
         : '';
-
+ 
     if (!nome || !email || !perfil) { toast('Preencha todos os campos obrigatórios.', 'err'); return; }
-    if (!isEdit && senha.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return; }
-
+ 
     if (isEdit) {
-      // Atualiza apenas os dados de perfil no Firestore
+      // Edição: atualiza só os dados de perfil no Firestore (não mexe na senha via cliente)
       await setDoc(doc(db, 'usuarios', uid), { nome, email, perfil, vinculo }, { merge: true });
       toast('Usuário atualizado!');
+      window.closeUserModal();
+      await renderUsers();
     } else {
-      // Cria usuário no Firebase Auth via Admin SDK não disponível no cliente.
-      // Usamos createUserWithEmailAndPassword temporariamente e depois restauramos sessão.
-      const currentUser = auth.currentUser;
-      const cred = await createUserWithEmailAndPassword(auth, email, senha);
+      // Criação: usa o app SECUNDÁRIO para não deslogar o gerente
+      if (senha.length < 6) { toast('Senha deve ter ao menos 6 caracteres.', 'err'); return; }
+ 
+      // 1. Cria o usuário no Firebase Auth usando a instância secundária
+      const cred   = await createUserWithEmailAndPassword(auth2, email, senha);
       const newUid = cred.user.uid;
-      await setDoc(doc(db, 'usuarios', newUid), { nome, email, perfil, vinculo, criadoEm: serverTimestamp() });
-      // Faz logout do novo usuário e reloga o gerente
-      await signOut(auth);
-      // O onAuthStateChanged vai disparar e limpar me; precisamos relogar o gerente
-      // Salvamos as credenciais do gerente temporariamente
-      toast('Usuário criado! Você será redirecionado para o login novamente — isso é normal.', 'ok');
-      // Aguarda 2s para o toast aparecer e redireciona para login
-      setTimeout(() => { window.location.reload(); }, 2000);
-      return;
+ 
+      // 2. Desloga o novo usuário da instância secundária imediatamente
+      await signOut(auth2);
+ 
+      // 3. Salva o perfil no Firestore usando a instância principal (gerente ainda logado)
+      await setDoc(doc(db, 'usuarios', newUid), {
+        nome, email, perfil, vinculo,
+        criadoEm: serverTimestamp()
+      });
+ 
+      toast(`Usuário ${nome} criado com sucesso! ✅`);
+      window.closeUserModal();
+      await renderUsers();
     }
-    window.closeUserModal();
-    await renderUsers();
   } catch(e) {
-    const msg = e.code === 'auth/email-already-in-use' ? 'Este e-mail já está em uso.' : e.message;
-    toast('Erro: ' + msg, 'err');
+    const msgs = {
+      'auth/email-already-in-use': 'Este e-mail já está cadastrado.',
+      'auth/invalid-email':        'E-mail inválido.',
+      'auth/weak-password':        'Senha fraca — use ao menos 6 caracteres.',
+    };
+    toast('Erro: ' + (msgs[e.code] || e.message), 'err');
   } finally {
-    btn.disabled = false; btn.textContent = document.getElementById('userId').value ? 'Salvar' : 'Criar Usuário';
+    btn.disabled = false;
+    btn.textContent = document.getElementById('userId').value ? 'Salvar' : 'Criar Usuário';
   }
 };
-
+ 
 window.delUser = async function(uid) {
   if (uid === me.uid) { toast('Você não pode remover a si mesmo.', 'err'); return; }
-  if (!confirm('Remover este usuário? Ele perderá o acesso.')) return;
+  if (!confirm('Remover este usuário? Ele perderá o acesso ao sistema.')) return;
   try {
     await deleteDoc(doc(db, 'usuarios', uid));
-    toast('Usuário removido do sistema. (O acesso de autenticação deve ser removido manualmente no Firebase Console.)');
+    toast('Usuário removido.');
     await renderUsers();
   } catch(e) { toast('Erro: ' + e.message, 'err'); }
 };
-
+ 
 // ── EXPORT CSV ────────────────────────────────────────
 window.exportCSV = function() {
   const rows = [['Nº','Cidade','Empreiteira','Fiscal','Status','Conclusão','Fiscalização','Δ Fisc(d)','Kaffa','Δ Kaffa(d)','Medição','Δ Med(d)']];
@@ -458,12 +473,12 @@ window.exportCSV = function() {
     o.medicao, diff(o.kaffa, o.medicao) ?? ''
   ]));
   const csv = rows.map(r => r.join(';')).join('\n');
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csv);
+  const a   = document.createElement('a');
+  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csv);
   a.download = 'obras_track.csv';
   a.click();
 };
-
+ 
 // ── FECHAR MODAIS CLICANDO FORA ───────────────────────
 ['ovObra','ovUser'].forEach(id => {
   document.getElementById(id).addEventListener('click', e => {
