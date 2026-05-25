@@ -169,6 +169,14 @@ input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6);}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 
+/* CHECKBOX GRID */
+.chk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-top:6px;}
+.chk-item{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;cursor:pointer;transition:all .15s;font-size:12px;}
+.chk-item:hover{border-color:var(--accent);background:rgba(0,229,160,.05);}
+.chk-item input[type="checkbox"]{width:14px;height:14px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;}
+.chk-item input:checked+span{color:var(--accent);font-weight:600;}
+.chk-item:has(input:checked){border-color:var(--accent);background:rgba(0,229,160,.08);}
+
 /* FILTROS */
 .filtros-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:14px;}
 .filtros-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;}
