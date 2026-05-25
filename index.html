@@ -302,7 +302,6 @@
       </div>
     </div>
     <div class="fg"><label>Data Kaffa</label><input type="date" id="oKaffa"></div>
-    <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
   </div>
   <div class="modal-section" id="secImpedimento">
     <div class="modal-section-title">🚫 Impedimento de Execução</div>
@@ -331,18 +330,24 @@
       <span class="toggle-lbl">Existe pendência na obra</span>
     </div>
     <div id="secPendenciaDetalhe" style="display:none">
-      <div class="fg"><label>Tipo de Pendência</label>
-        <select id="oTipoPendencia">
-          <option value="">— selecione —</option>
-          <option>Poda</option><option>Aterramento de Cerca</option><option>Conexão</option>
-          <option>Estrutura</option><option>Aterramento</option><option>Transformador</option><option>Outro</option>
-        </select>
+      <div class="fg">
+        <label>Tipos de Pendência (selecione todos que se aplicam)</label>
+        <div class="chk-grid">
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Poda"><span>Poda</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Aterramento de Cerca"><span>Aterramento de Cerca</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Conexão"><span>Conexão</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Estrutura"><span>Estrutura</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Aterramento"><span>Aterramento</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Transformador"><span>Transformador</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Outro" onchange="togglePendenciaOutro()"><span>Outro</span></label>
+        </div>
       </div>
       <div class="fg" id="fgPendenciaOutro" style="display:none">
-        <label>Descreva (1 palavra)</label><input type="text" id="oPendenciaOutro" placeholder="Ex: Vegetação">
+        <label>Descreva o tipo (Outro)</label><input type="text" id="oPendenciaOutro" placeholder="Ex: Vegetação">
       </div>
       <div class="fg"><label>Prazo para Resolução da Pendência</label><input type="date" id="oPrazoPendencia"></div>
     </div>
+    <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
   </div>
   <div class="modal-section" id="secRegularizacao">
     <div class="modal-section-title">🔧 Regularização de Pendência — Empreiteira</div>
