@@ -155,7 +155,7 @@ async function iniciarApp(){
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash') renderDash();
-    if(active?.id==='pgObras') renderObras();
+    if(active?.id==='pgObras') window.renderObras();
   });
 
   showPage('pgDash');
@@ -165,7 +165,7 @@ window.showPage=function(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page===id));
   document.getElementById(id).classList.add('active');
   if(id==='pgDash') renderDash();
-  if(id==='pgObras') renderObras();
+  if(id==='pgObras') window.renderObras();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
 };
@@ -416,7 +416,9 @@ function renderObras(){
         ${me.perfil==='gerente'?`<button class="btn btn-danger btn-sm" onclick="delObra('${o.id}')">🗑️</button>`:''}`
       :'';
     const pendChip=o.pendencia
-      ?(o.pendenciaResolvida?'<span class="chip chip-green">Resolvida</span>':'<span class="chip chip-red">'+(o.tipoPendencia||'')+'</span>')
+      ?(o.pendenciaResolvida
+        ?'<span class="chip chip-green">Resolvida</span>'
+        :`<span class="chip chip-red">${Array.isArray(o.tiposPendencia)?o.tiposPendencia.join(', '):(o.tipoPendencia||'Pendência')}</span>`)
       :'<span class="chip">—</span>';
     const armChip=o.armazenado?'<span class="chip chip-green">✓</span>':'<span class="chip">—</span>';
     return `<tr>
@@ -460,8 +462,10 @@ window.openObraModal=function(obraId){
    'oFabricante','oKaffa','oCadastro','oFiscalizacao','oPrazoPendencia','oRegularizacao','oMedicao',
    'oMedida70','oMedida230','oMedida280','oMedida280Motivo','oImpedimentoOutro','oPendenciaOutro',
    'oDataCancelamento','oMotivoCancelamento'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  ['oTipo','oCidade','oEmp','oTipoImpedimento','oTipoPendencia'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  ['oTipo','oCidade','oEmp','oTipoImpedimento'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   ['oTemImpedimento','oTemPendencia','oPendenciaResolvida','oArmazenado','oCancelado'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
+  // reset checkboxes de pendência
+  document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
 
   if(isEdit){
     const set=(id,v)=>{ const el=document.getElementById(id); if(el&&v!==undefined&&v!==null) el.value=v; };
@@ -473,7 +477,10 @@ window.openObraModal=function(obraId){
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     set('oKaffa',obra.kaffa); set('oCadastro',obra.dataCadastro);
-    set('oFiscalizacao',obra.fiscalizacao); set('oTipoPendencia',obra.tipoPendencia);
+    set('oFiscalizacao',obra.fiscalizacao);
+    // checkboxes de pendência (suporta array novo e string legada)
+    const tipos = obra.tiposPendencia || (obra.tipoPendencia ? [obra.tipoPendencia] : []);
+    document.querySelectorAll('.chk-pendencia').forEach(el => { el.checked = tipos.includes(el.value); });
     set('oPendenciaOutro',obra.pendenciaOutro); set('oPrazoPendencia',obra.prazoPendencia);
     set('oRegularizacao',obra.regularizacaoData); set('oMedicao',obra.medicao);
     set('oMedida70',obra.medida70); set('oMedida230',obra.medida230); set('oMedida280',obra.medida280);
@@ -494,8 +501,11 @@ window.openObraModal=function(obraId){
   // regularização só para empreiteira se tiver pendência
   document.getElementById('secRegularizacao').style.display=
     (p==='empreiteira'&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
-  if(obra?.pendencia) document.getElementById('msgPendencia').textContent=
-    `Pendência registrada: ${obra.tipoPendencia||''}. Prazo: ${fmtTxt(obra.prazoPendencia)}`;
+  if(obra?.pendencia){
+    const tipos=(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
+    document.getElementById('msgPendencia').textContent=
+      `Pendência registrada: ${tipos||'—'}. Prazo: ${fmtTxt(obra.prazoPendencia)}`;
+  }
   // confirmação pendência para fiscal/gerente
   document.getElementById('secConfPendencia').style.display=
     (p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
@@ -510,9 +520,11 @@ window.openObraModal=function(obraId){
   ['oConclusao','oPlacas','oSAP','oSerie','oFabricante','oKaffa','oCadastro'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='fiscal';
   });
-  ['oFiscalizacao','oTipoPendencia','oPrazoPendencia','oMedicao','oMedida70','oMedida230','oMedida280','oMedida280Motivo'].forEach(id=>{
+  ['oFiscalizacao','oPrazoPendencia','oMedicao','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira';
   });
+  // desabilitar checkboxes de pendência para empreiteira
+  document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled=p==='empreiteira'; });
 
   // atualiza toggles
   toggleImpedimento(); togglePendencia(); toggleCancelamento();
@@ -571,15 +583,20 @@ window.toggleImpedimento=function(){
 window.togglePendencia=function(){
   const tem=document.getElementById('oTemPendencia').checked;
   document.getElementById('secPendenciaDetalhe').style.display=tem?'block':'none';
-  if(tem){ document.getElementById('oTipoPendencia').addEventListener('change',()=>{
-    document.getElementById('fgPendenciaOutro').style.display=
-      document.getElementById('oTipoPendencia').value==='Outro'?'flex':'none';
-  });}
+};
+window.togglePendenciaOutro=function(){
+  const outroChk=document.querySelector('.chk-pendencia[value="Outro"]');
+  document.getElementById('fgPendenciaOutro').style.display=outroChk?.checked?'flex':'none';
 };
 window.toggleCancelamento=function(){
   document.getElementById('secCancelamentoDetalhe').style.display=
     document.getElementById('oCancelado').checked?'block':'none';
 };
+
+// Lê os checkboxes de tipos de pendência
+function getTiposPendencia(){
+  return Array.from(document.querySelectorAll('.chk-pendencia:checked')).map(el=>el.value);
+}
 
 window.saveObra=async function(){
   const btn=document.getElementById('btnSalvarObra');
@@ -602,11 +619,12 @@ window.saveObra=async function(){
         dataLimite, usc:g('oUSC')?parseFloat(g('oUSC')):null, ulv:g('oULV')?parseFloat(g('oULV')):null,
         dataDesligamento:g('oDesligamento'),
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
-        kaffa:g('oKaffa'), dataCadastro:g('oCadastro'),
+        kaffa:g('oKaffa'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        tipoPendencia:g('oTipoPendencia'), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
+        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
         pendenciaResolvida:gChk('oPendenciaResolvida'),
+        dataCadastro:g('oCadastro'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
         armazenado:gChk('oArmazenado'),
@@ -616,7 +634,7 @@ window.saveObra=async function(){
     } else if(me.perfil==='empreiteira'){
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
-        kaffa:g('oKaffa'), dataCadastro:g('oCadastro'),
+        kaffa:g('oKaffa'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
         atualizadaEm:serverTimestamp()
@@ -624,8 +642,9 @@ window.saveObra=async function(){
     } else if(me.perfil==='fiscal'){
       patch={
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        tipoPendencia:g('oTipoPendencia'), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
+        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
         pendenciaResolvida:gChk('oPendenciaResolvida'),
+        dataCadastro:g('oCadastro'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
         armazenado:gChk('oArmazenado'),
