@@ -6,22 +6,24 @@
 <title>ObrasTrack</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
-<!-- ════ LOGIN ════ -->
+<!-- LOGIN -->
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-logo">OBRAS<span>TRACK</span></div>
-    <div class="login-sub">Sistema de acompanhamento de obras</div>
+    <div class="login-sub">Sistema de acompanhamento de obras v2</div>
     <div class="fg"><label>E-mail</label><input type="email" id="lgEmail" placeholder="seu@email.com" autocomplete="username"></div>
     <div class="fg"><label>Senha</label><input type="password" id="lgPass" placeholder="••••••••" autocomplete="current-password"></div>
     <div class="login-err" id="lgErr"></div>
-    <button class="btn btn-primary" id="btnLogin" onclick="doLogin()">Entrar</button>
+    <button class="btn btn-primary btn-full" id="btnLogin" onclick="doLogin()" style="margin-top:8px">Entrar</button>
   </div>
 </div>
 
-<!-- ════ APP ════ -->
+<!-- APP -->
 <div id="appScreen" style="display:none">
   <header>
     <div class="h-logo">OBRAS<span>TRACK</span></div>
@@ -35,35 +37,140 @@
 
   <!-- DASHBOARD -->
   <div class="page" id="pgDash">
-    <div class="kpi-strip">
-      <div class="kpi-card c1"><div class="kpi-lbl">Total de Obras</div><div class="kpi-val" id="k1">—</div><div class="kpi-sub">cadastradas</div></div>
-      <div class="kpi-card c2"><div class="kpi-lbl">Aguard. Fiscalização</div><div class="kpi-val" id="k2">—</div><div class="kpi-sub">concluídas sem vistoria</div></div>
-      <div class="kpi-card c3"><div class="kpi-lbl">Aguard. Kaffa</div><div class="kpi-val" id="k3">—</div><div class="kpi-sub">fiscalizadas sem kaffa</div></div>
-      <div class="kpi-card c4"><div class="kpi-lbl">Aguard. Medição</div><div class="kpi-val" id="k4">—</div><div class="kpi-sub">kaffa sem medição</div></div>
-    </div>
-    <div class="sect-title">Velocidade Média por Fiscal</div>
-    <div class="vel-grid" id="velGrid"><div class="loading">Carregando...</div></div>
+    <div id="dashContent"><div class="loading">Carregando dashboard...</div></div>
   </div>
 
   <!-- OBRAS -->
   <div class="page" id="pgObras">
+    <!-- BARRA SUPERIOR -->
     <div class="tbl-head">
       <div class="page-title" id="obrasTit">Obras</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="toggleFiltros()">🔽 Filtros</button>
         <div class="search-wrap"><span class="search-ico">🔍</span><input type="text" id="srch" placeholder="Buscar…" oninput="renderObras()"></div>
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ CSV</button>
+        <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ Exportar CSV</button>
+        <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
     </div>
+
+    <!-- PAINEL DE FILTROS -->
+    <div id="painelFiltros" style="display:none">
+      <div class="filtros-panel">
+        <div class="filtros-grid">
+          <div class="fg">
+            <label>Status</label>
+            <select id="fStatus" onchange="renderObras()">
+              <option value="">Todos</option>
+              <option>Em Execução</option><option>Atrasada</option><option>Impedimento</option>
+              <option>Aguard. Fiscalização</option><option>Pendência</option><option>Fiscalizado</option>
+              <option>Aguard. Medição</option><option>Aguard. Medida 70</option>
+              <option>Aguard. Medida 230</option><option>Aguard. Medida 280</option>
+              <option>Aguard. Armazenamento</option><option>Encerrada</option><option>Cancelada</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Tipo</label>
+            <select id="fTipo" onchange="renderObras()">
+              <option value="">Todos</option><option>R1</option><option>R2</option><option>ODI</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Empreiteira</label>
+            <select id="fEmpreiteira" onchange="renderObras()"><option value="">Todas</option></select>
+          </div>
+          <div class="fg">
+            <label>Fiscal</label>
+            <select id="fFiscal" onchange="renderObras()"><option value="">Todos</option></select>
+          </div>
+          <div class="fg">
+            <label>Cidade</label>
+            <select id="fCidade" onchange="renderObras()">
+              <option value="">Todas</option>
+              <option>Anita Garibaldi</option><option>Bocaina do Sul</option><option>Bom Jardim da Serra</option>
+              <option>Bom Retiro</option><option>Campo Belo do Sul</option><option>Capão Alto</option>
+              <option>Celso Ramos</option><option>Cerro Negro</option><option>Correia Pinto</option>
+              <option>Curitibanos</option><option>Frei Rogério</option><option>Lages</option>
+              <option>Otacilio Costa</option><option>Painel</option><option>Palmeira</option>
+              <option>Ponte Alta</option><option>Ponte Alta do Norte</option><option>Rio Rufino</option>
+              <option>Santa Cecilia</option><option>São Cristóvão do Sul</option><option>São Joaquim</option>
+              <option>São Jose do Cerrito</option><option>Urubici</option><option>Urupema</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Pendência</label>
+            <select id="fPendencia" onchange="renderObras()">
+              <option value="">Todas</option>
+              <option value="com">Com pendência ativa</option>
+              <option value="resolvida">Pendência resolvida</option>
+              <option value="sem">Sem pendência</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Prazo — Abertura</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="date" id="fAberturaIni" onchange="renderObras()" placeholder="De">
+              <span style="color:var(--muted);font-size:10px">até</span>
+              <input type="date" id="fAberturaFim" onchange="renderObras()" placeholder="Até">
+            </div>
+          </div>
+          <div class="fg">
+            <label>Prazo — Data Limite</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="date" id="fLimiteIni" onchange="renderObras()" placeholder="De">
+              <span style="color:var(--muted);font-size:10px">até</span>
+              <input type="date" id="fLimiteFim" onchange="renderObras()" placeholder="Até">
+            </div>
+          </div>
+          <div class="fg">
+            <label>Dias p/ vencer</label>
+            <select id="fDiasVencer" onchange="renderObras()">
+              <option value="">Qualquer</option>
+              <option value="vencida">Já vencidas</option>
+              <option value="1">Vence em 1 dia</option>
+              <option value="7">Vence em até 7 dias</option>
+              <option value="15">Vence em até 15 dias</option>
+              <option value="30">Vence em até 30 dias</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Armazenado</label>
+            <select id="fArmazenado" onchange="renderObras()">
+              <option value="">Todos</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+          <span id="filtrosResumo" style="font-size:11px;color:var(--muted)"></span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" onclick="exportCSVFiltrado()">⬇ Exportar seleção</button>
+            <button class="btn btn-warn btn-sm" onclick="limparFiltros()">✕ Limpar filtros</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABELA -->
     <div class="tbl-wrap">
       <table>
-        <thead><tr>
-          <th>Nº</th><th>Cidade</th><th>Empreiteira</th><th>Fiscal</th><th>Status</th>
-          <th>Conclusão</th><th>Fiscalização</th><th>Δ</th>
-          <th>Kaffa</th><th>Δ</th><th>Medição</th><th>Δ</th><th></th>
-        </tr></thead>
-        <tbody id="obrasBody"><tr><td colspan="13"><div class="loading">Carregando obras...</div></td></tr></tbody>
+        <thead><tr id="thRow"></tr></thead>
+        <tbody id="obrasBody"><tr><td colspan="30"><div class="loading">Carregando...</div></td></tr></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- EMPREITEIRAS -->
+  <div class="page" id="pgEmpreiteiras">
+    <div class="tbl-head">
+      <div class="page-title">Empreiteiras</div>
+      <button class="btn btn-primary btn-sm" onclick="openEmpModal()">+ Nova Empreiteira</button>
+    </div>
+    <div class="users-table">
+      <div class="ut-row ut-header"><div class="ut-name">Nome</div><div class="ut-email">E-mail de contato</div><div class="ut-acts"></div></div>
+      <div id="empList"><div class="loading">Carregando...</div></div>
     </div>
   </div>
 
@@ -75,100 +182,273 @@
     </div>
     <div class="users-table">
       <div class="ut-row ut-header">
-        <div class="ut-name">Nome</div>
-        <div class="ut-email">E-mail</div>
-        <div class="ut-role">Perfil</div>
-        <div class="ut-vinc">Vínculo</div>
-        <div class="ut-acts"></div>
+        <div class="ut-name">Nome</div><div class="ut-email">E-mail</div>
+        <div class="ut-role">Perfil</div><div class="ut-vinc">Vínculo</div><div class="ut-acts"></div>
       </div>
       <div id="usersList"><div class="loading">Carregando...</div></div>
     </div>
   </div>
 </div>
 
-<!-- MODAL OBRA -->
-<div class="overlay" id="ovObra">
-  <div class="modal">
-    <h2 id="obraModalTit">Nova Obra</h2>
-    <input type="hidden" id="obraId">
-    <div id="blkIdentif">
-      <div class="sect-title">Identificação</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Nº da Obra</label><input type="text" id="oNum" placeholder="2024-001"></div>
-        <div class="fg"><label>Cidade</label><input type="text" id="oCid" placeholder="Florianópolis"></div>
-        <div class="fg"><label>Empreiteira</label>
-          <select id="oEmp">
-            <option value="">— selecione —</option>
-            <option value="CS ELETRICIDADE">CS ELETRICIDADE</option>
-            <option value="ELETELSUL">ELETELSUL</option>
-          </select>
-        </div>
-        <div class="fg"><label>Fiscal Responsável</label><input type="text" id="oFiscalNome" placeholder="Nome do fiscal"></div>
-      </div>
-      <hr class="divider">
+<!-- ══ MODAL IMPORT EXCEL ══ -->
+<div class="overlay" id="ovImport">
+ <div class="modal" style="width:740px">
+  <h2>📥 Importar Obras via Excel</h2>
+
+  <!-- PASSO 1: upload -->
+  <div id="importStep1">
+    <div class="modal-note">
+      Faça upload de uma planilha Excel (.xlsx ou .xls). O sistema vai identificar as colunas automaticamente.
+      Baixe o modelo abaixo para garantir o formato correto.
     </div>
-    <div id="blkEmp">
-      <div class="sect-title">Datas — Empreiteira</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Data Conclusão</label><input type="date" id="oConc"></div>
-        <div class="fg"><label>Data Kaffa</label><input type="date" id="oKaff"></div>
-      </div>
-      <hr class="divider">
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <button class="btn btn-secondary btn-sm" onclick="downloadModelo()">⬇ Baixar Modelo Excel</button>
     </div>
-    <div id="blkFis">
-      <div class="sect-title">Datas — Fiscal</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Data Fiscalização</label><input type="date" id="oFisc"></div>
-        <div class="fg"><label>Data Medição</label><input type="date" id="oMed"></div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeObraModal()">Cancelar</button>
-      <button class="btn btn-primary" id="btnSalvarObra" onclick="saveObra()">Salvar</button>
+    <div class="upload-drop" id="uploadDrop" onclick="document.getElementById('xlsxInput').click()">
+      <div style="font-size:32px;margin-bottom:8px">📂</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Clique para selecionar ou arraste o arquivo</div>
+      <div style="font-size:11px;color:var(--muted)">.xlsx ou .xls — máximo 5MB</div>
+      <input type="file" id="xlsxInput" accept=".xlsx,.xls" style="display:none" onchange="handleXlsxUpload(this)">
     </div>
   </div>
+
+  <!-- PASSO 2: preview e mapeamento -->
+  <div id="importStep2" style="display:none">
+    <div class="modal-note" id="importInfo"></div>
+    <div class="sect-title" style="margin-bottom:10px">Mapeamento de Colunas</div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:12px">
+      Verifique se as colunas do seu Excel foram mapeadas corretamente. Ajuste se necessário.
+    </p>
+    <div class="fg-grid" id="mappingGrid"></div>
+    <div class="sect-title" style="margin:14px 0 10px">Prévia (primeiras 5 linhas)</div>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+      <table id="previewTable" style="min-width:600px;width:100%;border-collapse:collapse;font-size:11px"></table>
+    </div>
+    <div id="importErros" style="display:none;margin-top:10px"></div>
+  </div>
+
+  <!-- PASSO 3: resultado -->
+  <div id="importStep3" style="display:none">
+    <div style="text-align:center;padding:20px">
+      <div style="font-size:40px;margin-bottom:12px">✅</div>
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:8px" id="importResultMsg"></div>
+      <div style="font-size:12px;color:var(--muted)" id="importResultSub"></div>
+    </div>
+  </div>
+
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeImportModal()">Fechar</button>
+    <button class="btn btn-primary" id="btnImportStep2" style="display:none" onclick="confirmarImport()">
+      ✅ Importar Obras
+    </button>
+  </div>
+ </div>
+</div>
+
+<!-- ══ MODAL OBRA ══ -->
+<div class="overlay" id="ovObra">
+ <div class="modal">
+  <h2 id="obraModalTit">Nova Obra</h2>
+  <input type="hidden" id="obraId">
+  <div class="modal-section" id="secIdentif">
+    <div class="modal-section-title">🏗️ Identificação da Obra</div>
+    <div class="fg-grid">
+      <div class="fg"><label>Nº da Obra</label><input type="text" id="oNum" placeholder="2024-001"></div>
+      <div class="fg"><label>Tipo</label>
+        <select id="oTipo"><option value="">— tipo —</option><option>R1</option><option>R2</option><option>ODI</option></select>
+      </div>
+    </div>
+    <div class="fg-grid">
+      <div class="fg"><label>Cidade / Localidade</label>
+        <select id="oCidade">
+          <option value="">— selecione —</option>
+          <option>Anita Garibaldi</option><option>Bocaina do Sul</option><option>Bom Jardim da Serra</option>
+          <option>Bom Retiro</option><option>Campo Belo do Sul</option><option>Capão Alto</option>
+          <option>Celso Ramos</option><option>Cerro Negro</option><option>Correia Pinto</option>
+          <option>Curitibanos</option><option>Frei Rogério</option><option>Lages</option>
+          <option>Otacilio Costa</option><option>Painel</option><option>Palmeira</option>
+          <option>Ponte Alta</option><option>Ponte Alta do Norte</option><option>Rio Rufino</option>
+          <option>Santa Cecilia</option><option>São Cristóvão do Sul</option><option>São Joaquim</option>
+          <option>São Jose do Cerrito</option><option>Urubici</option><option>Urupema</option>
+        </select>
+      </div>
+      <div class="fg"><label>Empreiteira</label>
+        <select id="oEmp"><option value="">— selecione —</option></select>
+      </div>
+    </div>
+    <div class="fg-grid">
+      <div class="fg"><label>Fiscal Responsável</label><input type="text" id="oFiscalNome" placeholder="Nome do fiscal"></div>
+      <div class="fg"><label>Data de Abertura</label><input type="date" id="oAbertura"></div>
+    </div>
+    <div class="fg-grid3">
+      <div class="fg"><label>Prazo de Execução (dias)</label><input type="number" id="oPrazo" placeholder="Ex: 60" min="1"></div>
+      <div class="fg"><label>USC</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
+      <div class="fg"><label>ULV</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
+    </div>
+    <div class="fg"><label>Data de Desligamento Programado</label><input type="date" id="oDesligamento"></div>
+    <div id="dataLimiteInfo" style="font-size:11px;color:var(--accent);margin-top:4px;display:none"></div>
+  </div>
+  <div class="modal-section" id="secExec">
+    <div class="modal-section-title">⚡ Execução — Empreiteira</div>
+    <div class="fg"><label>Data de Conclusão</label><input type="date" id="oConclusao"></div>
+    <div id="secConclusaoExtra" style="display:none">
+      <div class="fg-grid">
+        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
+        <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
+      </div>
+      <div class="fg-grid">
+        <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
+        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
+      </div>
+    </div>
+    <div class="fg"><label>Data Kaffa</label><input type="date" id="oKaffa"></div>
+    <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
+  </div>
+  <div class="modal-section" id="secImpedimento">
+    <div class="modal-section-title">🚫 Impedimento de Execução</div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oTemImpedimento" onchange="toggleImpedimento()"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Obra com impedimento de execução</span>
+    </div>
+    <div id="secImpedimentoDetalhe" style="display:none">
+      <div class="fg"><label>Tipo de Impedimento</label>
+        <select id="oTipoImpedimento">
+          <option value="">— selecione —</option>
+          <option>Acesso</option><option>Autorização de Passagem</option>
+          <option>Necessidade de Reprojeto</option><option>Outro</option>
+        </select>
+      </div>
+      <div class="fg" id="fgImpedimentoOutro" style="display:none">
+        <label>Descreva (1 palavra)</label><input type="text" id="oImpedimentoOutro" placeholder="Ex: Embargada">
+      </div>
+    </div>
+  </div>
+  <div class="modal-section" id="secFisc">
+    <div class="modal-section-title">🔍 Fiscalização</div>
+    <div class="fg"><label>Data de Fiscalização</label><input type="date" id="oFiscalizacao"></div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oTemPendencia" onchange="togglePendencia()"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Existe pendência na obra</span>
+    </div>
+    <div id="secPendenciaDetalhe" style="display:none">
+      <div class="fg"><label>Tipo de Pendência</label>
+        <select id="oTipoPendencia">
+          <option value="">— selecione —</option>
+          <option>Poda</option><option>Aterramento de Cerca</option><option>Conexão</option>
+          <option>Estrutura</option><option>Aterramento</option><option>Transformador</option><option>Outro</option>
+        </select>
+      </div>
+      <div class="fg" id="fgPendenciaOutro" style="display:none">
+        <label>Descreva (1 palavra)</label><input type="text" id="oPendenciaOutro" placeholder="Ex: Vegetação">
+      </div>
+      <div class="fg"><label>Prazo para Resolução da Pendência</label><input type="date" id="oPrazoPendencia"></div>
+    </div>
+  </div>
+  <div class="modal-section" id="secRegularizacao">
+    <div class="modal-section-title">🔧 Regularização de Pendência — Empreiteira</div>
+    <div class="modal-warn" id="msgPendencia"></div>
+    <div class="fg"><label>Data de Regularização</label><input type="date" id="oRegularizacao"></div>
+  </div>
+  <div class="modal-section" id="secConfPendencia">
+    <div class="modal-section-title">✅ Confirmação de Pendência — Fiscal</div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oPendenciaResolvida"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Pendência resolvida / sanada</span>
+    </div>
+  </div>
+  <div class="modal-section" id="secMedicao">
+    <div class="modal-section-title">📏 Medição</div>
+    <div class="fg"><label>Data de Medição</label><input type="date" id="oMedicao"></div>
+  </div>
+  <div class="modal-section" id="secMedidas">
+    <div class="modal-section-title">📋 Medidas de Controle (registro)</div>
+    <div class="modal-note">Datas de inserção no sistema externo. Prazo limite para Medidas 70 e 230 = data limite de execução da obra.</div>
+    <div class="fg-grid">
+      <div class="fg"><label>Data Medida 70</label><input type="date" id="oMedida70"></div>
+      <div class="fg"><label>Data Medida 230</label><input type="date" id="oMedida230"></div>
+    </div>
+    <div class="fg"><label>Data Medida 280</label><input type="date" id="oMedida280" onchange="checkMedida280()"></div>
+    <div id="secMedida280Motivo" style="display:none">
+      <div class="fg"><label>Motivo do encerramento fora do prazo</label>
+        <textarea id="oMedida280Motivo" rows="2" placeholder="Descreva o motivo..."></textarea>
+      </div>
+    </div>
+    <div id="medida280PrazoInfo" style="font-size:10px;color:var(--muted);margin-top:4px;"></div>
+  </div>
+  <div class="modal-section" id="secArmazenamento">
+    <div class="modal-section-title">📦 Armazenamento</div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oArmazenado"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Obra armazenada devidamente</span>
+    </div>
+  </div>
+  <div class="modal-section" id="secCancelamento">
+    <div class="modal-section-title" style="color:var(--red)">⛔ Cancelamento da Obra</div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oCancelado" onchange="toggleCancelamento()"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl" style="color:var(--red)">Cancelar esta obra</span>
+    </div>
+    <div id="secCancelamentoDetalhe" style="display:none">
+      <div class="fg"><label>Data do Cancelamento</label><input type="date" id="oDataCancelamento"></div>
+      <div class="fg"><label>Motivo do Cancelamento</label>
+        <textarea id="oMotivoCancelamento" rows="2" placeholder="Descreva o motivo..."></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeObraModal()">Cancelar</button>
+    <button class="btn btn-primary" id="btnSalvarObra" onclick="saveObra()">Salvar</button>
+  </div>
+ </div>
 </div>
 
 <!-- MODAL USUÁRIO -->
 <div class="overlay" id="ovUser">
-  <div class="modal" style="width:440px">
-    <h2 id="userModalTit">Novo Usuário</h2>
-    <input type="hidden" id="userId">
-    <div class="fg"><label>Nome completo</label><input type="text" id="uNome" placeholder="João Silva"></div>
-    <div class="fg"><label>E-mail (usado para login)</label><input type="email" id="uEmail" placeholder="joao@email.com"></div>
-    <div class="fg"><label>Senha inicial</label><input type="password" id="uSenha" placeholder="mínimo 6 caracteres"></div>
-    <div class="fg">
-      <label>Perfil</label>
-      <select id="uPerfil" onchange="onPerfilChange()">
-        <option value="">— selecione —</option>
-        <option value="gerente">Gerente</option>
-        <option value="fiscal">Fiscal</option>
-        <option value="empreiteira">Empreiteira</option>
-      </select>
-    </div>
-    <div class="fg" id="fgVincEmp" style="display:none">
-      <label>Empreiteira</label>
-      <select id="uVincEmp">
-        <option value="">— selecione —</option>
-        <option value="CS ELETRICIDADE">CS ELETRICIDADE</option>
-        <option value="ELETELSUL">ELETELSUL</option>
-      </select>
-    </div>
-    <div class="fg" id="fgVincFis" style="display:none">
-      <label>Nome do fiscal (deve bater com o cadastro nas obras)</label>
-      <input type="text" id="uVincFis" placeholder="Ex: João Silva">
-    </div>
-    <div class="modal-note" id="userNote" style="display:none"></div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeUserModal()">Cancelar</button>
-      <button class="btn btn-primary" id="btnSalvarUser" onclick="saveUser()">Criar Usuário</button>
-    </div>
+ <div class="modal modal-sm">
+  <h2 id="userModalTit">Novo Usuário</h2>
+  <input type="hidden" id="userId">
+  <div class="fg"><label>Nome completo</label><input type="text" id="uNome" placeholder="João Silva"></div>
+  <div class="fg"><label>E-mail (login)</label><input type="email" id="uEmail" placeholder="joao@email.com"></div>
+  <div class="fg"><label>Senha</label><input type="password" id="uSenha" placeholder="mínimo 6 caracteres"></div>
+  <div class="fg"><label>Perfil</label>
+    <select id="uPerfil" onchange="onPerfilChange()">
+      <option value="">— selecione —</option>
+      <option value="gerente">Gerente</option>
+      <option value="fiscal">Fiscal</option>
+      <option value="empreiteira">Empreiteira</option>
+    </select>
   </div>
+  <div class="fg" id="fgVincEmp" style="display:none">
+    <label>Empreiteira vinculada</label>
+    <select id="uVincEmp"><option value="">— selecione —</option></select>
+  </div>
+  <div class="fg" id="fgVincFis" style="display:none">
+    <label>Nome do fiscal (igual ao cadastro nas obras)</label>
+    <input type="text" id="uVincFis" placeholder="Ex: João Silva">
+  </div>
+  <div class="modal-note" id="userNote" style="display:none">Deixe a senha em branco para não alterá-la.</div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeUserModal()">Cancelar</button>
+    <button class="btn btn-primary" id="btnSalvarUser" onclick="saveUser()">Criar Usuário</button>
+  </div>
+ </div>
 </div>
 
-<!-- Toast -->
-<div id="toast"></div>
+<!-- MODAL EMPREITEIRA -->
+<div class="overlay" id="ovEmp">
+ <div class="modal modal-sm">
+  <h2 id="empModalTit">Nova Empreiteira</h2>
+  <input type="hidden" id="empId">
+  <div class="fg"><label>Nome da Empreiteira</label><input type="text" id="eNome" placeholder="Ex: CS ELETRICIDADE"></div>
+  <div class="fg"><label>E-mail de contato</label><input type="email" id="eEmail" placeholder="contato@empresa.com"></div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeEmpModal()">Cancelar</button>
+    <button class="btn btn-primary" id="btnSalvarEmp" onclick="saveEmp()">Salvar</button>
+  </div>
+ </div>
+</div>
 
+<div id="toast"></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
