@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ObrasTrack</title>
+<title>SPCC_ARLAG</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -14,7 +14,7 @@
 <!-- LOGIN -->
 <div id="loginScreen">
   <div class="login-box">
-    <div class="login-logo">OBRAS<span>TRACK</span></div>
+    <div class="login-logo">SPCC_<span>ARLAG</span></div>
     <div class="login-sub">Sistema de acompanhamento de obras v2</div>
     <div class="fg"><label>E-mail</label><input type="email" id="lgEmail" placeholder="seu@email.com" autocomplete="username"></div>
     <div class="fg"><label>Senha</label><input type="password" id="lgPass" placeholder="••••••••" autocomplete="current-password"></div>
@@ -26,7 +26,7 @@
 <!-- APP -->
 <div id="appScreen" style="display:none">
   <header>
-    <div class="h-logo">OBRAS<span>TRACK</span></div>
+    <div class="h-logo">SPCC_<span>ARLAG</span></div>
     <div class="h-right">
       <div class="h-user">Olá, <strong id="hName"></strong></div>
       <span class="role-badge" id="hRole"></span>
@@ -285,13 +285,33 @@
       <div class="fg"><label>USC</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
       <div class="fg"><label>ULV</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
     </div>
-    <div class="fg"><label>Data de Desligamento Programado</label><input type="date" id="oDesligamento"></div>
+    <div class="fg"><label>Data de Desligamento Programado</label>
+      <input type="date" id="oDesligamento" min="">
+      <!-- min será hoje, definido via JS -->
+    </div>
     <div id="dataLimiteInfo" style="font-size:11px;color:var(--accent);margin-top:4px;display:none"></div>
+    <!-- Confirmação de desligamento (aparece após data ser preenchida) -->
+    <div id="secDesligConfirm" style="display:none;margin-top:10px">
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oDesligConfirmado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:var(--green)">Desligamento confirmado</span>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oDesligCancelado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:var(--red)">Desligamento cancelado</span>
+      </div>
+      <div id="secDesligMotivo" style="display:none">
+        <div class="fg"><label>Motivo do cancelamento do desligamento</label>
+          <textarea id="oDesligMotivo" rows="2" placeholder="Descreva o motivo..."></textarea>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="modal-section" id="secExec">
     <div class="modal-section-title">⚡ Execução — Empreiteira</div>
     <div class="fg"><label>Data de Conclusão</label><input type="date" id="oConclusao"></div>
     <div id="secConclusaoExtra" style="display:none">
+      <div class="modal-note" style="margin-bottom:10px">Campos obrigatórios para registrar a conclusão.</div>
       <div class="fg-grid">
         <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
         <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
@@ -299,6 +319,18 @@
       <div class="fg-grid">
         <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
         <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
+      </div>
+    </div>
+    <!-- Dados do transformador para visualização do fiscal -->
+    <div id="secTransfView" style="display:none">
+      <div class="modal-section-title" style="margin-top:12px">🔩 Dados do Transformador (Empreiteira)</div>
+      <div class="fg-grid">
+        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacasView" disabled></div>
+        <div class="fg"><label>Nº SAP</label><input type="text" id="oSAPView" disabled></div>
+      </div>
+      <div class="fg-grid">
+        <div class="fg"><label>Nº Série</label><input type="text" id="oSerieView" disabled></div>
+        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricanteView" disabled></div>
       </div>
     </div>
     <div class="fg"><label>Data Kaffa</label><input type="date" id="oKaffa"></div>
@@ -348,6 +380,12 @@
       <div class="fg"><label>Prazo para Resolução da Pendência</label><input type="date" id="oPrazoPendencia"></div>
     </div>
     <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
+    <div id="secCadastroConfirm" style="display:none">
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oCadastroConfirmado"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:var(--accent)">Confirmar Cadastro (envio confirmado)</span>
+      </div>
+    </div>
   </div>
   <div class="modal-section" id="secRegularizacao">
     <div class="modal-section-title">🔧 Regularização de Pendência — Empreiteira</div>
