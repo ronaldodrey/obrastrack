@@ -15,7 +15,9 @@ service cloud.firestore {
       allow update: if request.auth != null && (
         perfil() == 'gerente' ||
         (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
-        (perfil() == 'fiscal' && resource.data.fiscal == vinculo())
+        (perfil() == 'fiscal' && resource.data.fiscal == vinculo()) ||
+        perfil() == 'genesis' ||
+        perfil() == 'estagiario'
       );
       allow delete: if request.auth != null && perfil() == 'gerente';
     }
