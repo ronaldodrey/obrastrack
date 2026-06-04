@@ -207,3 +207,15 @@ input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6);}
   .modal{padding:20px;}
   .fg-grid,.fg-grid3{grid-template-columns:1fr;}
 }
+
+/* ── NEW PROFILES ── */
+.role-genesis{background:rgba(6,182,212,.15);color:#06B6D4;border:1px solid rgba(6,182,212,.3);}
+.role-estagiario{background:rgba(168,85,247,.15);color:#A855F7;border:1px solid rgba(168,85,247,.3);}
+
+/* ── QUICK FILTERS ── */
+#filtrosRapidos .btn-secondary{font-size:10px;padding:4px 10px;}
+#filtrosRapidos .btn-danger{font-size:10px;padding:4px 10px;}
+
+/* ── CHART ── */
+#chartContainer{min-height:60px;overflow-x:auto;}
+#chartContainer svg{display:block;}
