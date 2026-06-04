@@ -38,6 +38,10 @@
   <!-- DASHBOARD -->
   <div class="page" id="pgDash">
     <div id="dashContent"><div class="loading">Carregando dashboard...</div></div>
+    <div id="chartSection" style="margin-top:24px;display:none">
+      <div style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px">📊 Obras Concluídas por Mês — por Empreiteira</div>
+      <div id="chartContainer" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;overflow-x:auto"></div>
+    </div>
   </div>
 
   <!-- OBRAS -->
@@ -50,7 +54,7 @@
         <div class="search-wrap"><span class="search-ico">🔍</span><input type="text" id="srch" placeholder="Buscar…" oninput="renderObras()"></div>
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">⬇ Exportar CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
     </div>
@@ -63,11 +67,18 @@
             <label>Status</label>
             <select id="fStatus" onchange="renderObras()">
               <option value="">Todos</option>
-              <option>Em Execução</option><option>Atrasada</option><option>Impedimento</option>
-              <option>Aguard. Fiscalização</option><option>Pendência</option><option>Fiscalizado</option>
-              <option>Aguard. Medição</option><option>Aguard. Medida 70</option>
+              <option>Em Execução</option><option>Atrasada</option>
+              <option>Obra Paralisada</option>
+              <option>Prob. Executivo – Celesc</option>
+              <option>Impedimento</option>
+              <option>Aguard. Fiscalização</option><option>Ag. Conf. Pend. Fiscal</option>
+              <option>Pendência</option><option>Fiscalizado</option>
+              <option>Aguardando Kaffa</option>
+              <option>Aguard. Medição</option>
+              <option>Encaminhar Cadastro Urgente</option>
+              <option>Aguard. Medida 70</option>
               <option>Aguard. Medida 230</option><option>Aguard. Medida 280</option>
-              <option>Aguard. Armazenamento</option><option>Encerrada</option><option>Cancelada</option>
+              <option>Aguard. Armazenamento</option><option>Em encerramento</option><option>Encerramento atrasado</option><option>Encerrada</option><option>Cancelada</option>
             </select>
           </div>
           <div class="fg">
@@ -146,10 +157,22 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
           <span id="filtrosResumo" style="font-size:11px;color:var(--muted)"></span>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-secondary btn-sm" onclick="exportCSVFiltrado()">⬇ Exportar seleção</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportXLSXFiltrado()">⬇ Exportar Excel</button>
             <button class="btn btn-warn btn-sm" onclick="limparFiltros()">✕ Limpar filtros</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- FILTROS RÁPIDOS -->
+    <div id="filtrosRapidos" style="margin-bottom:10px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:10px;color:var(--muted);font-weight:600">FILTROS RÁPIDOS:</span>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida70')">📋 Sem Med. 70</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida230')">📋 Sem Med. 230</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('med230_sem280')">📋 Med.230 s/ 280</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('encerradas')">✅ Encerradas completas</button>
+        <button class="btn btn-danger btn-sm" id="btnBulkDelete" style="display:none" onclick="bulkDeleteEncerradas()">🗑️ Excluir seleção</button>
       </div>
     </div>
 
@@ -277,28 +300,49 @@
       </div>
     </div>
     <div class="fg-grid">
-      <div class="fg"><label>Fiscal Responsável</label><input type="text" id="oFiscalNome" placeholder="Nome do fiscal"></div>
+      <div class="fg"><label>Fiscal Responsável</label>
+        <select id="oFiscalSelect" onchange="toggleFiscalOutro()">
+          <option value="">— selecione —</option>
+          <option value="Thiago L. Chaves">Thiago L. Chaves</option>
+          <option value="Jorge">Jorge</option>
+          <option value="Ezequiel">Ezequiel</option>
+          <option value="Marcio">Marcio</option>
+          <option value="Diego">Diego</option>
+          <option value="outro">Outro (digitar)…</option>
+        </select>
+        <input type="text" id="oFiscalNome" placeholder="Digite o nome do fiscal" style="margin-top:6px;display:none">
+      </div>
       <div class="fg"><label>Data de Abertura</label><input type="date" id="oAbertura"></div>
     </div>
     <div class="fg-grid3">
-      <div class="fg"><label>Prazo de Execução (dias)</label><input type="number" id="oPrazo" placeholder="Ex: 60" min="1"></div>
+      <div class="fg"><label>Prazo de Execução</label>
+        <select id="oPrazoOpcao" onchange="togglePrazoCustom()">
+          <option value="">— selecione —</option>
+          <option value="60">60 dias</option>
+          <option value="120">120 dias</option>
+          <option value="150">150 dias</option>
+          <option value="365">365 dias</option>
+          <option value="outro">Outro…</option>
+        </select>
+        <input type="number" id="oPrazo" placeholder="Digite os dias" min="1"
+          style="margin-top:6px;display:none">
+      </div>
       <div class="fg"><label>USC</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
       <div class="fg"><label>ULV</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
     </div>
-    <div class="fg"><label>Data de Desligamento Programado</label>
+    <div class="fg" id="secDesligData"><label>Data de Desligamento Programado</label>
       <input type="date" id="oDesligamento" min="">
-      <!-- min será hoje, definido via JS -->
     </div>
     <div id="dataLimiteInfo" style="font-size:11px;color:var(--accent);margin-top:4px;display:none"></div>
-    <!-- Confirmação de desligamento (aparece após data ser preenchida) -->
+    <!-- Confirmação só pelo fiscal -->
     <div id="secDesligConfirm" style="display:none;margin-top:10px">
       <div class="toggle-row">
         <label class="toggle"><input type="checkbox" id="oDesligConfirmado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
-        <span class="toggle-lbl" style="color:var(--green)">Desligamento confirmado</span>
+        <span class="toggle-lbl" style="color:#22c55e;font-weight:600">✓ Desligamento confirmado</span>
       </div>
       <div class="toggle-row">
         <label class="toggle"><input type="checkbox" id="oDesligCancelado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
-        <span class="toggle-lbl" style="color:var(--red)">Desligamento cancelado</span>
+        <span class="toggle-lbl" style="color:var(--red);font-weight:600">✗ Desligamento cancelado</span>
       </div>
       <div id="secDesligMotivo" style="display:none">
         <div class="fg"><label>Motivo do cancelamento do desligamento</label>
@@ -377,7 +421,17 @@
       <div class="fg" id="fgPendenciaOutro" style="display:none">
         <label>Descreva o tipo (Outro)</label><input type="text" id="oPendenciaOutro" placeholder="Ex: Vegetação">
       </div>
-      <div class="fg"><label>Prazo para Resolução da Pendência</label><input type="date" id="oPrazoPendencia"></div>
+      <div class="fg"><label>Prazo para Regularização da Pendência</label>
+        <select id="oPrazoPendenciaOpcao" onchange="calcularPrazoPendencia()">
+          <option value="">— selecione —</option>
+          <option value="2">⚡ Urgente – Imediato (2 dias)</option>
+          <option value="15">15 dias</option>
+          <option value="30">30 dias</option>
+          <option value="60">60 dias</option>
+        </select>
+        <input type="hidden" id="oPrazoPendencia">
+        <div id="infoPrazoPendencia" style="display:none;font-size:11px;color:var(--accent);margin-top:5px;padding:6px 10px;background:rgba(0,229,160,.07);border-radius:4px;border:1px solid rgba(0,229,160,.2)"></div>
+      </div>
     </div>
     <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
     <div id="secCadastroConfirm" style="display:none">
@@ -394,9 +448,11 @@
   </div>
   <div class="modal-section" id="secConfPendencia">
     <div class="modal-section-title">✅ Confirmação de Pendência — Fiscal</div>
+    <div id="infoRegularizacao" style="display:none;margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:11px;color:#F59E0B"></div>
+    <div id="infoPendenciaPrazo" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:11px"></div>
     <div class="toggle-row">
       <label class="toggle"><input type="checkbox" id="oPendenciaResolvida"><span class="toggle-slider"></span></label>
-      <span class="toggle-lbl">Pendência resolvida / sanada</span>
+      <span class="toggle-lbl">Pendência conferida e resolvida pelo fiscal</span>
     </div>
   </div>
   <div class="modal-section" id="secMedicao">
@@ -420,9 +476,37 @@
   </div>
   <div class="modal-section" id="secArmazenamento">
     <div class="modal-section-title">📦 Armazenamento</div>
+    <div class="modal-note">Marque todos os itens abaixo antes de confirmar o armazenamento.</div>
     <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oContratosAssinado"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Contratos Assinados</span>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oMedicoesAssinadas"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Medições Assinadas</span>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oProjetosAsBuilt"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl">Projetos As-Built Assinados</span>
+    </div>
+    <div class="fg" style="margin-top:8px"><label>Caixa Armazenada (identificação)</label>
+      <input type="text" id="oCaixaArmazenada" placeholder="Ex: Caixa 42 — Prateleira B3">
+    </div>
+    <div class="toggle-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
       <label class="toggle"><input type="checkbox" id="oArmazenado"><span class="toggle-slider"></span></label>
-      <span class="toggle-lbl">Obra armazenada devidamente</span>
+      <span class="toggle-lbl" style="font-weight:600;color:var(--accent)">✓ Confirmar Armazenamento completo</span>
+    </div>
+  </div>
+  <div class="modal-section" id="secParalisada">
+    <div class="modal-section-title" style="color:#DC2626">🛑 Obra Paralisada — Gerente</div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="oParalisada" onchange="toggleParalisada()"><span class="toggle-slider"></span></label>
+      <span class="toggle-lbl" style="color:#DC2626;font-weight:600">Marcar obra como paralisada</span>
+    </div>
+    <div id="secParalisadaDetalhe" style="display:none">
+      <div class="fg"><label>Motivo da Paralização</label>
+        <textarea id="oMotivoParalisada" rows="2" placeholder="Descreva o motivo da paralização..."></textarea>
+      </div>
     </div>
   </div>
   <div class="modal-section" id="secCancelamento">
@@ -459,6 +543,8 @@
       <option value="gerente">Gerente</option>
       <option value="fiscal">Fiscal</option>
       <option value="empreiteira">Empreiteira</option>
+      <option value="genesis">Genesis</option>
+      <option value="estagiario">Estagiário</option>
     </select>
   </div>
   <div class="fg" id="fgVincEmp" style="display:none">
