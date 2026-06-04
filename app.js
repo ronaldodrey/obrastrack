@@ -56,6 +56,7 @@ function diasHtml(dias){
 // ── STATUS ────────────────────────────────────────────
 const STATUS_DEF = {
   'Cancelada':                    { cor:'#6B7280', bg:'rgba(107,114,128,.15)' },
+  'Obra Paralisada':              { cor:'#DC2626', bg:'rgba(220,38,38,.2)'    },
   'Encerrada':                    { cor:'#16A34A', bg:'rgba(22,163,74,.15)'   },
   'Aguard. Armazenamento':        { cor:'#84CC16', bg:'rgba(132,204,22,.15)'  },
   'Aguard. Medida 280':           { cor:'#22C55E', bg:'rgba(34,197,94,.15)'   },
@@ -64,40 +65,44 @@ const STATUS_DEF = {
   'Aguard. Medição':              { cor:'#6366F1', bg:'rgba(99,102,241,.15)'  },
   'Aguardando Kaffa':             { cor:'#A855F7', bg:'rgba(168,85,247,.15)'  },
   'Encaminhar Cadastro Urgente':  { cor:'#EF4444', bg:'rgba(239,68,68,.15)'   },
+  'Ag. Conf. Pend. Fiscal':       { cor:'#F59E0B', bg:'rgba(245,158,11,.15)'  },
   'Pendência':                    { cor:'#F97316', bg:'rgba(249,115,22,.15)'  },
   'Fiscalizado':                  { cor:'#8B5CF6', bg:'rgba(139,92,246,.15)'  },
-  'Impedimento':                  { cor:'#DC2626', bg:'rgba(220,38,38,.15)'   },
+  'Prob. Executivo – Celesc':     { cor:'#B91C1C', bg:'rgba(185,28,28,.18)'   },
   'Aguard. Fiscalização':         { cor:'#EAB308', bg:'rgba(234,179,8,.15)'   },
   'Atrasada':                     { cor:'#EF4444', bg:'rgba(239,68,68,.15)'   },
+  'Em encerramento':              { cor:'#06B6D4', bg:'rgba(6,182,212,.15)'   },
+  'Encerramento atrasado':        { cor:'#EF4444', bg:'rgba(239,68,68,.15)'   },
   'Em Execução':                  { cor:'#3B82F6', bg:'rgba(59,130,246,.15)'  },
 };
 
 function statusOf(o){
   if(o.cancelado)    return 'Cancelada';
+  if(o.paralisada)   return 'Obra Paralisada';
   if(o.armazenado)   return 'Encerrada';
   if(o.medida280)    return 'Aguard. Armazenamento';
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70)     return 'Aguard. Medida 230';
   if(o.medicao)      return 'Aguard. Medida 70';
-  // Cadastro urgente: fiscalizado há mais de 30 dias sem enviar para cadastro
   if(o.fiscalizacao && !o.dataCadastro){
-    const diasSemCad = diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
-    if(diasSemCad !== null && diasSemCad > 30) return 'Encaminhar Cadastro Urgente';
+    const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
+    if(d!==null && d>30) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa)        return 'Aguard. Medição';
   if(o.fiscalizacao) return 'Aguardando Kaffa';
-  if(o.pendencia && !o.pendenciaResolvida && !o.fiscalizacao) return 'Pendência';
-  if(o.impedimento)  return 'Impedimento';
+  if(o.impedimento)  return 'Prob. Executivo – Celesc';
   if(o.conclusao)    return 'Aguard. Fiscalização';
   if(o.dataLimite && hoje()>parseD(o.dataLimite)) return 'Atrasada';
   return 'Em Execução';
 }
 
-// Retorna badge de segundo status (pendência ativa mesmo com avanço)
+// Segundo status: pendência com regularização aguardando conf. fiscal, ou pendência ativa
 function statusSecundario(o){
-  if(o.pendencia && !o.pendenciaResolvida && o.fiscalizacao)
-    return `<span class="st" style="color:#F97316;background:rgba(249,115,22,.15);border-color:#F9731644;margin-left:4px">
-      <span style="background:#F97316"></span>Pendência</span>`;
+  if(o.pendencia && !o.pendenciaResolvida){
+    if(o.regularizacaoData)
+      return `<span class="st" style="color:#F59E0B;background:rgba(245,158,11,.15);border-color:#F59E0B44;margin-left:4px"><span style="background:#F59E0B"></span>Ag. Conf. Pend.</span>`;
+    return `<span class="st" style="color:#F97316;background:rgba(249,115,22,.15);border-color:#F9731644;margin-left:4px"><span style="background:#F97316"></span>Pendência</span>`;
+  }
   return '';
 }
 
@@ -153,26 +158,33 @@ async function iniciarApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
   const rb=document.getElementById('hRole');
-  rb.textContent=me.perfil.charAt(0).toUpperCase()+me.perfil.slice(1);
+  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário'};
+  rb.textContent=perfilLabels[me.perfil]||me.perfil;
   rb.className='role-badge role-'+me.perfil;
+  // Ensure role badge color for new profiles
+  if(!['gerente','fiscal','empreiteira'].includes(me.perfil)){
+    rb.style.background='rgba(6,182,212,.15)'; rb.style.color='#06B6D4'; rb.style.border='1px solid rgba(6,182,212,.3)';
+  }
 
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
   const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
   if(me.perfil==='gerente'){ tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
+  // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML=tabs
     .map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
 
   document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnImport').style.display=me.perfil==='gerente'?'inline-flex':'none';
+  document.getElementById('btnBulkDelete').style.display=me.perfil==='gerente'?'none':'none'; // shown by filtroRapido
   buildTableHeader();
 
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
   unsubObras=onSnapshot(q,snap=>{
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
-    if(active?.id==='pgDash') renderDash();
+    if(active?.id==='pgDash'){ renderDash(); setTimeout(renderChart,200); }
     if(active?.id==='pgObras') window.renderObras();
   });
 
@@ -192,6 +204,8 @@ window.showPage=function(id){
 function visibleObras(){
   if(me.perfil==='gerente') return obras;
   if(me.perfil==='fiscal')  return obras;
+  if(me.perfil==='genesis') return obras;   // só visualiza
+  if(me.perfil==='estagiario') return obras; // visualiza + confirma armazenamento
   if(me.perfil==='empreiteira') return obras.filter(o=>o.empreiteira===me.vinculo);
   return [];
 }
@@ -265,84 +279,247 @@ window.delEmp=async function(id){
 };
 
 // ── DASHBOARD ─────────────────────────────────────────
+// Estado para seleção de perspectiva no dashboard do gerente
+let dashPerspectiva = 'gerente'; // 'gerente' | 'fiscal:Nome' | 'empreiteira:Nome'
+
 function renderDash(){
-  const list=visibleObras();
-  let html='';
+  const listAll = obras; // todas as obras (sem filtro de perfil para o gerente navegar)
+  const list = visibleObras();
+  let html = '';
 
-  if(me.perfil==='gerente'){
-    html+=`<div class="kpi-strip">
-      ${kpiCard('Total',list.length,'obras','#00e5a0')}
-      ${kpiCard('Em Execução',list.filter(o=>statusOf(o)==='Em Execução').length,'no prazo','#3B82F6')}
-      ${kpiCard('Atrasadas',list.filter(o=>statusOf(o)==='Atrasada').length,'fora do prazo','#EF4444')}
-      ${kpiCard('Pendências Ativas',list.filter(o=>o.pendencia&&!o.pendenciaResolvida).length,'aguardando resolução','#F97316')}
-      ${kpiCard('Aguard. Fiscalização',list.filter(o=>statusOf(o)==='Aguard. Fiscalização').length,'concluídas sem vistoria','#EAB308')}
-      ${kpiCard('Aguardando Kaffa',list.filter(o=>statusOf(o)==='Aguardando Kaffa').length,'fiscalizadas sem kaffa','#A855F7')}
-      ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+30d sem enviar cadastro','#EF4444')}
-      ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
+  if(me.perfil === 'gerente'){
+    // Seletor de perspectiva
+    const fiscaisDisponiveis = [...new Set(obras.map(o=>o.fiscal).filter(Boolean))].sort();
+    const empDisponiveis = empreiteiras.map(e=>e.nome);
+    html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--muted)">Visualizando como:</span>
+      <button class="btn btn-sm ${dashPerspectiva==='gerente'?'btn-primary':'btn-secondary'}"
+        onclick="setDashPerspectiva('gerente')">👔 Gerente (visão geral)</button>
+      <select id="selFiscalDash" onchange="setDashPerspectiva('fiscal:'+this.value)"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:'DM Mono',monospace;font-size:11px;">
+        <option value="">👷 Ver como Fiscal…</option>
+        ${fiscaisDisponiveis.map(f=>`<option value="${f}" ${dashPerspectiva==='fiscal:'+f?'selected':''}>${f}</option>`).join('')}
+      </select>
+      <select id="selEmpDash" onchange="setDashPerspectiva('empreiteira:'+this.value)"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:'DM Mono',monospace;font-size:11px;">
+        <option value="">🏗️ Ver como Empreiteira…</option>
+        ${empDisponiveis.map(e=>`<option value="${e}" ${dashPerspectiva==='empreiteira:'+e?'selected':''}>${e}</option>`).join('')}
+      </select>
     </div>`;
-    html+='<div class="sect-title" style="margin-bottom:12px">Velocidade Média por Fiscal</div>';
-    html+='<div class="vel-grid">'+velCards(list)+'</div>';
-    html+='<div class="sect-title" style="margin-bottom:12px;margin-top:8px">Volume por Empreiteira</div>';
-    html+='<div class="kpi-strip">'+emprKpis(list)+'</div>';
+
+    if(dashPerspectiva === 'gerente'){
+      html += renderDashGerente(list, listAll);
+    } else if(dashPerspectiva.startsWith('fiscal:')){
+      const nome = dashPerspectiva.replace('fiscal:','');
+      html += `<div class="modal-note" style="margin-bottom:16px">👁️ Visualizando perspectiva do fiscal <strong>${nome}</strong></div>`;
+      html += renderDashFiscal(listAll, nome);
+    } else if(dashPerspectiva.startsWith('empreiteira:')){
+      const nome = dashPerspectiva.replace('empreiteira:','');
+      html += `<div class="modal-note" style="margin-bottom:16px">👁️ Visualizando perspectiva da empreiteira <strong>${nome}</strong></div>`;
+      html += renderDashEmpreiteira(listAll.filter(o=>o.empreiteira===nome));
+    }
   }
-  else if(me.perfil==='fiscal'){
-    const meuNome=me.vinculo;
-    const minhas=list.filter(o=>o.fiscal===meuNome);
-    const uscTotal=minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-    const ulvTotal=minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-    const comPend=minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
-    const paraFisc=list.filter(o=>o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
-    const paraMedir=list.filter(o=>o.kaffa&&!o.medicao&&o.fiscal===meuNome);
-    const cadUrgente=minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
-    const mesAtual=new Date().getMonth(), anoAtual=new Date().getFullYear();
-    const fiscMes=minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
-    const tempoFisc=avgDiff(minhas,'conclusao','fiscalizacao');
-    const tempoMed=avgDiff(minhas,'kaffa','medicao');
-    const tempoCad=avgDiff(minhas,'fiscalizacao','dataCadastro');
-    html+=`<div class="kpi-strip">
-      ${kpiCard('Minhas Obras',minhas.length,'atribuídas','#00e5a0')}
-      ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
-      ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
-      ${kpiCard('Para Fiscalizar',paraFisc.length,'aguardando vistoria','#EAB308')}
-      ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
-      ${kpiCard('Com Pendência',comPend.length,'não resolvidas','#F97316')}
-      ${kpiCard('Cadastro Urgente',cadUrgente.length,'+30d sem enviar','#EF4444')}
-      ${kpiCard('Fiscalizadas/Mês',fiscMes.length,'mês corrente','#38bdf8')}
-      ${kpiCard('Tempo Médio Fisc.',tempoFisc!==null?tempoFisc+'d':'—','conclusão→fiscalização','#a3e635')}
-      ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
-      ${kpiCard('Tempo Médio Cadastro',tempoCad!==null?tempoCad+'d':'—','fiscalização→cadastro','#f5c542')}
-    </div>`;
-    html+='<div class="sect-title" style="margin-bottom:12px">Principais Pendências por Empreiteira</div>';
-    html+=pendenciaRankingPorEmpreiteira(minhas);
-    html+='<div class="sect-title" style="margin-bottom:12px;margin-top:16px">Obras por Empreiteira</div>';
-    html+='<div class="kpi-strip">'+emprKpis(minhas)+'</div>';
+  else if(me.perfil === 'fiscal'){
+    html += renderDashFiscal(list, me.vinculo);
   }
-  else if(me.perfil==='empreiteira'){
-    const minhas=list;
-    const uscTotal=minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-    const ulvTotal=minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-    const aguardKaffa=minhas.filter(o=>o.conclusao&&!o.kaffa);
-    const aguardMed=minhas.filter(o=>o.kaffa&&!o.medicao);
-    const comPend=minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
-    const tempoKaffa=avgDiff(minhas,'conclusao','kaffa');
-    const tempoReg=avgDiff(minhas.filter(o=>o.pendencia&&o.regularizacaoData),'prazoPendencia','regularizacaoData');
-    html+=`<div class="kpi-strip">
-      ${kpiCard('Total de Obras',minhas.length,'da empresa','#00e5a0')}
-      ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
-      ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
-      ${kpiCard('Aguard. Kaffa',aguardKaffa.length,'concluídas sem kaffa','#A855F7')}
-      ${kpiCard('Aguard. Medição',aguardMed.length,'kaffa sem medição','#6366F1')}
-      ${kpiCard('Com Pendência',comPend.length,'não resolvidas','#F97316')}
-      ${kpiCard('Tempo Médio Kaffa',tempoKaffa!==null?tempoKaffa+'d':'—','conclusão→kaffa','#a3e635')}
-      ${kpiCard('Tempo Médio Regulariz.',tempoReg!==null?tempoReg+'d':'—','pendência→regularização','#fb7185')}
-    </div>`;
-    html+='<div class="sect-title" style="margin-bottom:12px">Obras por Tipo</div>';
-    html+=`<div class="kpi-strip">${['R1','R2','ODI'].map(t=>kpiCard(t,minhas.filter(o=>o.tipo===t).length,'obras',gc(t))).join('')}</div>`;
-    html+='<div class="sect-title" style="margin-bottom:12px;margin-top:8px">Principais Pendências</div>';
-    html+=pendenciaRanking(minhas);
+  else if(me.perfil === 'empreiteira'){
+    html += renderDashEmpreiteira(list);
   }
 
-  document.getElementById('dashContent').innerHTML=html;
+  document.getElementById('dashContent').innerHTML = html;
+}
+
+window.setDashPerspectiva = function(p){
+  if(!p || p.endsWith(':')) return;
+  dashPerspectiva = p;
+  renderDash();
+};
+
+function renderDashGerente(list, listAll){
+  let html = '';
+  html += `<div class="kpi-strip">
+    ${kpiCard('Total',list.length,'obras','#00e5a0')}
+    ${kpiCard('Em Execução',list.filter(o=>statusOf(o)==='Em Execução').length,'no prazo','#3B82F6')}
+    ${kpiCard('Atrasadas',list.filter(o=>statusOf(o)==='Atrasada').length,'fora do prazo','#EF4444')}
+    ${kpiCard('Paralisadas',list.filter(o=>o.paralisada).length,'paralisadas','#DC2626')}
+    ${kpiCard('Prob. Executivo',list.filter(o=>o.impedimento&&!o.conclusao).length,'Celesc verificar','#B91C1C')}
+    ${kpiCard('Pendências Ativas',list.filter(o=>o.pendencia&&!o.pendenciaResolvida).length,'aguardando resolução','#F97316')}
+    ${kpiCard('Ag. Conf. Pend.',list.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length,'fiscal conferir','#F59E0B')}
+    ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+30d sem cadastro','#EF4444')}
+    ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
+  </div>`;
+
+  // Tabela resumo por fiscal
+  html += '<div class="sect-title" style="margin-bottom:10px">Painel de Fiscais</div>';
+  html += tabelaResumoFiscais(list);
+  html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">Painel de Empreiteiras</div>';
+  html += tabelaResumoEmpreiteiras(list);
+  html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
+  html += '<div class="vel-grid">' + velCards(list) + '</div>';
+  return html;
+}
+
+function tabelaResumoFiscais(list){
+  const fiscais = [...new Set(list.map(o=>o.fiscal).filter(Boolean))].sort();
+  if(!fiscais.length) return '<div class="empty"><p>Nenhum fiscal com obras.</p></div>';
+  const rows = fiscais.map(f => {
+    const minhas = list.filter(o=>o.fiscal===f);
+    const pend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida).length;
+    const agConf = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length;
+    const paraFisc = minhas.filter(o=>o.conclusao&&!o.fiscalizacao).length;
+    const paraMedir = minhas.filter(o=>o.kaffa&&!o.medicao).length;
+    const cadUrg = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length;
+    const atrasadas = minhas.filter(o=>statusOf(o)==='Atrasada').length;
+    const c = gc(f);
+    return `<tr>
+      <td><span style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${c};display:inline-block"></span>
+        <strong>${f}</strong></span></td>
+      <td style="text-align:center">${minhas.length}</td>
+      <td style="text-align:center;color:${paraFisc>0?'var(--yellow)':'var(--muted)'}">${paraFisc}</td>
+      <td style="text-align:center;color:${paraMedir>0?'var(--accent3)':'var(--muted)'}">${paraMedir}</td>
+      <td style="text-align:center;color:${pend>0?'var(--accent2)':'var(--muted)'}">${pend}${agConf>0?` <span style="font-size:9px;color:#F59E0B">(${agConf} ag. conf.)</span>`:''}</td>
+      <td style="text-align:center;color:${cadUrg>0?'var(--red)':'var(--muted)'}">${cadUrg}</td>
+      <td style="text-align:center;color:${atrasadas>0?'var(--red)':'var(--muted)'}">${atrasadas}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="setDashPerspectiva('fiscal:${f.replace(/'/g,"\'")}')">👁️ Ver</button></td>
+    </tr>`;
+  }).join('');
+  return `<div class="tbl-wrap" style="max-height:none"><table>
+    <thead><tr>
+      <th>Fiscal</th><th style="text-align:center">Total</th><th style="text-align:center">Para Fiscalizar</th>
+      <th style="text-align:center">Para Medir</th><th style="text-align:center">Pendências</th>
+      <th style="text-align:center">Cad. Urgente</th><th style="text-align:center">Atrasadas</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function tabelaResumoEmpreiteiras(list){
+  if(!empreiteiras.length) return '<div class="empty"><p>Nenhuma empreiteira.</p></div>';
+  const rows = empreiteiras.map(e => {
+    const minhas = list.filter(o=>o.empreiteira===e.nome);
+    const pend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida).length;
+    const agConf = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length;
+    const aguardKaffa = minhas.filter(o=>o.conclusao&&!o.kaffa).length;
+    const impedimentos = minhas.filter(o=>o.impedimento&&!o.conclusao).length;
+    const atrasadas = minhas.filter(o=>statusOf(o)==='Atrasada').length;
+    const c = gc(e.nome);
+    return `<tr>
+      <td><span style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${c};display:inline-block"></span>
+        <strong>${e.nome}</strong></span></td>
+      <td style="text-align:center">${minhas.length}</td>
+      <td style="text-align:center;color:${aguardKaffa>0?'var(--accent3)':'var(--muted)'}">${aguardKaffa}</td>
+      <td style="text-align:center;color:${pend>0?'var(--accent2)':'var(--muted)'}">${pend}${agConf>0?` <span style="font-size:9px;color:#F59E0B">(${agConf} reg.)</span>`:''}</td>
+      <td style="text-align:center;color:${impedimentos>0?'var(--red)':'var(--muted)'}">${impedimentos}</td>
+      <td style="text-align:center;color:${atrasadas>0?'var(--red)':'var(--muted)'}">${atrasadas}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="setDashPerspectiva('empreiteira:${e.nome.replace(/'/g,"\'")}')">👁️ Ver</button></td>
+    </tr>`;
+  }).join('');
+  return `<div class="tbl-wrap" style="max-height:none"><table>
+    <thead><tr>
+      <th>Empreiteira</th><th style="text-align:center">Total</th><th style="text-align:center">Aguard. Kaffa</th>
+      <th style="text-align:center">Pendências</th><th style="text-align:center">Impedimentos</th>
+      <th style="text-align:center">Atrasadas</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderDashFiscal(list, meuNome){
+  const minhas = list.filter(o=>o.fiscal===meuNome);
+  const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const ulvTotal = minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
+  const agConfPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
+  const paraFisc = list.filter(o=>o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
+  const paraMedir = list.filter(o=>o.kaffa&&!o.medicao&&o.fiscal===meuNome);
+  const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
+  const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
+  const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
+  const tempoFisc = avgDiff(minhas,'conclusao','fiscalizacao');
+  const tempoMed = avgDiff(minhas,'kaffa','medicao');
+  const tempoCad = avgDiff(minhas,'fiscalizacao','dataCadastro');
+  let html = `<div class="kpi-strip">
+    ${kpiCard('Obras',minhas.length,'atribuídas','#00e5a0')}
+    ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
+    ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
+    ${kpiCard('Para Fiscalizar',paraFisc.length,'aguardando vistoria','#EAB308')}
+    ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
+    ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
+    ${kpiCard('Ag. Conf. Pend.',agConfPend.length,'regularizadas p/ conferir','#F59E0B')}
+    ${kpiCard('Cadastro Urgente',cadUrgente.length,'+30d sem enviar','#EF4444')}
+    ${kpiCard('Fiscalizadas/Mês',fiscMes.length,'mês corrente','#38bdf8')}
+    ${kpiCard('Tempo Médio Fisc.',tempoFisc!==null?tempoFisc+'d':'—','conclusão→fiscalização','#a3e635')}
+    ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
+    ${kpiCard('Tempo Médio Cadastro',tempoCad!==null?tempoCad+'d':'—','fiscalização→cadastro','#f5c542')}
+  </div>`;
+  html += '<div class="sect-title" style="margin-bottom:12px">Pendências por Empreiteira</div>';
+  html += pendenciaRankingPorEmpreiteira(minhas);
+  html += '<div class="sect-title" style="margin-bottom:12px;margin-top:16px">Obras por Empreiteira</div>';
+  html += '<div class="kpi-strip">' + emprKpis(minhas) + '</div>';
+  return html;
+}
+
+function renderDashEmpreiteira(minhas){
+  const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const ulvTotal = minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const aguardKaffa = minhas.filter(o=>o.conclusao&&!o.kaffa);
+  const aguardMed = minhas.filter(o=>o.kaffa&&!o.medicao);
+  const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
+  const tempoKaffa = avgDiff(minhas,'conclusao','kaffa');
+  const tempoReg = avgDiff(minhas.filter(o=>o.pendencia&&o.regularizacaoData),'prazoPendencia','regularizacaoData');
+
+  // Estatística: tempo médio para informar conclusão por prazo
+  const prazoGroups = {};
+  minhas.filter(o=>o.dataAbertura&&o.conclusao&&o.prazoExecucao).forEach(o=>{
+    const prazo = String(o.prazoExecucao);
+    if(!prazoGroups[prazo]) prazoGroups[prazo]={label:prazo+'d',vals:[]};
+    const d = diff(o.dataAbertura, o.conclusao);
+    if(d!==null) prazoGroups[prazo].vals.push(d);
+  });
+  const avgArr = a => a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : null;
+
+  let html = `<div class="kpi-strip">
+    ${kpiCard('Total de Obras',minhas.length,'da empresa','#00e5a0')}
+    ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
+    ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
+    ${kpiCard('Aguard. Kaffa',aguardKaffa.length,'concluídas sem kaffa','#A855F7')}
+    ${kpiCard('Aguard. Medição',aguardMed.length,'kaffa sem medição','#6366F1')}
+    ${kpiCard('Com Pendência',comPend.length,'não resolvidas','#F97316')}
+    ${kpiCard('Tempo Médio Kaffa',tempoKaffa!==null?tempoKaffa+'d':'—','conclusão→kaffa','#a3e635')}
+    ${kpiCard('Tempo Médio Regulariz.',tempoReg!==null?tempoReg+'d':'—','pendência→regularização','#fb7185')}
+  </div>`;
+
+  // Tempo médio de conclusão por prazo contratual
+  if(Object.keys(prazoGroups).length){
+    html += '<div class="sect-title" style="margin-bottom:10px;margin-top:4px">Tempo Médio para Concluir — por Prazo Contratual</div>';
+    html += '<div class="vel-grid">';
+    Object.entries(prazoGroups).sort((a,b)=>+a[0]-+b[0]).forEach(([prazo,g])=>{
+      const avg = avgArr(g.vals);
+      const pct = avg !== null ? Math.min(100, Math.round((avg/+prazo)*100)) : 0;
+      const cor = pct<=85?'var(--accent)':pct<=100?'var(--yellow)':'var(--red)';
+      html += `<div class="vel-card" style="padding:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span class="vc-name">Prazo ${g.label}</span>
+          <span style="font-size:11px;color:var(--muted)">${g.vals.length} obras</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:11px;color:var(--muted)">Média real:</span>
+          <span style="font-size:18px;font-weight:700;color:${cor}">${avg!==null?avg+'d':'—'}</span>
+        </div>
+        <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${cor}"></div></div>
+        <div style="font-size:9px;color:var(--muted);margin-top:4px;text-align:right">${pct}% do prazo</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  html += '<div class="sect-title" style="margin-bottom:12px;margin-top:8px">Obras por Tipo</div>';
+  html += `<div class="kpi-strip">${['R1','R2','ODI'].map(t=>kpiCard(t,minhas.filter(o=>o.tipo===t).length,'obras',gc(t))).join('')}</div>`;
+  html += '<div class="sect-title" style="margin-bottom:12px;margin-top:8px">Principais Pendências</div>';
+  html += pendenciaRanking(minhas);
+  return html;
 }
 
 function kpiCard(lbl,val,sub,cor){
@@ -490,10 +667,18 @@ window.openObraModal=function(obraId){
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
    'oFabricante','oKaffa','oCadastro','oFiscalizacao','oPrazoPendencia','oRegularizacao','oMedicao',
    'oMedida70','oMedida230','oMedida280','oMedida280Motivo','oImpedimentoOutro','oPendenciaOutro',
-   'oDataCancelamento','oMotivoCancelamento','oDesligMotivo'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  ['oTipo','oCidade','oEmp','oTipoImpedimento'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+   'oDataCancelamento','oMotivoCancelamento','oDesligMotivo','oMotivoParalisada','oCaixaArmazenada'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  ['oTipo','oCidade','oEmp','oTipoImpedimento','oPrazoOpcao'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const prazoInp=document.getElementById('oPrazo'); if(prazoInp) prazoInp.style.display='none';
   ['oTemImpedimento','oTemPendencia','oPendenciaResolvida','oArmazenado','oCancelado',
-   'oDesligConfirmado','oDesligCancelado','oCadastroConfirmado'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
+   'oDesligConfirmado','oDesligCancelado','oCadastroConfirmado','oParalisada',
+   'oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
+  // reset prazo pendência
+  const selPrazoPend=document.getElementById('oPrazoPendenciaOpcao'); if(selPrazoPend) selPrazoPend.value='';
+  const infoPrazoPend=document.getElementById('infoPrazoPendencia'); if(infoPrazoPend) infoPrazoPend.style.display='none';
+  // reset fiscal
+  const selFiscal=document.getElementById('oFiscalSelect'); if(selFiscal){ selFiscal.value=''; }
+  const inpFiscal=document.getElementById('oFiscalNome'); if(inpFiscal){ inpFiscal.style.display='none'; inpFiscal.value=''; }
   // reset checkboxes de pendência
   document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
 
@@ -503,6 +688,7 @@ window.openObraModal=function(obraId){
    'oMedida70','oMedida230','oMedida280'].forEach(id=>{
     const el=document.getElementById(id); if(el){ el.max=hoje_s; el.removeAttribute('min'); }
   });
+  // Desligamento: presente ou futuro (pode ser hoje ou futuro)
   const desEl=document.getElementById('oDesligamento');
   if(desEl){ desEl.min=hoje_s; desEl.removeAttribute('max'); }
 
@@ -511,7 +697,16 @@ window.openObraModal=function(obraId){
     const setChk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=!!v; };
     set('oNum',obra.numero); set('oTipo',obra.tipo); set('oCidade',obra.cidade);
     set('oEmp',obra.empreiteira); set('oFiscalNome',obra.fiscal);
-    set('oAbertura',obra.dataAbertura); set('oPrazo',obra.prazoExecucao);
+    set('oAbertura',obra.dataAbertura);
+    // Prazo: preenche dropdown e campo numérico
+    if(obra.prazoExecucao){
+      const predefined=['60','120','150','365'];
+      const prazoStr=String(obra.prazoExecucao);
+      const selPrazo=document.getElementById('oPrazoOpcao');
+      const inpPrazo=document.getElementById('oPrazo');
+      if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
+      else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
+    }
     set('oUSC',obra.usc); set('oULV',obra.ulv); set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
@@ -527,9 +722,36 @@ window.openObraModal=function(obraId){
     set('oTipoImpedimento',obra.tipoImpedimento); set('oImpedimentoOutro',obra.impedimentoOutro);
     set('oDataCancelamento',obra.dataCancelamento); set('oMotivoCancelamento',obra.motivoCancelamento);
     set('oDesligMotivo',obra.desligamentoCanceladoMotivo);
+    set('oMotivoParalisada',obra.motivoParalisada);
     setChk('oTemImpedimento',obra.impedimento); setChk('oTemPendencia',obra.pendencia);
     setChk('oPendenciaResolvida',obra.pendenciaResolvida); setChk('oArmazenado',obra.armazenado);
-    setChk('oCancelado',obra.cancelado);
+    setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
+    setChk('oContratosAssinado',obra.contratosAssinado); setChk('oMedicoesAssinadas',obra.medicoesAssinadas);
+    setChk('oProjetosAsBuilt',obra.projetosAsBuilt); set('oCaixaArmazenada',obra.caixaArmazenada);
+    // Prazo pendência
+    if(obra.prazoPendencia){
+      const infoPP=document.getElementById('infoPrazoPendencia');
+      if(infoPP){ infoPP.style.display='block'; infoPP.textContent='Prazo limite: '+fmtTxt(obra.prazoPendencia); }
+    }
+    // Fiscal dropdown
+    const predFiscais=['Thiago L. Chaves','Jorge','Ezequiel','Marcio','Diego'];
+    const selF=document.getElementById('oFiscalSelect');
+    const inpF=document.getElementById('oFiscalNome');
+    if(selF&&inpF&&obra.fiscal){
+      if(predFiscais.includes(obra.fiscal)){ selF.value=obra.fiscal; inpF.style.display='none'; }
+      else { selF.value='outro'; inpF.style.display='block'; inpF.value=obra.fiscal; }
+    }
+    // pendenciaDentroPrazo info
+    const infoPP2=document.getElementById('infoPendenciaPrazo');
+    if(infoPP2){
+      if(obra.pendenciaResolvida&&obra.pendenciaDentroPrazo!==undefined){
+        infoPP2.style.display='block';
+        infoPP2.style.background=obra.pendenciaDentroPrazo?'rgba(0,229,160,.08)':'rgba(255,77,109,.08)';
+        infoPP2.style.border='1px solid '+(obra.pendenciaDentroPrazo?'rgba(0,229,160,.25)':'rgba(255,77,109,.25)');
+        infoPP2.style.color=obra.pendenciaDentroPrazo?'var(--accent)':'var(--red)';
+        infoPP2.textContent='Pendência resolvida '+(obra.pendenciaDentroPrazo?'dentro':'fora')+' do prazo (reg: '+fmtTxt(obra.regularizacaoData)+', prazo: '+fmtTxt(obra.prazoPendencia)+')';
+      } else { infoPP2.style.display='none'; }
+    }
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Preenche view-only do transformador para fiscal
@@ -537,16 +759,30 @@ window.openObraModal=function(obraId){
       const val=[obra.placas,obra.sap,obra.serie,obra.fabricante][i];
       const el=document.getElementById(id); if(el) el.value=val||'';
     });
+    // Mostra data de regularização na confirmação fiscal
+    const infoReg=document.getElementById('infoRegularizacao');
+    if(infoReg){
+      if(obra.regularizacaoData&&!obra.pendenciaResolvida){
+        infoReg.style.display='block';
+        infoReg.textContent='Empreiteira informou regularização em: '+fmtTxt(obra.regularizacaoData);
+      } else { infoReg.style.display='none'; }
+    }
   }
 
   // visibilidade e habilitação por perfil
   const p=me.perfil;
   document.getElementById('secIdentif').style.display=p==='gerente'?'block':'none';
   document.getElementById('secExec').style.display=p!=='fiscal'?'block':'none';
-  // Fiscal vê apenas dados do transformador (read-only), não o bloco de execução
+  // Fiscal vê apenas dados do transformador (read-only)
   document.getElementById('secTransfView').style.display=(p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
   document.getElementById('secImpedimento').style.display=p==='empreiteira'?'block':'none';
   document.getElementById('secFisc').style.display=p!=='empreiteira'?'block':'none';
+  // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
+  document.getElementById('secDesligData').style.display=p!=='gerente'?'block':(isEdit?'block':'block');
+  ['oDesligamento'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='gerente'; });
+  document.getElementById('secDesligConfirm').style.display=
+    (p==='fiscal'&&isEdit&&obra?.dataDesligamento)?'block':'none';
+  toggleDesligamento();
   // regularização só para empreiteira se tiver pendência não resolvida
   document.getElementById('secRegularizacao').style.display=
     (p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
@@ -562,33 +798,28 @@ window.openObraModal=function(obraId){
   document.getElementById('secMedidas').style.display=p!=='empreiteira'?'block':'none';
   // armazenamento só após medida280
   document.getElementById('secArmazenamento').style.display=
-    (p!=='empreiteira'&&isEdit&&obra?.medida280)?'block':'none';
+    (['gerente','fiscal','estagiario'].includes(p)&&isEdit&&obra?.medida280)?'block':'none';
   document.getElementById('secCancelamento').style.display=p==='gerente'?'block':'none';
-  // desligamento: confirmação disponível se data preenchida
-  document.getElementById('secDesligConfirm').style.display=
-    (p==='gerente'&&isEdit&&obra?.dataDesligamento)?'block':'none';
-  toggleDesligamento();
+  document.getElementById('secParalisada').style.display=p==='gerente'?'block':'none';
   // cadastro: confirmar disponível se data preenchida
   document.getElementById('secCadastroConfirm').style.display=
-    (p!=='empreiteira'&&isEdit&&obra?.dataCadastro)?'block':'none';
-  // listener para mostrar confirmar cadastro ao preencher data
+    (['gerente','fiscal','genesis'].includes(p)&&isEdit&&obra?.dataCadastro)?'block':'none';
   document.getElementById('oCadastro').addEventListener('change',()=>{
     document.getElementById('secCadastroConfirm').style.display=
       document.getElementById('oCadastro').value?'block':'none';
   });
 
   // desabilitar campos do outro perfil
-  ['oConclusao','oPlacas','oSAP','oSerie','oFabricante','oKaffa','oCadastro'].forEach(id=>{
+  ['oConclusao','oPlacas','oSAP','oSerie','oFabricante','oKaffa'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='fiscal';
   });
   ['oFiscalizacao','oPrazoPendencia','oMedicao','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira';
   });
-  // desabilitar checkboxes de pendência para empreiteira
   document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled=p==='empreiteira'; });
 
   // atualiza toggles
-  toggleImpedimento(); togglePendencia(); toggleCancelamento();
+  toggleImpedimento(); togglePendencia(); toggleCancelamento(); toggleParalisada();
   // mostra extra conclusao se já tem data
   document.getElementById('secConclusaoExtra').style.display=obra?.conclusao?'block':'none';
   document.getElementById('oConclusao').addEventListener('change',()=>{
@@ -598,7 +829,6 @@ window.openObraModal=function(obraId){
   atualizarInfoLimite();
   document.getElementById('oAbertura').addEventListener('input',atualizarInfoLimite);
   document.getElementById('oPrazo').addEventListener('input',atualizarInfoLimite);
-  // medida 280 prazo
   if(isEdit&&obra?.medida230) atualizarInfoMedida280(obra.medida230);
 
   document.getElementById('ovObra').classList.add('open');
@@ -649,9 +879,46 @@ window.togglePendenciaOutro=function(){
   const outroChk=document.querySelector('.chk-pendencia[value="Outro"]');
   document.getElementById('fgPendenciaOutro').style.display=outroChk?.checked?'flex':'none';
 };
+
+window.toggleFiscalOutro=function(){
+  const sel=document.getElementById('oFiscalSelect');
+  const inp=document.getElementById('oFiscalNome');
+  if(!sel||!inp) return;
+  if(sel.value==='outro'){ inp.style.display='block'; inp.focus(); inp.value=''; }
+  else { inp.style.display='none'; inp.value=sel.value; }
+};
+window.calcularPrazoPendencia=function(){
+  const sel=document.getElementById('oPrazoPendenciaOpcao');
+  const hid=document.getElementById('oPrazoPendencia');
+  const info=document.getElementById('infoPrazoPendencia');
+  if(!sel||!hid||!info) return;
+  const dias=parseInt(sel.value);
+  if(!dias){ hid.value=''; info.style.display='none'; return; }
+  // Calcular a partir de amanhã
+  const d=new Date(); d.setDate(d.getDate()+dias);
+  const prazo=d.toISOString().split('T')[0];
+  hid.value=prazo;
+  info.style.display='block';
+  info.textContent='Prazo limite: '+fmtTxt(prazo)+' ('+dias+(dias===2?' dias — Urgente':' dias')+')';
+};
+
 window.toggleCancelamento=function(){
   document.getElementById('secCancelamentoDetalhe').style.display=
     document.getElementById('oCancelado').checked?'block':'none';
+};
+window.toggleParalisada=function(){
+  document.getElementById('secParalisadaDetalhe').style.display=
+    document.getElementById('oParalisada').checked?'block':'none';
+};
+window.togglePrazoCustom=function(){
+  const sel=document.getElementById('oPrazoOpcao');
+  const inp=document.getElementById('oPrazo');
+  if(sel.value==='outro'){
+    inp.style.display='block'; inp.value='';
+  } else {
+    inp.style.display='none'; inp.value=sel.value;
+  }
+  atualizarInfoLimite();
 };
 window.toggleDesligamento=function(){
   const conf=document.getElementById('oDesligConfirmado')?.checked;
@@ -740,7 +1007,19 @@ window.saveObra=async function(){
     const med230=g('oMedida230')||(obraAntiga?.medida230||'');
     if(g('oMedida280')&&!med230) erros.push('Medida 280 só pode ser preenchida após a Medida 230.');
 
+    // Regularização da pendência não pode ser futura
+    if(g('oRegularizacao')&&g('oRegularizacao')>hojeStr())
+      erros.push('Data de Regularização da Pendência não pode ser futura.');
+
     if(erros.length){ toast(erros[0],'err'); return; }
+
+    // Verificar número de obra duplicado (apenas na criação)
+    if(!isEdit){
+      const numero=g('oNum').trim();
+      if(numero && obras.some(o=>o.numero===numero)){
+        toast(`Obra ${numero} já existe no sistema!`,'err'); return;
+      }
+    }
 
     let patch={};
     if(me.perfil==='gerente'){
@@ -760,7 +1039,10 @@ window.saveObra=async function(){
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
-        armazenado:gChk('oArmazenado'),
+        armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
+        medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
+        caixaArmazenada:g('oCaixaArmazenada'),
+        paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
         atualizadaEm:serverTimestamp()
       };
@@ -768,21 +1050,37 @@ window.saveObra=async function(){
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
         kaffa:g('oKaffa'),
+        dataDesligamento:g('oDesligamento'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
         atualizadaEm:serverTimestamp()
       };
     } else if(me.perfil==='fiscal'){
       patch={
+        dataDesligamento:g('oDesligamento'),
+        desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
+        desligamentoCanceladoMotivo:g('oDesligMotivo'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
-        armazenado:gChk('oArmazenado'),
+        armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
+        medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
+        caixaArmazenada:g('oCaixaArmazenada'),
         atualizadaEm:serverTimestamp()
       };
+    }
+
+    // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
+    if(me.perfil==='genesis'){
+      patch={ dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'), atualizadaEm:serverTimestamp() };
+    }
+    if(me.perfil==='estagiario'){
+      patch={ armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
+        medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
+        caixaArmazenada:g('oCaixaArmazenada'), atualizadaEm:serverTimestamp() };
     }
 
     if(isEdit){
@@ -792,6 +1090,12 @@ window.saveObra=async function(){
         await enviarEmailConclusao({...obraAntiga,...patch});
       if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia)
         await enviarEmailPendencia({...obraAntiga,...patch});
+      // Registrar se pendência foi resolvida dentro do prazo
+      if((me.perfil==='fiscal'||me.perfil==='gerente')&&patch.pendenciaResolvida&&!obraAntiga?.pendenciaResolvida){
+        const prazoLim=obraAntiga?.prazoPendencia;
+        const dataReg=obraAntiga?.regularizacaoData;
+        if(prazoLim&&dataReg) patch.pendenciaDentroPrazo=(dataReg<=prazoLim);
+      }
       // E-mail quando empreiteira regulariza pendência
       if(me.perfil==='empreiteira'&&!obraAntiga?.regularizacaoData&&patch.regularizacaoData)
         await enviarEmailRegularizacao({...obraAntiga,...patch});
@@ -820,7 +1124,7 @@ async function renderUsers(){
   const list=document.getElementById('usersList');
   list.innerHTML=users.length
     ?users.map(u=>{
-        const rc=`role-${u.perfil}`;
+        const rc=`role-${u.perfil==='estagiario'?'estagiario':u.perfil==='genesis'?'genesis':u.perfil}`;
         return `<div class="ut-row">
           <div class="ut-name">${u.nome}</div>
           <div class="ut-email">${u.email||'—'}</div>
@@ -867,6 +1171,7 @@ window.onPerfilChange=function(){
   const p=document.getElementById('uPerfil').value;
   document.getElementById('fgVincEmp').style.display=p==='empreiteira'?'flex':'none';
   document.getElementById('fgVincFis').style.display=p==='fiscal'?'flex':'none';
+  // genesis e estagiário: sem vínculo necessário
 };
 window.saveUser=async function(){
   const btn=document.getElementById('btnSalvarUser');
@@ -1117,6 +1422,7 @@ function aplicarFiltros(list) {
   const f = getFiltros();
   const h = hoje();
   return list.filter(o => {
+    if(window._filtroExtra && !window._filtroExtra(o)) return false;
     if (f.srch && !(o.numero+o.cidade+o.fiscal+o.empreiteira+o.tipo).toLowerCase().includes(f.srch)) return false;
     if (f.status && statusOf(o) !== f.status) return false;
     if (f.tipo && o.tipo !== f.tipo) return false;
@@ -1152,8 +1458,10 @@ window.limparFiltros = function() {
   ['fStatus','fTipo','fEmpreiteira','fFiscal','fCidade','fPendencia',
    'fAberturaIni','fAberturaFim','fLimiteIni','fLimiteFim','fDiasVencer','fArmazenado','srch']
     .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+  window._filtroExtra = null;
+  const btnBulk=document.getElementById('btnBulkDelete'); if(btnBulk) btnBulk.style.display='none';
   document.getElementById('btnLimparFiltros').style.display = 'none';
-  renderObras();
+  window.renderObras();
 };
 
 // Exportar somente o que está filtrado
