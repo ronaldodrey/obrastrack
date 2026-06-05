@@ -429,7 +429,7 @@
           <option value="30">30 dias</option>
           <option value="60">60 dias</option>
         </select>
-        <input type="hidden" id="oPrazoPendencia">
+        <input type="hidden" id="oPrazoPendencia"><input type="hidden" id="oPrazoPendenciaLabel">
         <div id="infoPrazoPendencia" style="display:none;font-size:11px;color:var(--accent);margin-top:5px;padding:6px 10px;background:rgba(0,229,160,.07);border-radius:4px;border:1px solid rgba(0,229,160,.2)"></div>
       </div>
     </div>
@@ -456,8 +456,33 @@
     </div>
   </div>
   <div class="modal-section" id="secMedicao">
-    <div class="modal-section-title">📏 Medição</div>
-    <div class="fg"><label>Data de Medição</label><input type="date" id="oMedicao"></div>
+    <div class="modal-section-title">📏 Medições</div>
+    <div id="listaMedicoes" style="margin-bottom:10px"></div>
+    <!-- Formulário nova medição -->
+    <div id="frmNovaMedicao" style="display:none;padding:14px;background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:10px">
+      <div class="fg-grid">
+        <div class="fg"><label>Data da Medição</label><input type="date" id="oMedicaoData"></div>
+        <div class="fg"><label>Tipo</label>
+          <select id="oMedicaoTipo" onchange="toggleMedicaoTipo()">
+            <option value="">— selecione —</option>
+            <option value="parcial">Parcial</option>
+            <option value="final">Final</option>
+          </select>
+        </div>
+      </div>
+      <div id="secMedicaoParcialFields" style="display:none">
+        <div class="modal-note" style="margin-bottom:8px">Informe as quantidades medidas nesta parcial.</div>
+        <div class="fg-grid">
+          <div class="fg"><label>USC Medido</label><input type="number" id="oMedicaoUSC" min="0" step="0.01" placeholder="0"></div>
+          <div class="fg"><label>ULV Medido</label><input type="number" id="oMedicaoULV" min="0" step="0.01" placeholder="0"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="adicionarMedicao()">✓ Adicionar</button>
+        <button class="btn btn-secondary btn-sm" onclick="cancelarNovaMedicao()">Cancelar</button>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-sm" id="btnNovaMedicao" onclick="abrirNovaMedicao()">+ Registrar Medição</button>
   </div>
   <div class="modal-section" id="secMedidas">
     <div class="modal-section-title">📋 Medidas de Controle (registro)</div>
@@ -478,22 +503,22 @@
     <div class="modal-section-title">📦 Armazenamento</div>
     <div class="modal-note">Marque todos os itens abaixo antes de confirmar o armazenamento.</div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" id="oContratosAssinado"><span class="toggle-slider"></span></label>
+      <label class="toggle"><input type="checkbox" id="oContratosAssinado" onchange="checkArmazenamentoDeps()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Contratos Assinados</span>
     </div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" id="oMedicoesAssinadas"><span class="toggle-slider"></span></label>
+      <label class="toggle"><input type="checkbox" id="oMedicoesAssinadas" onchange="checkArmazenamentoDeps()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Medições Assinadas</span>
     </div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" id="oProjetosAsBuilt"><span class="toggle-slider"></span></label>
+      <label class="toggle"><input type="checkbox" id="oProjetosAsBuilt" onchange="checkArmazenamentoDeps()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Projetos As-Built Assinados</span>
     </div>
     <div class="fg" style="margin-top:8px"><label>Caixa Armazenada (identificação)</label>
-      <input type="text" id="oCaixaArmazenada" placeholder="Ex: Caixa 42 — Prateleira B3">
+      <input type="text" id="oCaixaArmazenada" placeholder="Ex: Caixa 42 — Prateleira B3" oninput="checkArmazenamentoDeps()">
     </div>
     <div class="toggle-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-      <label class="toggle"><input type="checkbox" id="oArmazenado"><span class="toggle-slider"></span></label>
+      <label class="toggle"><input type="checkbox" id="oArmazenado" disabled><span class="toggle-slider"></span></label>
       <span class="toggle-lbl" style="font-weight:600;color:var(--accent)">✓ Confirmar Armazenamento completo</span>
     </div>
   </div>
