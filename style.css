@@ -219,3 +219,7 @@ input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6);}
 /* ── CHART ── */
 #chartContainer{min-height:60px;overflow-x:auto;}
 #chartContainer svg{display:block;}
+
+/* ── MONITOR DE PRAZOS ── */
+.sect-title svg { vertical-align: middle; }
+th[title] { text-decoration: underline dotted; cursor: help; }
