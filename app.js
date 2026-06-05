@@ -309,13 +309,19 @@ function renderDash(){
 
     if(dashPerspectiva === 'gerente'){
       html += renderDashGerente(list, listAll);
+    } else if(dashPerspectiva === 'genesis'){
+      html += '<div class="modal-note" style="margin-bottom:16px">👁️ Perspectiva <strong>Genesis</strong></div>';
+      html += renderDashGenesis(listAll);
+    } else if(dashPerspectiva === 'estagiario'){
+      html += '<div class="modal-note" style="margin-bottom:16px">👁️ Perspectiva <strong>Estagiário</strong></div>';
+      html += renderDashEstagiario(listAll);
     } else if(dashPerspectiva.startsWith('fiscal:')){
       const nome = dashPerspectiva.replace('fiscal:','');
-      html += `<div class="modal-note" style="margin-bottom:16px">👁️ Visualizando perspectiva do fiscal <strong>${nome}</strong></div>`;
+      html += '<div class="modal-note" style="margin-bottom:16px">👁️ Perspectiva do fiscal <strong>'+nome+'</strong></div>';
       html += renderDashFiscal(listAll, nome);
     } else if(dashPerspectiva.startsWith('empreiteira:')){
       const nome = dashPerspectiva.replace('empreiteira:','');
-      html += `<div class="modal-note" style="margin-bottom:16px">👁️ Visualizando perspectiva da empreiteira <strong>${nome}</strong></div>`;
+      html += '<div class="modal-note" style="margin-bottom:16px">👁️ Perspectiva da empreiteira <strong>'+nome+'</strong></div>';
       html += renderDashEmpreiteira(listAll.filter(o=>o.empreiteira===nome));
     }
   }
@@ -324,6 +330,12 @@ function renderDash(){
   }
   else if(me.perfil === 'empreiteira'){
     html += renderDashEmpreiteira(list);
+  }
+  else if(me.perfil === 'genesis'){
+    html += renderDashGenesis(obras); // genesis sees ALL obras
+  }
+  else if(me.perfil === 'estagiario'){
+    html += renderDashEstagiario(obras); // estagiário sees ALL obras
   }
 
   document.getElementById('dashContent').innerHTML = html;
@@ -527,6 +539,86 @@ function renderDashEmpreiteira(minhas){
   return html;
 }
 
+
+// ── DASHBOARD GENESIS ─────────────────────────────────────────────────
+function renderDashGenesis(list){
+  const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cancelado);
+  const confirmados = list.filter(o => o.cadastroConfirmado);
+  const hoje_s = hojeStr();
+  // Avg time: dataCadastro → dataCadastroConfirmado
+  const tempos = confirmados.filter(o=>o.dataCadastro&&o.dataCadastroConfirmado).map(o=>diff(o.dataCadastro,o.dataCadastroConfirmado));
+  const avgTempo = tempos.length ? Math.round(tempos.reduce((a,b)=>a+b,0)/tempos.length) : null;
+  let html = `<div class="kpi-strip">
+    ${kpiCard('Aguardando Cadastro',aguardando.length,'enviadas pelo fiscal, sem confirmar','#F59E0B')}
+    ${kpiCard('Cadastros Confirmados',confirmados.length,'já confirmados','#22C55E')}
+    ${kpiCard('Tempo Médio Confirmação',avgTempo!==null?avgTempo+'d':'—','envio → confirmação','#06B6D4')}
+    ${kpiCard('Total Obras',list.filter(o=>!o.cancelado).length,'no sistema','#00e5a0')}
+  </div>`;
+  html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras Aguardando Confirmação de Cadastro</div>';
+  if(!aguardando.length){
+    html += '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra aguardando confirmação de cadastro.</p></div>';
+  } else {
+    const rows = [...aguardando].sort((a,b)=>a.dataCadastro>b.dataCadastro?1:-1).map(o=>{
+      const diasAg = diff(o.dataCadastro, hoje_s);
+      const corDias = diasAg===null?'var(--muted)':diasAg>30?'var(--red)':diasAg>15?'var(--yellow)':'var(--text)';
+      return `<tr>
+        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td>${o.cidade||'—'}</td>
+        <td>${o.fiscal||'—'}</td>
+        <td>${fmt(o.dataCadastro)}</td>
+        <td style="color:${corDias};font-weight:600">${diasAg!==null?diasAg+'d':'—'}</td>
+        <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Confirmar Cadastro</button></td>
+      </tr>`;
+    }).join('');
+    html += `<div class="tbl-wrap"><table>
+      <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Enviado em</th><th>Dias Aguardando</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+  return html;
+}
+
+// ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
+function renderDashEstagiario(list){
+  const semArm   = list.filter(o => o.medida280 && !o.armazenado && !o.cancelado);
+  const armOk    = list.filter(o => o.armazenado);
+  const semContr = list.filter(o => o.medida280 && !o.armazenado && !o.contratosAssinado);
+  const semMed   = list.filter(o => o.medida280 && !o.armazenado && !o.medicoesAssinadas);
+  const semProj  = list.filter(o => o.medida280 && !o.armazenado && !o.projetosAsBuilt);
+  let html = `<div class="kpi-strip">
+    ${kpiCard('Aguard. Armazenamento',semArm.length,'com Med.280, sem armazenar','#F59E0B')}
+    ${kpiCard('Armazenadas',armOk.length,'concluídas','#22C55E')}
+    ${kpiCard('Sem Contratos',semContr.length,'faltando assinar','#EF4444')}
+    ${kpiCard('Sem Medições Assin.',semMed.length,'faltando assinar','#EF4444')}
+    ${kpiCard('Sem As-Built',semProj.length,'faltando assinar','#EF4444')}
+  </div>`;
+  html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras para Armazenar</div>';
+  if(!semArm.length){
+    html += '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra pendente de armazenamento.</p></div>';
+  } else {
+    const rows = semArm.map(o=>{
+      const itens = [
+        o.contratosAssinado?null:'Contratos',
+        o.medicoesAssinadas?null:'Medições',
+        o.projetosAsBuilt?null:'As-Built',
+        o.caixaArmazenada?null:'Caixa',
+      ].filter(Boolean);
+      return `<tr>
+        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td>${o.cidade||'—'}</td>
+        <td>${o.fiscal||'—'}</td>
+        <td>${fmt(o.medida280)}</td>
+        <td>${itens.length?`<span class="chip chip-red">${itens.join(', ')}</span>`:'<span class="chip chip-green">Pronto p/ confirmar</span>'}</td>
+        <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Armazenar</button></td>
+      </tr>`;
+    }).join('');
+    html += `<div class="tbl-wrap"><table>
+      <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Med.280</th><th>Faltando</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+  return html;
+}
 function kpiCard(lbl,val,sub,cor){
   return `<div class="kpi-card" style="--card-color:${cor}">
     <div class="kpi-lbl">${lbl}</div>
@@ -669,8 +761,8 @@ function renderMonitorPrazos(list){
       });
   }
 
-  // Obras que precisam de Med.70: tem medição, sem med70
-  const sem70  = ativas.filter(o => o.medicao && !o.medida70);
+  // Obras que precisam de Med.70: tem conclusão, sem med70 (prazo = dataLimite)
+  const sem70  = ativas.filter(o => o.conclusao && !o.medida70);
   // Obras que precisam de Med.230: tem conclusão, sem med230 (prazo = dataLimite)
   const sem230 = ativas.filter(o => o.conclusao && !o.medida230);
   // Obras que precisam de Med.280: tem med230, sem med280
@@ -679,6 +771,11 @@ function renderMonitorPrazos(list){
   const ord70  = listaOrdenada(sem70,  'med70');
   const ord230 = listaOrdenada(sem230, 'med230');
   const ord280 = listaOrdenada(sem280, 'med280');
+
+  // Separar em "este mês + atrasadas" vs "próximos meses"
+  const mesAtualFim = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
+  function splitMes(lista){ return { atual: lista.filter(x=>x.dias<=0||(diasRestantes(mesAtualFim)>=0&&x.dias<=diasRestantes(mesAtualFim))), proximo: lista.filter(x=>x.dias>0&&x.dias>diasRestantes(mesAtualFim)) }; }
+  const sp70=splitMes(ord70), sp230=splitMes(ord230), sp280=splitMes(ord280);
 
   // Contadores por urgência para cada painel
   function contadores(lista){
@@ -766,25 +863,31 @@ function renderMonitorPrazos(list){
         — prazo da execução corre até a Medida 230; encerramento corre até último dia do mês seguinte à Med. 230
       </span>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px;margin-bottom:28px">
-      ${renderPainelMonitor(
-        'Medida 70 pendente',
-        'Prazo limite = Data Limite da obra · Indica: obra liberada dentro/fora do prazo',
-        ord70, 'med70', '#14B8A6',
-        prazoMedida70e230
-      )}
-      ${renderPainelMonitor(
-        'Medida 230 pendente',
-        'Prazo limite = Data Limite da obra · Indica: execução dentro/fora do prazo',
-        ord230, 'med230', '#10B981',
-        prazoMedida70e230
-      )}
-      ${renderPainelMonitor(
-        'Medida 280 pendente',
-        'Prazo limite = último dia do mês seguinte à Med. 230 · Indica: encerramento dentro/fora do prazo',
-        ord280, 'med280', '#22C55E',
-        prazoMedida280
-      )}
+    <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:28px">
+        <!-- Monitor 1: Atrasadas + Este mês -->
+      <div style="grid-column:1/-1">
+        <div style="font-size:11px;font-weight:700;color:#EF4444;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+          🚨 Atrasadas + Vencem Este Mês
+          <span style="font-size:9px;color:var(--muted);font-weight:400">Ação urgente necessária</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-bottom:20px">
+          ${renderPainelMonitor('Medida 70','Prazo = Data Limite · Indica: obra liberada no prazo',sp70.atual,'med70','#14B8A6',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 230','Prazo = Data Limite · Indica: execução no prazo',sp230.atual,'med230','#10B981',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 280','Prazo = último dia mês seguinte à Med.230',sp280.atual,'med280','#22C55E',prazoMedida280)}
+        </div>
+      </div>
+      <!-- Monitor 2: Próximos meses -->
+      <div style="grid-column:1/-1">
+        <div style="font-size:11px;font-weight:700;color:#06B6D4;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+          📅 Vencem nos Próximos Meses
+          <span style="font-size:9px;color:var(--muted);font-weight:400">Planejamento antecipado</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">
+          ${renderPainelMonitor('Medida 70','',sp70.proximo,'med70','#14B8A6',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 230','',sp230.proximo,'med230','#10B981',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 280','',sp280.proximo,'med280','#22C55E',prazoMedida280)}
+        </div>
+      </div>
     </div>`;
 }
 
@@ -810,30 +913,43 @@ function buildTableHeader(){
 }
 
 // ── TABELA OBRAS ──────────────────────────────────────
+// ── renderObras ÚNICA — sempre usa aplicarFiltros ────────────────────
 function renderObras(){
-  const srch=document.getElementById('srch').value.toLowerCase();
-  const filtroSt=document.getElementById('filtroStatus').value;
-  let list=visibleObras().filter(o=>{
-    if(srch&&!(o.numero+o.cidade+o.fiscal+o.empreiteira+o.tipo).toLowerCase().includes(srch)) return false;
-    if(filtroSt&&statusOf(o)!==filtroSt) return false;
-    return true;
-  });
-  const body=document.getElementById('obrasBody');
-  if(!list.length){ body.innerHTML=`<tr><td colspan="28"><div class="empty"><div class="ico">🏗️</div><p>Nenhuma obra encontrada.</p></div></td></tr>`; return; }
+  if(!document.getElementById('obrasBody')) return;
+  const list = aplicarFiltros(visibleObras());
+  const ativos = contarFiltrosAtivos() + (window._filtroExtra?1:0);
+  const btnLimpar = document.getElementById('btnLimparFiltros');
+  if(btnLimpar) btnLimpar.style.display = ativos>0?'inline-flex':'none';
+  const resumo = document.getElementById('filtrosResumo');
+  if(resumo){
+    const total = visibleObras().length;
+    resumo.textContent = ativos>0
+      ? `Mostrando ${list.length} de ${total} obras — ${ativos} filtro(s) ativo(s)`
+      : `${total} obras no total`;
+  }
+  const body = document.getElementById('obrasBody');
+  if(!list.length){
+    body.innerHTML=`<tr><td colspan="29"><div class="empty"><div class="ico">🔍</div><p>Nenhuma obra encontrada.</p></div></td></tr>`;
+    return;
+  }
   body.innerHTML=list.map(o=>{
-    const s=statusOf(o), fc=o.fiscal?gc(o.fiscal):'var(--muted)';
+    const fc=o.fiscal?gc(o.fiscal):'var(--muted)';
     const limDias=diasRestantes(o.dataLimite);
-    const canEdit=me.perfil==='gerente'||(me.perfil==='fiscal'&&o.fiscal===me.vinculo)||(me.perfil==='empreiteira'&&o.empreiteira===me.vinculo);
+    const canEdit=me.perfil==='gerente'||me.perfil==='genesis'||me.perfil==='estagiario'
+      ||(me.perfil==='fiscal'&&o.fiscal===me.vinculo)
+      ||(me.perfil==='empreiteira'&&o.empreiteira===me.vinculo);
     const acts=canEdit
       ?`<button class="btn btn-secondary btn-sm" onclick="openObraModal('${o.id}')">✏️</button>
         ${me.perfil==='gerente'?`<button class="btn btn-danger btn-sm" onclick="delObra('${o.id}')">🗑️</button>`:''}`
       :'';
     const pendChip=o.pendencia
-      ?(o.pendenciaResolvida
-        ?'<span class="chip chip-green">Resolvida</span>'
+      ?(o.pendenciaResolvida?'<span class="chip chip-green">Resolvida</span>'
         :`<span class="chip chip-red">${Array.isArray(o.tiposPendencia)?o.tiposPendencia.join(', '):(o.tipoPendencia||'Pendência')}</span>`)
       :'<span class="chip">—</span>';
     const armChip=o.armazenado?'<span class="chip chip-green">✓</span>':'<span class="chip">—</span>';
+    const kaffaDisp=o.kaffaEntries?.length
+      ?`${fmtTxt((o.kaffaEntries||[]).slice(-1)[0]?.data)} <span class="chip ${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'Final':'Parc.'}</span>`
+      :fmt(o.kaffa);
     return `<tr>
       <td>${statusHtml(o)}</td>
       <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
@@ -845,13 +961,13 @@ function renderObras(){
       <td>${o.prazoExecucao?o.prazoExecucao+'d':'—'}</td>
       <td>${fmt(o.dataLimite)}</td>
       <td>${!o.conclusao?diasHtml(limDias):'<span class="chip chip-green">Concluída</span>'}</td>
-      <td>${o.dataDesligamento?`<span style="color:${o.desligamentoConfirmado?"var(--green)":o.desligamentoCancelado?"var(--red)":"var(--text)"};">${fmtTxt(o.dataDesligamento)}${o.desligamentoConfirmado?" ✓":o.desligamentoCancelado?" ✗":""}</span>`:"—"}</td>
+      <td>${o.dataDesligamento?`<span style="color:${o.desligamentoConfirmado?'var(--green)':o.desligamentoCancelado?'var(--red)':'var(--text)'}">${fmtTxt(o.dataDesligamento)}${o.desligamentoConfirmado?' ✓':o.desligamentoCancelado?' ✗':''}</span>`:'—'}</td>
       <td>${fmt(o.conclusao)}</td>
       <td>${fmt(o.fiscalizacao)}</td>
       <td>${pendChip}</td>
-      <td>${fmt(o.kaffa)}</td>
-      <td>${o.dataCadastro?`<span style="color:${o.cadastroConfirmado?"var(--green)":"var(--text)"}">${fmtTxt(o.dataCadastro)}${o.cadastroConfirmado?" ✓":""}</span>`:"—"}</td>
-      <td>${fmt(o.medicao)}</td>
+      <td>${kaffaDisp}</td>
+      <td>${o.dataCadastro?`<span style="color:${o.cadastroConfirmado?'var(--green)':'var(--text)'}">${fmtTxt(o.dataCadastro)}${o.cadastroConfirmado?' ✓':''}</span>`:'—'}</td>
+      <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
       <td>${o.usc||'—'}</td>
       <td>${o.ulv||'—'}</td>
       <td>${fmt(o.medida70)}</td>
@@ -860,7 +976,6 @@ function renderObras(){
       <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
       <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
-      <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
       <td>${armChip}</td>
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
@@ -892,8 +1007,9 @@ window.openObraModal=function(obraId){
   const inpFiscal=document.getElementById('oFiscalNome'); if(inpFiscal){ inpFiscal.style.display='none'; inpFiscal.value=''; }
   // reset checkboxes de pendência
   document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
-  // reset medições pendentes
+  // reset medições e kaffas pendentes
   _medicoesPendentes=[];
+  _kaffasPendentes=[];
   // reset oArmazenado to disabled (will be re-enabled by checkArmazenamentoDeps)
   const armEl=document.getElementById('oArmazenado'); if(armEl) armEl.disabled=true;
 
@@ -925,7 +1041,8 @@ window.openObraModal=function(obraId){
     set('oUSC',obra.usc); set('oULV',obra.ulv); set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
-    set('oKaffa',obra.kaffa); set('oCadastro',obra.dataCadastro);
+    // kaffaEntries rendered via renderListaKaffas above
+    set('oCadastro',obra.dataCadastro);
     set('oFiscalizacao',obra.fiscalizacao);
     // checkboxes de pendência (suporta array novo e string legada)
     const tipos = obra.tiposPendencia || (obra.tipoPendencia ? [obra.tipoPendencia] : []);
@@ -959,15 +1076,16 @@ window.openObraModal=function(obraId){
       }
     }
     // Fiscal dropdown
-    const predFiscais=['Thiago L. Chaves','Jorge','Ezequiel','Marcio','Diego'];
+    const predFiscais=['Thiago','Jorge','Ezequiel','Marcio','Diego'];
     const selF=document.getElementById('oFiscalSelect');
     const inpF=document.getElementById('oFiscalNome');
     if(selF&&inpF&&obra.fiscal){
       if(predFiscais.includes(obra.fiscal)){ selF.value=obra.fiscal; inpF.style.display='none'; }
       else { selF.value='outro'; inpF.style.display='block'; inpF.value=obra.fiscal; }
     }
-    // Render medições list
+    // Render medições e kaffas list
     renderListaMedicoes();
+    renderListaKaffas();
     // pendenciaDentroPrazo info
     const infoPP2=document.getElementById('infoPendenciaPrazo');
     if(infoPP2){
@@ -998,12 +1116,16 @@ window.openObraModal=function(obraId){
 
   // visibilidade e habilitação por perfil
   const p=me.perfil;
-  document.getElementById('secIdentif').style.display=p==='gerente'?'block':'none';
-  document.getElementById('secExec').style.display=p!=='fiscal'?'block':'none';
-  // Fiscal vê apenas dados do transformador (read-only)
-  document.getElementById('secTransfView').style.display=(p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
-  document.getElementById('secImpedimento').style.display=p==='empreiteira'?'block':'none';
-  document.getElementById('secFisc').style.display=p!=='empreiteira'?'block':'none';
+  // Genesis: só mostra seção de cadastro
+  // Estagiário: só mostra seção de armazenamento
+  const isGenesis   = p==='genesis';
+  const isEstagiario= p==='estagiario';
+  const isBasico    = isGenesis || isEstagiario;
+  document.getElementById('secIdentif').style.display   = p==='gerente'&&!isBasico?'block':'none';
+  document.getElementById('secExec').style.display      = !isBasico&&p!=='fiscal'?'block':'none';
+  document.getElementById('secTransfView').style.display= (p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
+  document.getElementById('secImpedimento').style.display= (!isBasico&&p==='empreiteira')?'block':'none';
+  document.getElementById('secFisc').style.display      = (!isBasico&&p!=='empreiteira')?'block':'none';
   // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
   // Desligamento: gerente, fiscal e empreiteira preenchem; gerente e fiscal confirmam
   document.getElementById('secDesligData').style.display='block';
@@ -1013,7 +1135,7 @@ window.openObraModal=function(obraId){
   toggleDesligamento();
   // regularização só para empreiteira se tiver pendência não resolvida
   document.getElementById('secRegularizacao').style.display=
-    (p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
+    (!isBasico&&p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
   if(obra?.pendencia){
     const tipos=(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
     document.getElementById('msgPendencia').textContent=
@@ -1021,20 +1143,30 @@ window.openObraModal=function(obraId){
   }
   // confirmação pendência para fiscal/gerente
   document.getElementById('secConfPendencia').style.display=
-    (p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
-  document.getElementById('secMedicao').style.display=p!=='empreiteira'?'block':'none';
-  document.getElementById('secMedidas').style.display=p!=='empreiteira'?'block':'none';
+    (!isBasico&&p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
+  document.getElementById('secMedicao').style.display= (!isBasico&&p!=='empreiteira')?'block':'none';
+  document.getElementById('secMedidas').style.display= (!isBasico&&p!=='empreiteira')?'block':'none';
   // armazenamento só após medida280
   // Armazenamento: gerente e estagiário veem sempre (isEdit), fiscal só após medida280
   document.getElementById('secArmazenamento').style.display=
     (isEdit && (['gerente','estagiario'].includes(p) || (p==='fiscal'&&obra?.medida280)))?'block':'none';
-  document.getElementById('secCancelamento').style.display=p==='gerente'?'block':'none';
-  document.getElementById('secParalisada').style.display=p==='gerente'?'block':'none';
+  // If estagiário, override: disable all non-armazenamento fields
+  if(isEstagiario){
+    ['oFiscalizacao','oPrazoPendencia','oMedicaoData','oMedida70','oMedida230','oMedida280','oCadastro'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.disabled=true;
+    });
+  }
+  document.getElementById('secCancelamento').style.display=(p==='gerente'&&!isBasico)?'block':'none';
+  document.getElementById('secParalisada').style.display=(p==='gerente'&&!isBasico)?'block':'none';
   // cadastro: confirmar disponível se data preenchida
   // secCadastroConfirm: gerente e genesis
   const showCadastroConf = ['gerente','genesis'].includes(p);
+  // Genesis always sees the cadastro section to confirm
   document.getElementById('secCadastroConfirm').style.display=
-    (showCadastroConf && isEdit && obra?.dataCadastro)?'block':'none';
+    (showCadastroConf && isEdit)?'block':'none';
+  // Genesis: also show dataCadastro field
+  const secFiscEl=document.getElementById('secFisc');
+  if(isGenesis && secFiscEl) secFiscEl.style.display='block';
   // Show when date is filled (remove old listeners by replacing element clone)
   const cadEl=document.getElementById('oCadastro');
   if(cadEl){
@@ -1073,7 +1205,7 @@ window.openObraModal=function(obraId){
   if(isEdit&&obra?.medida230) atualizarInfoMedida280(obra.medida230);
 
   // Always render medição list (empty for new obra)
-  if(!isEdit) renderListaMedicoes();
+  if(!isEdit){ renderListaMedicoes(); renderListaKaffas(); }
   document.getElementById('ovObra').classList.add('open');
 };
 window.closeObraModal=function(){ document.getElementById('ovObra').classList.remove('open'); };
@@ -1161,6 +1293,60 @@ window.checkArmazenamentoDeps = function(){
 
 // ── MEDIÇÕES MÚLTIPLAS ────────────────────────────────────────────────
 let _medicoesPendentes = [];
+let _kaffasPendentes = [];
+
+// ── KAFFA ENTRIES (parcial/final) ─────────────────────────────────────
+function tipoKaffa(obra){
+  const ks = obra?.kaffaEntries||[];
+  if(ks.some(k=>k.tipo==='final')) return 'final';
+  if(ks.length > 0) return 'parcial';
+  return null;
+}
+window.abrirNovoKaffa = function(){
+  const obraId=document.getElementById('obraId').value;
+  const obra=obras.find(o=>o.id===obraId);
+  const hasFinal=(obra?.kaffaEntries||[]).concat(_kaffasPendentes).some(k=>k.tipo==='final');
+  if(hasFinal){ toast('Esta obra já possui kaffa final registrado.','warn'); return; }
+  document.getElementById('frmNovoKaffa').style.display='block';
+  document.getElementById('btnNovoKaffa').style.display='none';
+  document.getElementById('oKaffaData').value='';
+  document.getElementById('oKaffaTipo').value='';
+  const d=document.getElementById('oKaffaData'); if(d) d.max=hojeStr();
+};
+window.cancelarNovoKaffa = function(){
+  document.getElementById('frmNovoKaffa').style.display='none';
+  document.getElementById('btnNovoKaffa').style.display='inline-flex';
+};
+window.adicionarKaffa = function(){
+  const data=document.getElementById('oKaffaData').value;
+  const tipo=document.getElementById('oKaffaTipo').value;
+  if(!data||!tipo){ toast('Preencha data e tipo do kaffa.','err'); return; }
+  if(data>hojeStr()){ toast('Data do kaffa não pode ser futura.','err'); return; }
+  _kaffasPendentes.push({id:'k_'+Date.now(), data, tipo});
+  renderListaKaffas();
+  cancelarNovoKaffa();
+};
+window.removerKaffaPendente = function(id){
+  _kaffasPendentes=_kaffasPendentes.filter(k=>k.id!==id);
+  renderListaKaffas();
+};
+function renderListaKaffas(){
+  const obra=obras.find(o=>o.id===document.getElementById('obraId').value);
+  const existing=obra?.kaffaEntries||[];
+  const all=[...existing,..._kaffasPendentes];
+  const cont=document.getElementById('listaKaffas'); if(!cont) return;
+  if(!all.length){ cont.innerHTML='<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhum kaffa registrado.</div>'; return; }
+  const sorted=[...all].sort((a,b)=>a.data>b.data?-1:1);
+  cont.innerHTML=sorted.map(k=>{
+    const isPend=_kaffasPendentes.some(p=>p.id===k.id);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${isPend?'rgba(0,229,160,.06)':'var(--surface2)'};border-radius:6px;margin-bottom:5px;border:1px solid ${isPend?'rgba(0,229,160,.2)':'var(--border)'}">
+      <span style="font-size:10px;color:var(--muted);min-width:70px">${fmtTxt(k.data)}</span>
+      <span class="chip ${k.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${k.tipo==='final'?'✓ Kaffa Final':'~ Kaffa Parcial'}</span>
+      ${isPend?`<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>
+        <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerKaffaPendente('${k.id}')">✕</button>`:''}
+    </div>`;
+  }).join('');
+}
 
 window.abrirNovaMedicao = function(){
   const obra = obras.find(o=>o.id===document.getElementById('obraId').value);
@@ -1421,14 +1607,31 @@ window.saveObra=async function(){
     if(isEdit){
       await updateDoc(doc(db,'obras',obraId),patch);
       // disparo de e-mails por evento
-      // Save new medições (append to existing array)
-      if(_medicoesPendentes.length > 0){
-        const existing=obraAntiga?.medicoes||[];
-        patch.medicoes=[...existing,..._medicoesPendentes];
-        // Update medicao date to most recent
-        const allDates=[...patch.medicoes].map(m=>m.data).filter(Boolean).sort();
-        if(allDates.length) patch.medicao=allDates[allDates.length-1];
-        _medicoesPendentes=[];
+      // Save new medições (ALWAYS include full array to prevent data loss)
+      {
+        const existingMeds = obraAntiga?.medicoes||[];
+        const allMeds = [...existingMeds, ..._medicoesPendentes];
+        if(_medicoesPendentes.length > 0){
+          patch.medicoes = allMeds;
+          const allDates = allMeds.map(m=>m.data).filter(Boolean).sort();
+          if(allDates.length) patch.medicao = allDates[allDates.length-1];
+          _medicoesPendentes = [];
+        }
+      }
+      // Save kaffaEntries (parcial/final)
+      {
+        const existingKaffas = obraAntiga?.kaffaEntries||[];
+        if(_kaffasPendentes.length > 0){
+          const allKaffas = [...existingKaffas, ..._kaffasPendentes];
+          patch.kaffaEntries = allKaffas;
+          const allKDates = allKaffas.map(k=>k.data).filter(Boolean).sort();
+          if(allKDates.length) patch.kaffa = allKDates[allKDates.length-1];
+          _kaffasPendentes = [];
+        }
+      }
+      // dataCadastroConfirmado: record timestamp when confirmed
+      if(patch.cadastroConfirmado && !obraAntiga?.cadastroConfirmado){
+        patch.dataCadastroConfirmado = hojeStr();
       }
       if(me.perfil==='empreiteira'&&!obraAntiga?.conclusao&&patch.conclusao)
         await enviarEmailConclusao({...obraAntiga,...patch});
@@ -1825,68 +2028,7 @@ window.exportCSVFiltrado = function() {
   toast(`${list.length} obras exportadas!`);
 };
 
-// Atualiza renderObras para usar filtros
-const _renderObrasOriginal = window.renderObras;
-window.renderObras = function() {
-  const list = aplicarFiltros(visibleObras());
-  const body = document.getElementById('obrasBody');
-  const ativos = contarFiltrosAtivos();
-  const btnLimpar = document.getElementById('btnLimparFiltros');
-  if (btnLimpar) btnLimpar.style.display = ativos > 0 ? 'inline-flex' : 'none';
-  const resumo = document.getElementById('filtrosResumo');
-  if (resumo) {
-    const total = visibleObras().length;
-    resumo.textContent = ativos > 0
-      ? `Mostrando ${list.length} de ${total} obras — ${ativos} filtro(s) ativo(s)`
-      : `${total} obras no total`;
-  }
-  if (!list.length) {
-    body.innerHTML = `<tr><td colspan="24"><div class="empty"><div class="ico">🔍</div><p>Nenhuma obra encontrada com os filtros aplicados.</p></div></td></tr>`;
-    return;
-  }
-  body.innerHTML = list.map(o => {
-    const s = statusOf(o), fc = o.fiscal ? gc(o.fiscal) : 'var(--muted)';
-    const limDias = diasRestantes(o.dataLimite);
-    const canEdit = me.perfil==='gerente'||(me.perfil==='fiscal'&&o.fiscal===me.vinculo)||(me.perfil==='empreiteira'&&o.empreiteira===me.vinculo);
-    const acts = canEdit
-      ? `<button class="btn btn-secondary btn-sm" onclick="openObraModal('${o.id}')">✏️</button>
-         ${me.perfil==='gerente'?`<button class="btn btn-danger btn-sm" onclick="delObra('${o.id}')">🗑️</button>`:''}`
-      : '';
-    const pendChip = o.pendencia
-      ? (o.pendenciaResolvida ? '<span class="chip chip-green">Resolvida</span>' : `<span class="chip chip-red">${o.tipoPendencia||''}</span>`)
-      : '<span class="chip">—</span>';
-    const armChip = o.armazenado ? '<span class="chip chip-green">✓</span>' : '<span class="chip">—</span>';
-    return `<tr>
-      <td>${statusHtml(o)}</td>
-      <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
-      <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
-      <td>${o.cidade||'—'}</td>
-      <td style="font-size:10px">${o.empreiteira||'—'}</td>
-      <td>${o.fiscal?`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:50%;background:${fc};display:inline-block"></span>${o.fiscal}</span>`:'—'}</td>
-      <td>${fmt(o.dataAbertura)}</td>
-      <td>${o.prazoExecucao?o.prazoExecucao+'d':'—'}</td>
-      <td>${fmt(o.dataLimite)}</td>
-      <td>${!o.conclusao?diasHtml(limDias):'<span class="chip chip-green">Concluída</span>'}</td>
-      <td>${fmt(o.dataDesligamento)}</td>
-      <td>${fmt(o.conclusao)}</td>
-      <td>${fmt(o.fiscalizacao)}</td>
-      <td>${pendChip}</td>
-      <td>${fmt(o.kaffa)}</td>
-      <td>${fmt(o.dataCadastro)}</td>
-      <td>${fmt(o.medicao)}</td>
-      <td>${o.usc||'—'}</td>
-      <td>${o.ulv||'—'}</td>
-      <td>${fmt(o.medida70)}</td>
-      <td>${celulaPrazo(diasParaMedida(o,'med70'))}</td>
-      <td>${fmt(o.medida230)}</td>
-      <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
-      <td>${fmt(o.medida280)}</td>
-      <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
-      <td>${armChip}</td>
-      <td><div style="display:flex;gap:4px">${acts}</div></td>
-    </tr>`;
-  }).join('');
-};
+// renderObras is now consolidated — see function above
 
 // ══════════════════════════════════════════════════════
 //  IMPORTAÇÃO EXCEL
