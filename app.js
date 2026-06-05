@@ -354,6 +354,7 @@ function renderDashGerente(list, listAll){
   html += tabelaResumoFiscais(list);
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">Painel de Empreiteiras</div>';
   html += tabelaResumoEmpreiteiras(list);
+  html += renderMonitorPrazos(list);
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
   html += '<div class="vel-grid">' + velCards(list) + '</div>';
   return html;
@@ -388,7 +389,10 @@ function tabelaResumoFiscais(list){
     <thead><tr>
       <th>Fiscal</th><th style="text-align:center">Total</th><th style="text-align:center">Para Fiscalizar</th>
       <th style="text-align:center">Para Medir</th><th style="text-align:center">Pendências</th>
-      <th style="text-align:center">Cad. Urgente</th><th style="text-align:center">Atrasadas</th><th></th>
+      <th style="text-align:center;color:#14B8A6" title="Obras sem Med.70 vencidas ou críticas (≤5d)">⏱ Med.70</th>
+      <th style="text-align:center;color:#10B981" title="Obras sem Med.230 vencidas ou críticas (≤5d)">⏱ Med.230</th>
+      <th style="text-align:center;color:#22C55E" title="Obras sem Med.280 vencidas ou críticas (≤5d)">⏱ Med.280</th>
+      <th style="text-align:center">Cad. Urgente</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -454,6 +458,7 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
     ${kpiCard('Tempo Médio Cadastro',tempoCad!==null?tempoCad+'d':'—','fiscalização→cadastro','#f5c542')}
   </div>`;
+  html += renderMonitorPrazos(minhas);
   html += '<div class="sect-title" style="margin-bottom:12px">Pendências por Empreiteira</div>';
   html += pendenciaRankingPorEmpreiteira(minhas);
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:16px">Obras por Empreiteira</div>';
@@ -594,12 +599,186 @@ function pendenciaRankingPorEmpreiteira(list){
   }).join('');
 }
 
+
+// ── HELPERS MONITOR DE PRAZOS ────────────────────────────────────────
+function prazoMedida70e230(o)  { return o.dataLimite || null; }
+function prazoMedida280(o)      { return o.medida230 ? ultimoDiaMesSeginte(o.medida230) : null; }
+
+function diasParaMedida(o, tipo){
+  if(tipo === 'med70')  return o.medida70  ? null : diasRestantes(prazoMedida70e230(o));
+  if(tipo === 'med230') return o.medida230 ? null : diasRestantes(prazoMedida70e230(o));
+  if(tipo === 'med280') return o.medida280 ? null : diasRestantes(prazoMedida280(o));
+  return null;
+}
+
+// Retorna classe de cor baseada nos dias restantes
+function corPrazo(dias, threshold={ ok:15, warn:5 }){
+  if(dias === null) return null; // já tem a data
+  if(dias < 0)                   return { cor:'#6B7280', bg:'rgba(107,114,128,.15)', label:'Vencida há '+Math.abs(dias)+'d' };
+  if(dias === 0)                  return { cor:'#EF4444', bg:'rgba(239,68,68,.18)',   label:'Vence HOJE' };
+  if(dias <= threshold.warn)      return { cor:'#EF4444', bg:'rgba(239,68,68,.15)',   label:dias+'d restantes' };
+  if(dias <= threshold.ok)        return { cor:'#F59E0B', bg:'rgba(245,158,11,.15)', label:dias+'d restantes' };
+  return                               { cor:'#22C55E', bg:'rgba(34,197,94,.12)',    label:dias+'d restantes' };
+}
+
+function celulaPrazo(dias){
+  if(dias === null) return '<span class="chip chip-green" style="font-size:9px">✓</span>';
+  const c = corPrazo(dias);
+  return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;background:${c.bg};color:${c.cor};white-space:nowrap;border:1px solid ${c.cor}33">${c.label}</span>`;
+}
+
+// ── MONITOR DE PRAZOS ─────────────────────────────────────────────────
+function renderMonitorPrazos(list){
+  // Apenas obras que ainda precisam de medidas (não canceladas/paralisadas/encerradas)
+  const ativas = list.filter(o => !o.cancelado && !o.armazenado);
+
+  // Calcula dias para cada medida em cada obra
+  function listaOrdenada(obrasArr, tipo){
+    return obrasArr
+      .map(o => ({ o, dias: diasParaMedida(o, tipo) }))
+      .filter(x => x.dias !== null) // null = já preenchida
+      .sort((a,b) => {
+        if(a.dias < 0 && b.dias >= 0) return -1;
+        if(a.dias >= 0 && b.dias < 0) return 1;
+        return a.dias - b.dias;
+      });
+  }
+
+  // Obras que precisam de Med.70: tem medição, sem med70
+  const sem70  = ativas.filter(o => o.medicao && !o.medida70);
+  // Obras que precisam de Med.230: tem conclusão, sem med230 (prazo = dataLimite)
+  const sem230 = ativas.filter(o => o.conclusao && !o.medida230);
+  // Obras que precisam de Med.280: tem med230, sem med280
+  const sem280 = ativas.filter(o => o.medida230 && !o.medida280);
+
+  const ord70  = listaOrdenada(sem70,  'med70');
+  const ord230 = listaOrdenada(sem230, 'med230');
+  const ord280 = listaOrdenada(sem280, 'med280');
+
+  // Contadores por urgência para cada painel
+  function contadores(lista){
+    const venc  = lista.filter(x => x.dias < 0).length;
+    const hoje  = lista.filter(x => x.dias === 0).length;
+    const urg   = lista.filter(x => x.dias >= 1 && x.dias <= 5).length;
+    const alrt  = lista.filter(x => x.dias >= 6 && x.dias <= 15).length;
+    const ok    = lista.filter(x => x.dias > 15).length;
+    return { venc, hoje, urg, alrt, ok };
+  }
+
+  function renderPainelMonitor(titulo, subtitulo, lista, tipo, corTopo, prazoFn){
+    const cnt = contadores(lista);
+    const totalPend = lista.length;
+    // Mini KPIs
+    const resumo = [
+      cnt.venc  > 0 ? `<span style="color:#6B7280;font-weight:700">${cnt.venc} vencidas</span>` : null,
+      cnt.hoje  > 0 ? `<span style="color:#EF4444;font-weight:700">${cnt.hoje} vencem hoje</span>` : null,
+      cnt.urg   > 0 ? `<span style="color:#EF4444;font-weight:600">${cnt.urg} críticas (≤5d)</span>` : null,
+      cnt.alrt  > 0 ? `<span style="color:#F59E0B;font-weight:600">${cnt.alrt} atenção (6–15d)</span>` : null,
+      cnt.ok    > 0 ? `<span style="color:#22C55E">${cnt.ok} ok (>15d)</span>` : null,
+    ].filter(Boolean).join(' · ');
+
+    // Tabela de obras (máx 10 linhas, ordenadas por urgência)
+    const linhas = lista.slice(0, 10).map(({o, dias}) => {
+      const c = corPrazo(dias);
+      const prazoLim = prazoFn(o);
+      const fc = o.fiscal ? gc(o.fiscal) : 'var(--muted)';
+      return `<tr>
+        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td style="font-size:10px">${o.cidade||'—'}</td>
+        <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
+          <span style="width:5px;height:5px;border-radius:50%;background:${fc};display:inline-block"></span>${o.fiscal||'—'}</span></td>
+        <td style="font-size:10px">${o.empreiteira||'—'}</td>
+        <td style="font-size:10px;color:var(--muted)">${fmt(o.dataLimite)}</td>
+        <td>
+          <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:${c.bg};color:${c.cor};border:1px solid ${c.cor}33;white-space:nowrap">
+            <span style="width:6px;height:6px;border-radius:50%;background:${c.cor};flex-shrink:0"></span>
+            ${c.label}
+          </span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    const maisTxt = lista.length > 10 ? `<tr><td colspan="6" style="text-align:center;font-size:10px;color:var(--muted);padding:8px">… e mais ${lista.length - 10} obras</td></tr>` : '';
+
+    return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;border-top:3px solid ${corTopo}">
+      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:${corTopo}">${titulo}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">${subtitulo}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:${corTopo}">${totalPend}</span>
+            <span style="font-size:10px;color:var(--muted)">obras<br>pendentes</span>
+          </div>
+        </div>
+        ${resumo ? `<div style="font-size:10px;margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">${resumo}</div>` : ''}
+      </div>
+      ${totalPend === 0
+        ? `<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">✅ Todas as obras com ${titulo} em dia!</div>`
+        : `<table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Nº Obra</th>
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Cidade</th>
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Fiscal</th>
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Empreiteira</th>
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Prazo Limite</th>
+              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Situação</th>
+            </tr></thead>
+            <tbody>${linhas}${maisTxt}</tbody>
+          </table>`
+      }
+    </div>`;
+  }
+
+  return `
+    <div class="sect-title" style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+      ⏱️ Monitor de Prazos das Medidas
+      <span style="font-size:9px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">
+        — prazo da execução corre até a Medida 230; encerramento corre até último dia do mês seguinte à Med. 230
+      </span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px;margin-bottom:28px">
+      ${renderPainelMonitor(
+        'Medida 70 pendente',
+        'Prazo limite = Data Limite da obra · Indica: obra liberada dentro/fora do prazo',
+        ord70, 'med70', '#14B8A6',
+        prazoMedida70e230
+      )}
+      ${renderPainelMonitor(
+        'Medida 230 pendente',
+        'Prazo limite = Data Limite da obra · Indica: execução dentro/fora do prazo',
+        ord230, 'med230', '#10B981',
+        prazoMedida70e230
+      )}
+      ${renderPainelMonitor(
+        'Medida 280 pendente',
+        'Prazo limite = último dia do mês seguinte à Med. 230 · Indica: encerramento dentro/fora do prazo',
+        ord280, 'med280', '#22C55E',
+        prazoMedida280
+      )}
+    </div>`;
+}
+
 // ── TABELA HEADERS ────────────────────────────────────
 function buildTableHeader(){
-  const cols=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite','Dias Rest.',
+  const cols=[
+    'Status','Nº','Tipo','Cidade','Empreiteira','Fiscal',
+    'Abertura','Prazo','Data Limite','Dias Exec.',
     'Deslig.','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV',
-    'Medida 70','Medida 230','Medida 280','Armazenado','Ações'];
-  document.getElementById('thRow').innerHTML=cols.map(c=>`<th>${c}</th>`).join('');
+    {label:'Med. 70',tip:'Prazo = Data Limite da obra'},
+    {label:'⏱ Dias p/ Med.70',tip:'Dias restantes até prazo limite da Med. 70'},
+    {label:'Med. 230',tip:'Prazo = Data Limite da obra · Define se execução foi no prazo'},
+    {label:'⏱ Dias p/ Med.230',tip:'Dias restantes até prazo limite da Med. 230'},
+    {label:'Med. 280',tip:'Prazo = último dia mês seguinte à Med. 230'},
+    {label:'⏱ Dias p/ Med.280',tip:'Dias restantes para encerramento'},
+    'Armazenado','Ações'
+  ];
+  document.getElementById('thRow').innerHTML=cols.map(c=>{
+    if(typeof c === 'object') return `<th title="${c.tip}" style="cursor:help;color:#06B6D4">${c.label} ℹ</th>`;
+    return `<th>${c}</th>`;
+  }).join('');
 }
 
 // ── TABELA OBRAS ──────────────────────────────────────
@@ -612,7 +791,7 @@ function renderObras(){
     return true;
   });
   const body=document.getElementById('obrasBody');
-  if(!list.length){ body.innerHTML=`<tr><td colspan="24"><div class="empty"><div class="ico">🏗️</div><p>Nenhuma obra encontrada.</p></div></td></tr>`; return; }
+  if(!list.length){ body.innerHTML=`<tr><td colspan="27"><div class="empty"><div class="ico">🏗️</div><p>Nenhuma obra encontrada.</p></div></td></tr>`; return; }
   body.innerHTML=list.map(o=>{
     const s=statusOf(o), fc=o.fiscal?gc(o.fiscal):'var(--muted)';
     const limDias=diasRestantes(o.dataLimite);
@@ -648,8 +827,11 @@ function renderObras(){
       <td>${o.usc||'—'}</td>
       <td>${o.ulv||'—'}</td>
       <td>${fmt(o.medida70)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med70'))}</td>
       <td>${fmt(o.medida230)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
       <td>${armChip}</td>
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
@@ -1533,8 +1715,11 @@ window.renderObras = function() {
       <td>${o.usc||'—'}</td>
       <td>${o.ulv||'—'}</td>
       <td>${fmt(o.medida70)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med70'))}</td>
       <td>${fmt(o.medida230)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
+      <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
       <td>${armChip}</td>
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
