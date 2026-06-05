@@ -600,6 +600,31 @@ function pendenciaRankingPorEmpreiteira(list){
 }
 
 
+
+// ── USC / ULV PENDENTE (considera medições parciais e final) ──────────
+function calcUSCPendente(obra){
+  const base = parseFloat(obra.usc) || 0;
+  if(!base) return 0;
+  const meds = obra.medicoes || [];
+  if(meds.some(m=>m.tipo==='final')) return 0;
+  const medido = meds.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0), 0);
+  return Math.max(0, base - medido);
+}
+function calcULVPendente(obra){
+  const base = parseFloat(obra.ulv) || 0;
+  if(!base) return 0;
+  const meds = obra.medicoes || [];
+  if(meds.some(m=>m.tipo==='final')) return 0;
+  const medido = meds.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.ulvMedido)||0), 0);
+  return Math.max(0, base - medido);
+}
+function tipoMedicao(obra){
+  const meds = obra.medicoes || [];
+  if(meds.some(m=>m.tipo==='final')) return 'final';
+  if(meds.length > 0) return 'parcial';
+  return null;
+}
+
 // ── HELPERS MONITOR DE PRAZOS ────────────────────────────────────────
 function prazoMedida70e230(o)  { return o.dataLimite || null; }
 function prazoMedida280(o)      { return o.medida230 ? ultimoDiaMesSeginte(o.medida230) : null; }
@@ -682,8 +707,10 @@ function renderMonitorPrazos(list){
       const c = corPrazo(dias);
       const prazoLim = prazoFn(o);
       const fc = o.fiscal ? gc(o.fiscal) : 'var(--muted)';
+      // Color obra number: red=vencida, orange=≤5d, green=>5d
+      const numCor = dias < 0 ? '#EF4444' : dias <= 5 ? '#F97316' : '#22C55E';
       return `<tr>
-        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td><strong style="color:${numCor}">${o.numero||'—'}</strong></td>
         <td style="font-size:10px">${o.cidade||'—'}</td>
         <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
           <span style="width:5px;height:5px;border-radius:50%;background:${fc};display:inline-block"></span>${o.fiscal||'—'}</span></td>
@@ -767,6 +794,7 @@ function buildTableHeader(){
     'Status','Nº','Tipo','Cidade','Empreiteira','Fiscal',
     'Abertura','Prazo','Data Limite','Dias Exec.',
     'Deslig.','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV',
+    {label:'Medição Tipo',tip:'Parcial ou Final — indica o tipo de medição registrado'},
     {label:'Med. 70',tip:'Prazo = Data Limite da obra'},
     {label:'⏱ Dias p/ Med.70',tip:'Dias restantes até prazo limite da Med. 70'},
     {label:'Med. 230',tip:'Prazo = Data Limite da obra · Define se execução foi no prazo'},
@@ -791,7 +819,7 @@ function renderObras(){
     return true;
   });
   const body=document.getElementById('obrasBody');
-  if(!list.length){ body.innerHTML=`<tr><td colspan="27"><div class="empty"><div class="ico">🏗️</div><p>Nenhuma obra encontrada.</p></div></td></tr>`; return; }
+  if(!list.length){ body.innerHTML=`<tr><td colspan="28"><div class="empty"><div class="ico">🏗️</div><p>Nenhuma obra encontrada.</p></div></td></tr>`; return; }
   body.innerHTML=list.map(o=>{
     const s=statusOf(o), fc=o.fiscal?gc(o.fiscal):'var(--muted)';
     const limDias=diasRestantes(o.dataLimite);
@@ -832,6 +860,7 @@ function renderObras(){
       <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
       <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
+      <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
       <td>${armChip}</td>
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
@@ -863,6 +892,10 @@ window.openObraModal=function(obraId){
   const inpFiscal=document.getElementById('oFiscalNome'); if(inpFiscal){ inpFiscal.style.display='none'; inpFiscal.value=''; }
   // reset checkboxes de pendência
   document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
+  // reset medições pendentes
+  _medicoesPendentes=[];
+  // reset oArmazenado to disabled (will be re-enabled by checkArmazenamentoDeps)
+  const armEl=document.getElementById('oArmazenado'); if(armEl) armEl.disabled=true;
 
   // Restrições de data: passado para campos normais, futuro para desligamento
   const hoje_s=hojeStr();
@@ -910,10 +943,20 @@ window.openObraModal=function(obraId){
     setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
     setChk('oContratosAssinado',obra.contratosAssinado); setChk('oMedicoesAssinadas',obra.medicoesAssinadas);
     setChk('oProjetosAsBuilt',obra.projetosAsBuilt); set('oCaixaArmazenada',obra.caixaArmazenada);
+    // Enable oArmazenado if all deps met (delayed to allow DOM update)
+    setTimeout(checkArmazenamentoDeps, 50);
     // Prazo pendência
     if(obra.prazoPendencia){
       const infoPP=document.getElementById('infoPrazoPendencia');
-      if(infoPP){ infoPP.style.display='block'; infoPP.textContent='Prazo limite: '+fmtTxt(obra.prazoPendencia); }
+      if(infoPP){ infoPP.style.display='block'; infoPP.textContent='Prazo: '+(obra.prazoPendenciaLabel||'')+' → '+fmtTxt(obra.prazoPendencia); }
+      // Restore select option
+      const selPP=document.getElementById('oPrazoPendenciaOpcao');
+      const hidLbl=document.getElementById('oPrazoPendenciaLabel');
+      if(selPP&&obra.prazoPendenciaLabel){
+        const map={'Urgente – Imediato (2 dias)':'2','15 dias':'15','30 dias':'30','60 dias':'60'};
+        selPP.value=map[obra.prazoPendenciaLabel]||'';
+        if(hidLbl) hidLbl.value=obra.prazoPendenciaLabel||'';
+      }
     }
     // Fiscal dropdown
     const predFiscais=['Thiago L. Chaves','Jorge','Ezequiel','Marcio','Diego'];
@@ -923,6 +966,8 @@ window.openObraModal=function(obraId){
       if(predFiscais.includes(obra.fiscal)){ selF.value=obra.fiscal; inpF.style.display='none'; }
       else { selF.value='outro'; inpF.style.display='block'; inpF.value=obra.fiscal; }
     }
+    // Render medições list
+    renderListaMedicoes();
     // pendenciaDentroPrazo info
     const infoPP2=document.getElementById('infoPendenciaPrazo');
     if(infoPP2){
@@ -960,10 +1005,11 @@ window.openObraModal=function(obraId){
   document.getElementById('secImpedimento').style.display=p==='empreiteira'?'block':'none';
   document.getElementById('secFisc').style.display=p!=='empreiteira'?'block':'none';
   // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
-  document.getElementById('secDesligData').style.display=p!=='gerente'?'block':(isEdit?'block':'block');
-  ['oDesligamento'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='gerente'; });
+  // Desligamento: gerente, fiscal e empreiteira preenchem; gerente e fiscal confirmam
+  document.getElementById('secDesligData').style.display='block';
+  const desEl2=document.getElementById('oDesligamento'); if(desEl2) desEl2.disabled=false;
   document.getElementById('secDesligConfirm').style.display=
-    (p==='fiscal'&&isEdit&&obra?.dataDesligamento)?'block':'none';
+    (['gerente','fiscal'].includes(p)&&isEdit&&obra?.dataDesligamento)?'block':'none';
   toggleDesligamento();
   // regularização só para empreiteira se tiver pendência não resolvida
   document.getElementById('secRegularizacao').style.display=
@@ -979,24 +1025,37 @@ window.openObraModal=function(obraId){
   document.getElementById('secMedicao').style.display=p!=='empreiteira'?'block':'none';
   document.getElementById('secMedidas').style.display=p!=='empreiteira'?'block':'none';
   // armazenamento só após medida280
+  // Armazenamento: gerente e estagiário veem sempre (isEdit), fiscal só após medida280
   document.getElementById('secArmazenamento').style.display=
-    (['gerente','fiscal','estagiario'].includes(p)&&isEdit&&obra?.medida280)?'block':'none';
+    (isEdit && (['gerente','estagiario'].includes(p) || (p==='fiscal'&&obra?.medida280)))?'block':'none';
   document.getElementById('secCancelamento').style.display=p==='gerente'?'block':'none';
   document.getElementById('secParalisada').style.display=p==='gerente'?'block':'none';
   // cadastro: confirmar disponível se data preenchida
+  // secCadastroConfirm: gerente e genesis
+  const showCadastroConf = ['gerente','genesis'].includes(p);
   document.getElementById('secCadastroConfirm').style.display=
-    (['gerente','fiscal','genesis'].includes(p)&&isEdit&&obra?.dataCadastro)?'block':'none';
-  document.getElementById('oCadastro').addEventListener('change',()=>{
-    document.getElementById('secCadastroConfirm').style.display=
-      document.getElementById('oCadastro').value?'block':'none';
-  });
+    (showCadastroConf && isEdit && obra?.dataCadastro)?'block':'none';
+  // Show when date is filled (remove old listeners by replacing element clone)
+  const cadEl=document.getElementById('oCadastro');
+  if(cadEl){
+    const newCadEl=cadEl.cloneNode(true);
+    cadEl.parentNode.replaceChild(newCadEl, cadEl);
+    newCadEl.addEventListener('change',()=>{
+      if(showCadastroConf)
+        document.getElementById('secCadastroConfirm').style.display=newCadEl.value?'block':'none';
+    });
+  }
 
   // desabilitar campos do outro perfil
   ['oConclusao','oPlacas','oSAP','oSerie','oFabricante','oKaffa'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='fiscal';
   });
-  ['oFiscalizacao','oPrazoPendencia','oMedicao','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
+  ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira';
+  });
+  // Medição: accessible for fiscal, gerente, estagiário
+  ['btnNovaMedicao'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display=(p==='empreiteira')?'none':'inline-flex';
   });
   document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled=p==='empreiteira'; });
 
@@ -1013,6 +1072,8 @@ window.openObraModal=function(obraId){
   document.getElementById('oPrazo').addEventListener('input',atualizarInfoLimite);
   if(isEdit&&obra?.medida230) atualizarInfoMedida280(obra.medida230);
 
+  // Always render medição list (empty for new obra)
+  if(!isEdit) renderListaMedicoes();
   document.getElementById('ovObra').classList.add('open');
 };
 window.closeObraModal=function(){ document.getElementById('ovObra').classList.remove('open'); };
@@ -1072,18 +1133,108 @@ window.toggleFiscalOutro=function(){
 window.calcularPrazoPendencia=function(){
   const sel=document.getElementById('oPrazoPendenciaOpcao');
   const hid=document.getElementById('oPrazoPendencia');
+  const hidLbl=document.getElementById('oPrazoPendenciaLabel');
   const info=document.getElementById('infoPrazoPendencia');
   if(!sel||!hid||!info) return;
   const dias=parseInt(sel.value);
-  if(!dias){ hid.value=''; info.style.display='none'; return; }
-  // Calcular a partir de amanhã
+  if(!dias){ hid.value=''; if(hidLbl) hidLbl.value=''; info.style.display='none'; return; }
   const d=new Date(); d.setDate(d.getDate()+dias);
   const prazo=d.toISOString().split('T')[0];
   hid.value=prazo;
+  const lbl=dias===2?'Urgente – Imediato (2 dias)':dias+' dias';
+  if(hidLbl) hidLbl.value=lbl;
   info.style.display='block';
-  info.textContent='Prazo limite: '+fmtTxt(prazo)+' ('+dias+(dias===2?' dias — Urgente':' dias')+')';
+  info.textContent='Prazo: '+lbl+' → '+fmtTxt(prazo);
 };
 
+
+// ── ARMAZENAMENTO: habilita confirm só se todos deps marcados ─────────
+window.checkArmazenamentoDeps = function(){
+  const deps = ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
+  const allChk = deps.every(id => { const el=document.getElementById(id); return el&&el.checked; });
+  const caixa  = (document.getElementById('oCaixaArmazenada')?.value||'').trim();
+  const final  = document.getElementById('oArmazenado');
+  if(!final) return;
+  final.disabled = !(allChk && caixa);
+  if(final.disabled && final.checked) final.checked = false;
+};
+
+// ── MEDIÇÕES MÚLTIPLAS ────────────────────────────────────────────────
+let _medicoesPendentes = [];
+
+window.abrirNovaMedicao = function(){
+  const obra = obras.find(o=>o.id===document.getElementById('obraId').value);
+  const hasFinal = (obra?.medicoes||[]).concat(_medicoesPendentes).some(m=>m.tipo==='final');
+  if(hasFinal){ toast('Esta obra já possui uma medição final registrada.','warn'); return; }
+  document.getElementById('frmNovaMedicao').style.display='block';
+  document.getElementById('btnNovaMedicao').style.display='none';
+  document.getElementById('oMedicaoData').value='';
+  document.getElementById('oMedicaoTipo').value='';
+  document.getElementById('secMedicaoParcialFields').style.display='none';
+  const d=document.getElementById('oMedicaoData');
+  if(d) d.max=hojeStr();
+};
+window.cancelarNovaMedicao = function(){
+  document.getElementById('frmNovaMedicao').style.display='none';
+  document.getElementById('btnNovaMedicao').style.display='inline-flex';
+};
+window.toggleMedicaoTipo = function(){
+  const tipo=document.getElementById('oMedicaoTipo').value;
+  document.getElementById('secMedicaoParcialFields').style.display=tipo==='parcial'?'block':'none';
+};
+window.adicionarMedicao = function(){
+  const data=document.getElementById('oMedicaoData').value;
+  const tipo=document.getElementById('oMedicaoTipo').value;
+  if(!data||!tipo){ toast('Preencha data e tipo.','err'); return; }
+  if(data>hojeStr()){ toast('Data de medição não pode ser futura.','err'); return; }
+  const med={
+    id:'med_'+Date.now(),
+    data, tipo,
+    uscMedido: tipo==='parcial'?(parseFloat(document.getElementById('oMedicaoUSC').value)||0):0,
+    ulvMedido: tipo==='parcial'?(parseFloat(document.getElementById('oMedicaoULV').value)||0):0,
+  };
+  _medicoesPendentes.push(med);
+  renderListaMedicoes();
+  cancelarNovaMedicao();
+};
+window.removerMedicaoPendente = function(id){
+  _medicoesPendentes=_medicoesPendentes.filter(m=>m.id!==id);
+  renderListaMedicoes();
+};
+function renderListaMedicoes(){
+  const obra=obras.find(o=>o.id===document.getElementById('obraId').value);
+  const existing=obra?.medicoes||[];
+  const all=[...existing,..._medicoesPendentes];
+  const cont=document.getElementById('listaMedicoes');
+  if(!cont) return;
+  if(!all.length){
+    cont.innerHTML='<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhuma medição registrada.</div>';
+    return;
+  }
+  // Calculate pendentes
+  const uscPrev=parseFloat(obra?.usc)||0, ulvPrev=parseFloat(obra?.ulv)||0;
+  const hasFinal=all.some(m=>m.tipo==='final');
+  const uscMedTotal=all.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0),0);
+  const ulvMedTotal=all.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.ulvMedido)||0),0);
+  const uscPend=hasFinal?0:Math.max(0,uscPrev-uscMedTotal);
+  const ulvPend=hasFinal?0:Math.max(0,ulvPrev-ulvMedTotal);
+  const sorted=[...all].sort((a,b)=>a.data>b.data?-1:1);
+  cont.innerHTML=`
+    <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(124,106,247,.1);color:var(--accent3);border:1px solid rgba(124,106,247,.2)">USC previsto: ${uscPrev} | medido: ${uscMedTotal} | <strong>pendente: ${uscPend}</strong></span>
+      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(255,107,53,.1);color:var(--accent2);border:1px solid rgba(255,107,53,.2)">ULV previsto: ${ulvPrev} | medido: ${ulvMedTotal} | <strong>pendente: ${ulvPend}</strong></span>
+    </div>
+    ${sorted.map(m=>{
+      const isPend=_medicoesPendentes.some(p=>p.id===m.id);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${isPend?'rgba(0,229,160,.06)':'var(--surface2)'};border-radius:6px;margin-bottom:5px;border:1px solid ${isPend?'rgba(0,229,160,.2)':'var(--border)'}">
+        <span style="font-size:10px;color:var(--muted);min-width:70px">${fmtTxt(m.data)}</span>
+        <span class="chip ${m.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${m.tipo==='final'?'✓ Final':'~ Parcial'}</span>
+        ${m.tipo==='parcial'?`<span style="font-size:10px;color:var(--muted)">USC: ${m.uscMedido} | ULV: ${m.ulvMedido}</span>`:'<span style="font-size:10px;color:var(--accent)">Encerra a medição</span>'}
+        ${isPend?`<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>
+          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerMedicaoPendente('${m.id}')">✕</button>`:''}
+      </div>`;
+    }).join('')}`;
+}
 window.toggleCancelamento=function(){
   document.getElementById('secCancelamentoDetalhe').style.display=
     document.getElementById('oCancelado').checked?'block':'none';
@@ -1216,7 +1367,7 @@ window.saveObra=async function(){
         kaffa:g('oKaffa'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
+        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
@@ -1243,7 +1394,7 @@ window.saveObra=async function(){
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'),
+        tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
         medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
@@ -1260,7 +1411,9 @@ window.saveObra=async function(){
       patch={ dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'), atualizadaEm:serverTimestamp() };
     }
     if(me.perfil==='estagiario'){
-      patch={ armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
+      const finalCheckEl=document.getElementById('oArmazenado');
+      patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
+        contratosAssinado:gChk('oContratosAssinado'),
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'), atualizadaEm:serverTimestamp() };
     }
@@ -1268,6 +1421,15 @@ window.saveObra=async function(){
     if(isEdit){
       await updateDoc(doc(db,'obras',obraId),patch);
       // disparo de e-mails por evento
+      // Save new medições (append to existing array)
+      if(_medicoesPendentes.length > 0){
+        const existing=obraAntiga?.medicoes||[];
+        patch.medicoes=[...existing,..._medicoesPendentes];
+        // Update medicao date to most recent
+        const allDates=[...patch.medicoes].map(m=>m.data).filter(Boolean).sort();
+        if(allDates.length) patch.medicao=allDates[allDates.length-1];
+        _medicoesPendentes=[];
+      }
       if(me.perfil==='empreiteira'&&!obraAntiga?.conclusao&&patch.conclusao)
         await enviarEmailConclusao({...obraAntiga,...patch});
       if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia)
