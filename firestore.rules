@@ -14,10 +14,10 @@ service cloud.firestore {
       allow create: if request.auth != null && perfil() == 'gerente';
       allow update: if request.auth != null && (
         perfil() == 'gerente' ||
-        (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
-        (perfil() == 'fiscal' && resource.data.fiscal == vinculo()) ||
         perfil() == 'genesis' ||
-        perfil() == 'estagiario'
+        perfil() == 'estagiario' ||
+        (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
+        (perfil() == 'fiscal' && resource.data.fiscal == vinculo())
       );
       allow delete: if request.auth != null && perfil() == 'gerente';
     }
