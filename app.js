@@ -294,7 +294,11 @@ function renderDash(){
     html += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
       <span style="font-size:11px;color:var(--muted)">Visualizando como:</span>
       <button class="btn btn-sm ${dashPerspectiva==='gerente'?'btn-primary':'btn-secondary'}"
-        onclick="setDashPerspectiva('gerente')">👔 Gerente (visão geral)</button>
+        onclick="setDashPerspectiva('gerente')">👔 Gerente</button>
+      <button class="btn btn-sm ${dashPerspectiva==='genesis'?'btn-primary':'btn-secondary'}"
+        onclick="setDashPerspectiva('genesis')" style="font-size:10px">🔷 Genesis</button>
+      <button class="btn btn-sm ${dashPerspectiva==='estagiario'?'btn-primary':'btn-secondary'}"
+        onclick="setDashPerspectiva('estagiario')" style="font-size:10px">🎓 Estagiário</button>
       <select id="selFiscalDash" onchange="setDashPerspectiva('fiscal:'+this.value)"
         style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:'DM Mono',monospace;font-size:11px;">
         <option value="">👷 Ver como Fiscal…</option>
@@ -916,8 +920,14 @@ function buildTableHeader(){
 // ── renderObras ÚNICA — sempre usa aplicarFiltros ────────────────────
 function renderObras(){
   if(!document.getElementById('obrasBody')) return;
-  const list = aplicarFiltros(visibleObras());
-  const ativos = contarFiltrosAtivos() + (window._filtroExtra?1:0);
+  // Apply module-level quick filter first, then form filters
+  let baseList = visibleObras();
+  if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
+  else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
+  else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
+  else if(_filtroRapidoAtivo === 'encerradas')    baseList = baseList.filter(o=>o.armazenado&&o.cadastroConfirmado&&o.medida280);
+  const list = aplicarFiltros(baseList);
+  const ativos = contarFiltrosAtivos() + (_filtroRapidoAtivo?1:0);
   const btnLimpar = document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display = ativos>0?'inline-flex':'none';
   const resumo = document.getElementById('filtrosResumo');
@@ -1185,10 +1195,12 @@ window.openObraModal=function(obraId){
   ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira';
   });
-  // Medição: accessible for fiscal, gerente, estagiário
-  ['btnNovaMedicao'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.style.display=(p==='empreiteira')?'none':'inline-flex';
-  });
+  // Medição: accessible for fiscal, gerente (not empreiteira, not genesis if medição isn't their job)
+  const btnMedEl=document.getElementById('btnNovaMedicao');
+  if(btnMedEl) btnMedEl.style.display=(p==='empreiteira'||isGenesis)?'none':'inline-flex';
+  // Kaffa: accessible for empreiteira and gerente (not fiscal-only)
+  const btnKaffaEl=document.getElementById('btnNovoKaffa');
+  if(btnKaffaEl) btnKaffaEl.style.display=(p==='empreiteira'||p==='gerente')?'inline-flex':'none';
   document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled=p==='empreiteira'; });
 
   // atualiza toggles
@@ -1568,11 +1580,11 @@ window.saveObra=async function(){
     } else if(me.perfil==='empreiteira'){
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
-        kaffa:g('oKaffa'),
         dataDesligamento:g('oDesligamento'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
         atualizadaEm:serverTimestamp()
+        // kaffaEntries added below from _kaffasPendentes
       };
     } else if(me.perfil==='fiscal'){
       patch={
@@ -1618,16 +1630,13 @@ window.saveObra=async function(){
           _medicoesPendentes = [];
         }
       }
-      // Save kaffaEntries (parcial/final)
-      {
+      // Save kaffaEntries (always explicit to avoid data loss)
+      if(_kaffasPendentes.length > 0){
         const existingKaffas = obraAntiga?.kaffaEntries||[];
-        if(_kaffasPendentes.length > 0){
-          const allKaffas = [...existingKaffas, ..._kaffasPendentes];
-          patch.kaffaEntries = allKaffas;
-          const allKDates = allKaffas.map(k=>k.data).filter(Boolean).sort();
-          if(allKDates.length) patch.kaffa = allKDates[allKDates.length-1];
-          _kaffasPendentes = [];
-        }
+        patch.kaffaEntries = [...existingKaffas, ..._kaffasPendentes];
+        const allKDates = patch.kaffaEntries.map(k=>k.data).filter(Boolean).sort();
+        if(allKDates.length) patch.kaffa = allKDates[allKDates.length-1];
+        _kaffasPendentes = [];
       }
       // dataCadastroConfirmado: record timestamp when confirmed
       if(patch.cadastroConfirmado && !obraAntiga?.cadastroConfirmado){
@@ -1969,7 +1978,7 @@ function aplicarFiltros(list) {
   const f = getFiltros();
   const h = hoje();
   return list.filter(o => {
-    if(window._filtroExtra && !window._filtroExtra(o)) return false;
+    // _filtroRapidoAtivo is applied in renderObras before calling aplicarFiltros
     if (f.srch && !(o.numero+o.cidade+o.fiscal+o.empreiteira+o.tipo).toLowerCase().includes(f.srch)) return false;
     if (f.status && statusOf(o) !== f.status) return false;
     if (f.tipo && o.tipo !== f.tipo) return false;
@@ -2001,14 +2010,30 @@ function contarFiltrosAtivos() {
     .filter(Boolean).length;
 }
 
+window.filtroRapido=function(tipo){
+  ['fStatus','fTipo','fEmpreiteira','fFiscal','fCidade','fPendencia',
+   'fAberturaIni','fAberturaFim','fLimiteIni','fLimiteFim','fDiasVencer','fArmazenado','srch']
+    .forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  _filtroRapidoAtivo=tipo;
+  const btnBulk=document.getElementById('btnBulkDelete');
+  if(btnBulk) btnBulk.style.display=(tipo==='encerradas'&&me&&me.perfil==='gerente')?'inline-flex':'none';
+  const btnLimpar=document.getElementById('btnLimparFiltros');
+  if(btnLimpar) btnLimpar.style.display=tipo?'inline-flex':'none';
+  const resumo=document.getElementById('filtrosResumo');
+  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','encerradas':'Encerradas completas'};
+  if(resumo) resumo.textContent=tipo?'Filtro rápido: '+(labels[tipo]||tipo):'';
+  renderObras();
+};
+
 window.limparFiltros = function() {
   ['fStatus','fTipo','fEmpreiteira','fFiscal','fCidade','fPendencia',
    'fAberturaIni','fAberturaFim','fLimiteIni','fLimiteFim','fDiasVencer','fArmazenado','srch']
     .forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
-  window._filtroExtra = null;
+  _filtroRapidoAtivo = null;
   const btnBulk=document.getElementById('btnBulkDelete'); if(btnBulk) btnBulk.style.display='none';
-  document.getElementById('btnLimparFiltros').style.display = 'none';
-  window.renderObras();
+  const btnLimpar=document.getElementById('btnLimparFiltros');
+  if(btnLimpar) btnLimpar.style.display = 'none';
+  renderObras();
 };
 
 // Exportar somente o que está filtrado
@@ -2029,6 +2054,76 @@ window.exportCSVFiltrado = function() {
 };
 
 // renderObras is now consolidated — see function above
+
+
+// ══ EXPORTAR EXCEL ════════════════════════════════════
+const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
+  'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
+  'USC Pendente','ULV Pendente','Med.70','Dias p/70','Med.230','Dias p/230','Med.280','Armazenado',
+  'Cadastro Confirmado','Paralisada','Cancelada'];
+
+function obraParaLinha(o){
+  const d70=diasParaMedida(o,'med70'), d230=diasParaMedida(o,'med230');
+  const statusDias=d=>d===null?'OK':d<0?'VENCIDA HÁ '+Math.abs(d)+'d':d<=5?'CRÍTICO '+d+'d':d<=15?'ATENÇÃO '+d+'d':'OK '+d+'d';
+  const ultimoKaffa=(o.kaffaEntries||[]).slice(-1)[0];
+  return [
+    statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,o.dataAbertura,o.prazoExecucao,o.dataLimite,
+    o.conclusao,o.fiscalizacao,
+    ultimoKaffa?.data||o.kaffa||'', ultimoKaffa?.tipo||'',
+    o.medicao||((o.medicoes||[]).slice(-1)[0]?.data)||'',
+    tipoMedicao(o)||'',
+    o.usc,o.ulv,calcUSCPendente(o).toFixed(1),calcULVPendente(o).toFixed(1),
+    o.medida70,statusDias(d70),o.medida230,statusDias(d230),o.medida280,
+    o.armazenado?'Sim':'Não',o.cadastroConfirmado?'Sim':'Não',
+    o.paralisada?'Sim':'Não',o.cancelado?'Sim':'Não'
+  ];
+}
+
+function exportCSVFallback(list, filename){
+  toast('Exportando como CSV...','warn');
+  const rows=[XLSX_EXPORT_HEADERS,...list.map(obraParaLinha)];
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent('\uFEFF'+rows.map(r=>r.map(v=>v??'').join(';')).join('\n'));
+  a.download=filename; a.click();
+  toast(`${list.length} obras exportadas!`);
+}
+
+function gerarXLSX(list, filename){
+  const XLSXLib = window.XLSX;
+  if(!XLSXLib){
+    exportCSVFallback(list, filename.replace('.xlsx','.csv'));
+    return;
+  }
+  try{
+    const rows=[XLSX_EXPORT_HEADERS,...list.map(obraParaLinha)];
+    const ws=XLSXLib.utils.aoa_to_sheet(rows);
+    ws['!cols']=XLSX_EXPORT_HEADERS.map((_,i)=>{
+      const max=rows.reduce((m,r)=>Math.max(m,String(r[i]||'').length),XLSX_EXPORT_HEADERS[i].length);
+      return {wch:Math.min(max+2,40)};
+    });
+    const wb=XLSXLib.utils.book_new();
+    XLSXLib.utils.book_append_sheet(wb,ws,'Obras');
+    XLSXLib.writeFile(wb,filename);
+    toast(`${list.length} obras exportadas!`);
+  }catch(e){
+    console.error('XLSX error:',e);
+    exportCSVFallback(list, filename.replace('.xlsx','.csv'));
+  }
+}
+
+window.exportXLSX=function(){
+  gerarXLSX(visibleObras(),'obras_track.xlsx');
+};
+window.exportXLSXFiltrado=function(){
+  let base=visibleObras();
+  if(_filtroRapidoAtivo==='sem_medida70')     base=base.filter(o=>o.conclusao&&!o.medida70);
+  else if(_filtroRapidoAtivo==='sem_medida230') base=base.filter(o=>o.conclusao&&!o.medida230);
+  else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
+  else if(_filtroRapidoAtivo==='encerradas')    base=base.filter(o=>o.armazenado&&o.cadastroConfirmado&&o.medida280);
+  gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
+};
+window.exportCSV=window.exportXLSX;
+window.exportCSVFiltrado=window.exportXLSXFiltrado;
 
 // ══════════════════════════════════════════════════════
 //  IMPORTAÇÃO EXCEL
@@ -2072,17 +2167,17 @@ window.closeImportModal = function() { document.getElementById('ovImport').class
 
 // Baixar modelo Excel
 window.downloadModelo = function() {
-  const wb = XLSX.utils.book_new();
+  const wb = (window.XLSX||XLSX).utils.book_new();
   const headers = COLUNAS_SISTEMA.map(c => c.label);
   const exemplo = [
     ['2024-001','R1','Lages','CS ELETRICIDADE','João Silva','2024-01-15','60','10','5','','','','','','','',''],
     ['2024-002','R2','Curitibanos','ELETELSUL','Maria Santos','2024-02-01','45','8','3','','','','','','','',''],
   ];
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...exemplo]);
+  const ws = (window.XLSX||XLSX).utils.aoa_to_sheet([headers, ...exemplo]);
   // Larguras das colunas
   ws['!cols'] = headers.map(() => ({ wch: 18 }));
-  XLSX.utils.book_append_sheet(wb, ws, 'Obras');
-  XLSX.writeFile(wb, 'modelo_obras_track.xlsx');
+  (window.XLSX||XLSX).utils.book_append_sheet(wb, ws, 'Obras');
+  (window.XLSX||XLSX).writeFile(wb, 'modelo_obras_track.xlsx');
 };
 
 // Converter data do Excel para string YYYY-MM-DD
@@ -2115,9 +2210,9 @@ window.handleXlsxUpload = function(input) {
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
-      const wb = XLSX.read(e.target.result, { type:'array', cellDates:false });
+      const wb = (window.XLSX||XLSX).read(e.target.result, { type:'array', cellDates:false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      const rows = (window.XLSX||XLSX).utils.sheet_to_json(ws, { header:1, defval:'' });
       if (rows.length < 2) { toast('Planilha vazia ou sem dados.','err'); return; }
 
       xlsxHeaders = rows[0].map(h => String(h||'').trim());
