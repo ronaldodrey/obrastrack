@@ -17,6 +17,22 @@ const auth   = getAuth(fbApp);
 const auth2  = getAuth(fbApp2);
 const db     = getFirestore(fbApp);
 
+
+// ── GLOBAL ERROR HANDLER ─────────────────────────────
+window.addEventListener('error', e => {
+  console.error('SPCC_ARLAG Error:', e.message, e.filename, e.lineno);
+  const dc = document.getElementById('dashContent');
+  if(dc && dc.innerHTML.includes('Carregando')) {
+    dc.innerHTML = `<div style="padding:24px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#EF4444;font-size:12px">
+      <strong>Erro detectado:</strong> ${e.message} (linha ${e.lineno})<br>
+      <small>Verifique o console do navegador (F12) para detalhes.</small>
+    </div>`;
+  }
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('SPCC_ARLAG Promise Error:', e.reason);
+});
+
 // EmailJS
 try { emailjs.init(EMAILJS_CONFIG.publicKey); } catch(e) { console.warn('EmailJS não configurado'); }
 
@@ -28,6 +44,7 @@ function ini(n){ return n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCas
 
 // ── ESTADO ────────────────────────────────────────────
 let me=null, obras=[], users=[], empreiteiras=[], unsubObras=null;
+let _filtroRapidoAtivo=null; // módulo-level quick filter (not window-scoped)
 
 // ── HELPERS DE DATA ───────────────────────────────────
 function hoje(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
@@ -342,7 +359,12 @@ function renderDash(){
     html += renderDashEstagiario(obras); // estagiário sees ALL obras
   }
 
-  document.getElementById('dashContent').innerHTML = html;
+  try{
+    document.getElementById('dashContent').innerHTML = html;
+  }catch(e){
+    console.error('renderDash error:',e);
+    document.getElementById('dashContent').innerHTML='<div style="padding:20px;color:#EF4444">Erro ao renderizar dashboard: '+e.message+'</div>';
+  }
 }
 
 window.setDashPerspectiva = function(p){
@@ -920,6 +942,7 @@ function buildTableHeader(){
 // ── renderObras ÚNICA — sempre usa aplicarFiltros ────────────────────
 function renderObras(){
   if(!document.getElementById('obrasBody')) return;
+  try{
   // Apply module-level quick filter first, then form filters
   let baseList = visibleObras();
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
@@ -990,6 +1013,7 @@ function renderObras(){
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
   }).join('');
+  }catch(e){ console.error('renderObras error:',e); document.getElementById('obrasBody').innerHTML=`<tr><td colspan="29"><div class="empty"><p style="color:#EF4444">Erro: ${e.message}</p></div></td></tr>`; }
 }
 window.renderObras=renderObras;
 
@@ -1131,43 +1155,69 @@ window.openObraModal=function(obraId){
   const isGenesis   = p==='genesis';
   const isEstagiario= p==='estagiario';
   const isBasico    = isGenesis || isEstagiario;
-  document.getElementById('secIdentif').style.display   = p==='gerente'&&!isBasico?'block':'none';
-  document.getElementById('secExec').style.display      = !isBasico&&p!=='fiscal'?'block':'none';
-  document.getElementById('secTransfView').style.display= (p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
-  document.getElementById('secImpedimento').style.display= (!isBasico&&p==='empreiteira')?'block':'none';
-  document.getElementById('secFisc').style.display      = (!isBasico&&p!=='empreiteira')?'block':'none';
+
+  // For genesis: show ONLY secFisc (for dataCadastro field) and secCadastroConfirm
+  // For estagiário: show ONLY secArmazenamento
+  // For others: normal visibility
+  const allSections = ['secIdentif','secExec','secTransfView','secImpedimento','secFisc',
+    'secRegularizacao','secConfPendencia','secMedicao','secMedidas','secArmazenamento',
+    'secCancelamento','secParalisada','secCadastroConfirm','secDesligData','secDesligConfirm'];
+
+  if(isGenesis){
+    // Genesis: hide ALL sections, show ONLY dataCadastro + secCadastroConfirm
+    allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+    // Show minimal: just the cadastro section inside a clean context
+    const cadConf=document.getElementById('secCadastroConfirm'); if(cadConf) cadConf.style.display='block';
+    // Also expose the dataCadastro field (create a simple wrapper if needed)
+    // Show secFisc but hide everything inside except oCadastro row
+    const secF=document.getElementById('secFisc');
+    if(secF){
+      secF.style.display='block';
+      // Hide everything in secFisc except the cadastro row
+      Array.from(secF.querySelectorAll('.fg,.toggle-row,.sect-title,.modal-note')).forEach(el=>{
+        // Keep only the dataCadastro field
+        const hasOCadastro = el.querySelector && el.querySelector('#oCadastro');
+        if(!hasOCadastro) el.style.display='none';
+      });
+    }
+  } else if(isEstagiario){
+    // Estagiário: hide ALL sections, show ONLY armazenamento
+    allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+    const armEl=document.getElementById('secArmazenamento');
+    if(armEl) armEl.style.display='block';
+    // Reset and enable the armazenamento checkbox
+    setTimeout(checkArmazenamentoDeps, 100);
+    } else {
+    // Normal profiles
+    document.getElementById('secIdentif').style.display   = p==='gerente'?'block':'none';
+    document.getElementById('secExec').style.display      = p!=='fiscal'?'block':'none';
+    document.getElementById('secTransfView').style.display= (p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
+    document.getElementById('secImpedimento').style.display= p==='empreiteira'?'block':'none';
+    document.getElementById('secFisc').style.display      = p!=='empreiteira'?'block':'none';
+  }
   // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
-  // Desligamento: gerente, fiscal e empreiteira preenchem; gerente e fiscal confirmam
-  document.getElementById('secDesligData').style.display='block';
-  const desEl2=document.getElementById('oDesligamento'); if(desEl2) desEl2.disabled=false;
-  document.getElementById('secDesligConfirm').style.display=
-    (['gerente','fiscal'].includes(p)&&isEdit&&obra?.dataDesligamento)?'block':'none';
+  if(!isBasico){ document.getElementById('secDesligData').style.display='block'; const desEl2=document.getElementById('oDesligamento'); if(desEl2) desEl2.disabled=false; document.getElementById('secDesligConfirm').style.display=(['gerente','fiscal'].includes(p)&&isEdit&&obra?.dataDesligamento)?'block':'none'; }
   toggleDesligamento();
   // regularização só para empreiteira se tiver pendência não resolvida
-  document.getElementById('secRegularizacao').style.display=
-    (!isBasico&&p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
+  if(!isBasico) document.getElementById('secRegularizacao').style.display=(p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
   if(obra?.pendencia){
     const tipos=(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
     document.getElementById('msgPendencia').textContent=
       `Pendência registrada: ${tipos||'—'}. Prazo: ${fmtTxt(obra.prazoPendencia)}`;
   }
   // confirmação pendência para fiscal/gerente
-  document.getElementById('secConfPendencia').style.display=
-    (!isBasico&&p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
-  document.getElementById('secMedicao').style.display= (!isBasico&&p!=='empreiteira')?'block':'none';
-  document.getElementById('secMedidas').style.display= (!isBasico&&p!=='empreiteira')?'block':'none';
+  if(!isBasico) document.getElementById('secConfPendencia').style.display=(p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
+  if(!isBasico){ document.getElementById('secMedicao').style.display=p!=='empreiteira'?'block':'none'; document.getElementById('secMedidas').style.display=p!=='empreiteira'?'block':'none'; }
   // armazenamento só após medida280
-  // Armazenamento: gerente e estagiário veem sempre (isEdit), fiscal só após medida280
-  document.getElementById('secArmazenamento').style.display=
-    (isEdit && (['gerente','estagiario'].includes(p) || (p==='fiscal'&&obra?.medida280)))?'block':'none';
+  // Armazenamento (for normal profiles — estagiário handled in isBasico block)
+  if(!isBasico) document.getElementById('secArmazenamento').style.display=(isEdit&&(p==='gerente'||(p==='fiscal'&&obra?.medida280)))?'block':'none';
   // If estagiário, override: disable all non-armazenamento fields
   if(isEstagiario){
     ['oFiscalizacao','oPrazoPendencia','oMedicaoData','oMedida70','oMedida230','oMedida280','oCadastro'].forEach(id=>{
       const el=document.getElementById(id); if(el) el.disabled=true;
     });
   }
-  document.getElementById('secCancelamento').style.display=(p==='gerente'&&!isBasico)?'block':'none';
-  document.getElementById('secParalisada').style.display=(p==='gerente'&&!isBasico)?'block':'none';
+  if(!isBasico){ document.getElementById('secCancelamento').style.display=p==='gerente'?'block':'none'; document.getElementById('secParalisada').style.display=p==='gerente'?'block':'none'; }
   // cadastro: confirmar disponível se data preenchida
   // secCadastroConfirm: gerente e genesis
   const showCadastroConf = ['gerente','genesis'].includes(p);
@@ -1189,12 +1239,8 @@ window.openObraModal=function(obraId){
   }
 
   // desabilitar campos do outro perfil
-  ['oConclusao','oPlacas','oSAP','oSerie','oFabricante','oKaffa'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.disabled=p==='fiscal';
-  });
-  ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira';
-  });
+  if(!isBasico){ ['oConclusao','oPlacas','oSAP','oSerie','oFabricante'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='fiscal'; }); }
+  if(!isBasico){ ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira'; }); }
   // Medição: accessible for fiscal, gerente (not empreiteira, not genesis if medição isn't their job)
   const btnMedEl=document.getElementById('btnNovaMedicao');
   if(btnMedEl) btnMedEl.style.display=(p==='empreiteira'||isGenesis)?'none':'inline-flex';
@@ -1495,57 +1541,47 @@ window.saveObra=async function(){
     const ab=g('oAbertura'), pr=g('oPrazo');
     const dataLimite=ab&&pr?addDias(ab,parseInt(pr)):null;
 
-    // ── VALIDAÇÕES ──────────────────────────────────────
+    // ── VALIDAÇÕES — skip entirely for genesis and estagiário ──
     const erros=[];
+    const skipValidations = ['genesis','estagiario'].includes(me.perfil);
 
-    // Datas não podem ser futuras (exceto desligamento)
-    const datasPassadas=[
-      [g('oAbertura'),'Data de Abertura'],
-      [g('oConclusao'),'Data de Conclusão'],
-      [g('oKaffa'),'Data Kaffa'],
-      [g('oFiscalizacao'),'Data de Fiscalização'],
-      [g('oCadastro'),'Data Envio para Cadastro'],
-      [g('oMedicao'),'Data de Medição'],
-      [g('oMedida70'),'Data Medida 70'],
-      [g('oMedida230'),'Data Medida 230'],
-      [g('oMedida280'),'Data Medida 280'],
-    ];
-    datasPassadas.forEach(([v,l])=>{ const e=validarDataPassada(v,l); if(e) erros.push(e); });
-
-    // Desligamento: presente ou futuro
-    const errDes=validarDataFutura(g('oDesligamento'),'Data de Desligamento');
-    if(errDes) erros.push(errDes);
-
-    // Fiscalização >= Conclusão
-    const concl=g('oConclusao')||(obraAntiga?.conclusao||'');
-    const fisc=g('oFiscalizacao')||(obraAntiga?.fiscalizacao||'');
-    if(fisc&&concl&&fisc<concl) erros.push('Data de Fiscalização não pode ser anterior à Data de Conclusão.');
-
-    // Medição >= Kaffa
-    const kaffa=g('oKaffa')||(obraAntiga?.kaffa||'');
-    const med=g('oMedicao')||(obraAntiga?.medicao||'');
-    if(med&&kaffa&&med<kaffa) erros.push('Data de Medição não pode ser anterior à Data de Kaffa.');
-
-    // Conclusão obriga placa/SAP/série/fabricante (empreiteira)
-    if(me.perfil!=='fiscal'&&g('oConclusao')){
-      if(!g('oPlacas')) erros.push('Informe as Placas Instaladas para registrar a conclusão.');
-      if(!g('oSAP'))    erros.push('Informe o Nº SAP do Transformador para registrar a conclusão.');
-      if(!g('oSerie'))  erros.push('Informe o Nº Série do Transformador para registrar a conclusão.');
-      if(!g('oFabricante')) erros.push('Informe o Fabricante do Transformador para registrar a conclusão.');
+    if(!skipValidations){
+      // Datas não podem ser futuras (exceto desligamento)
+      const datasPassadas=[
+        [g('oAbertura'),'Data de Abertura'],
+        [g('oConclusao'),'Data de Conclusão'],
+        [g('oFiscalizacao'),'Data de Fiscalização'],
+        [g('oCadastro'),'Data Envio para Cadastro'],
+        [g('oMedicao'),'Data de Medição'],
+        [g('oMedida70'),'Data Medida 70'],
+        [g('oMedida230'),'Data Medida 230'],
+        [g('oMedida280'),'Data Medida 280'],
+      ];
+      datasPassadas.forEach(([v,l])=>{ const e=validarDataPassada(v,l); if(e) erros.push(e); });
+      const errDes=validarDataFutura(g('oDesligamento'),'Data de Desligamento');
+      if(errDes) erros.push(errDes);
+      const concl=g('oConclusao')||(obraAntiga?.conclusao||'');
+      const fisc=g('oFiscalizacao')||(obraAntiga?.fiscalizacao||'');
+      if(fisc&&concl&&fisc<concl) erros.push('Fiscalização não pode ser anterior à Conclusão.');
+      const kaffa=g('oKaffa')||(obraAntiga?.kaffa||'');
+      const med=g('oMedicao')||(obraAntiga?.medicao||'');
+      if(med&&kaffa&&med<kaffa) erros.push('Medição não pode ser anterior ao Kaffa.');
+      if(me.perfil!=='fiscal'&&g('oConclusao')){
+        if(!g('oPlacas')) erros.push('Informe as Placas Instaladas.');
+        if(!g('oSAP'))    erros.push('Informe o Nº SAP do Transformador.');
+        if(!g('oSerie'))  erros.push('Informe o Nº Série do Transformador.');
+        if(!g('oFabricante')) erros.push('Informe o Fabricante.');
+      }
+      const med230=g('oMedida230')||(obraAntiga?.medida230||'');
+      if(g('oMedida280')&&!med230) erros.push('Medida 280 só pode ser preenchida após a Medida 230.');
+      if(g('oRegularizacao')&&g('oRegularizacao')>hojeStr())
+        erros.push('Data de Regularização não pode ser futura.');
     }
-
-    // Medida 280 só após medida 230
-    const med230=g('oMedida230')||(obraAntiga?.medida230||'');
-    if(g('oMedida280')&&!med230) erros.push('Medida 280 só pode ser preenchida após a Medida 230.');
-
-    // Regularização da pendência não pode ser futura
-    if(g('oRegularizacao')&&g('oRegularizacao')>hojeStr())
-      erros.push('Data de Regularização da Pendência não pode ser futura.');
 
     if(erros.length){ toast(erros[0],'err'); return; }
 
-    // Verificar número de obra duplicado (apenas na criação)
-    if(!isEdit){
+    // Verificar número de obra duplicado (apenas na criação, não para genesis/estagiario)
+    if(!isEdit&&!skipValidations){
       const numero=g('oNum').trim();
       if(numero && obras.some(o=>o.numero===numero)){
         toast(`Obra ${numero} já existe no sistema!`,'err'); return;
