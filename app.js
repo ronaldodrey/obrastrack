@@ -480,7 +480,7 @@ function renderDashFiscal(list, meuNome){
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
   const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
   const tempoFisc = avgDiff(minhas,'conclusao','fiscalizacao');
-  const tempoMed = avgDiff(minhas,'kaffa','medicao');
+  const tempoMed = avgDiffKaffaMedicao(minhas); // pareia kaffa parcial/final com medição parcial/final
   const tempoCad = avgDiff(minhas,'fiscalizacao','dataCadastro');
   let html = `<div class="kpi-strip">
     ${kpiCard('Obras',minhas.length,'atribuídas','#00e5a0')}
@@ -507,10 +507,10 @@ function renderDashFiscal(list, meuNome){
 function renderDashEmpreiteira(minhas){
   const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
   const ulvTotal = minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-  const aguardKaffa = minhas.filter(o=>o.conclusao&&!o.kaffa);
+  const aguardKaffa = minhas.filter(o=>o.conclusao&&!(o.kaffaEntries||[]).some(k=>k.tipo==='final')); // aguarda kaffa FINAL
   const aguardMed = minhas.filter(o=>o.kaffa&&!o.medicao);
   const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
-  const tempoKaffa = avgDiff(minhas,'conclusao','kaffa');
+  const tempoKaffa = avgDiffConclusaoKaffaFinal(minhas); // só kaffa FINAL conta para este KPI
   const tempoReg = avgDiff(minhas.filter(o=>o.pendencia&&o.regularizacaoData),'prazoPendencia','regularizacaoData');
 
   // Estatística: tempo médio para informar conclusão por prazo
@@ -652,6 +652,48 @@ function kpiCard(lbl,val,sub,cor){
     <div class="kpi-sub">${sub}</div>
   </div>`;
 }
+
+// ── KPI: tempo médio kaffa parcial/final → medição parcial/final ──────
+// Faz pareamento individual: kaffa_parcial[0]→med_parcial[0], kaffa_final→med_final
+function avgDiffKaffaMedicao(list){
+  const allDiffs = [];
+  list.forEach(o => {
+    const kaffas  = (o.kaffaEntries||[]).slice().sort((a,b)=>a.data>b.data?1:-1);
+    const meds    = (o.medicoes||[]).slice().sort((a,b)=>a.data>b.data?1:-1);
+    if(!kaffas.length || !meds.length) return;
+
+    // Parear parciais em ordem cronológica
+    const kParciais = kaffas.filter(k=>k.tipo==='parcial');
+    const mParciais = meds.filter(m=>m.tipo==='parcial');
+    const nParciais = Math.min(kParciais.length, mParciais.length);
+    for(let i=0;i<nParciais;i++){
+      const d=diff(kParciais[i].data, mParciais[i].data);
+      if(d!==null && d>=0) allDiffs.push(d);
+    }
+
+    // Parear kaffa final → medição final
+    const kFinal = kaffas.find(k=>k.tipo==='final');
+    const mFinal = meds.find(m=>m.tipo==='final');
+    if(kFinal && mFinal){
+      const d=diff(kFinal.data, mFinal.data);
+      if(d!==null && d>=0) allDiffs.push(d);
+    }
+  });
+  return allDiffs.length ? Math.round(allDiffs.reduce((a,b)=>a+b,0)/allDiffs.length) : null;
+}
+
+// ── KPI: tempo conclusão → kaffa FINAL (exclui parciais) ──────────────
+function avgDiffConclusaoKaffaFinal(list){
+  const vals = list
+    .filter(o => o.conclusao && o.kaffaEntries?.some(k=>k.tipo==='final'))
+    .map(o => {
+      const kFinal = (o.kaffaEntries||[]).find(k=>k.tipo==='final');
+      return diff(o.conclusao, kFinal?.data);
+    })
+    .filter(v=>v!==null && v>=0);
+  return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : null;
+}
+
 function avgDiff(list,a,b){
   const vals=list.map(o=>diff(o[a],o[b])).filter(v=>v!==null);
   return vals.length? Math.round(vals.reduce((x,y)=>x+y,0)/vals.length) : null;
@@ -666,10 +708,17 @@ function velCards(list){
     if(df!==null) f.df.push(df); if(dk!==null) f.dk.push(dk);
     if(dm!==null) f.dm.push(dm); if(dc!==null) f.dc.push(dc);
   });
+  // Use pair-matched kaffa→medição for each fiscal
+  const kafMedMap={};
+  list.forEach(o=>{
+    if(!o.fiscal) return;
+    if(!kafMedMap[o.fiscal]) kafMedMap[o.fiscal]=[];
+    kafMedMap[o.fiscal].push(o);
+  });
   const avg=a=>a.length?Math.round(a.reduce((x,y)=>x+y,0)/a.length):null;
   const bar=v=>v===null?0:Math.min(100,Math.round((v/30)*100));
   return Object.entries(fis).sort().map(([name,d])=>{
-    const c=gc(name),af=avg(d.df),ak=avg(d.dk),am=avg(d.dm),ac=avg(d.dc);
+    const c=gc(name),af=avg(d.df),ak=avg(d.dk),am=avgDiffKaffaMedicao(kafMedMap[name]||[]),ac=avg(d.dc);
     return `<div class="vel-card">
       <div class="vc-hd"><div class="avatar" style="background:${c}22;color:${c}">${ini(name)}</div>
       <div><div class="vc-name">${name}</div><div class="vc-ct">${d.t} obras</div></div></div>
@@ -725,6 +774,9 @@ function calcUSCPendente(obra){
   if(!base) return 0;
   const meds = obra.medicoes || [];
   if(meds.some(m=>m.tipo==='final')) return 0;
+  // Se gerente informou USC medido, usa esse valor prioritariamente
+  if(obra.uscMedidoGerente != null) return Math.max(0, base - (parseFloat(obra.uscMedidoGerente)||0));
+  // Fallback: soma uscMedido das parciais (legado)
   const medido = meds.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0), 0);
   return Math.max(0, base - medido);
 }
@@ -733,6 +785,8 @@ function calcULVPendente(obra){
   if(!base) return 0;
   const meds = obra.medicoes || [];
   if(meds.some(m=>m.tipo==='final')) return 0;
+  // Se gerente informou ULV medido, usa esse valor prioritariamente
+  if(obra.ulvMedidoGerente != null) return Math.max(0, base - (parseFloat(obra.ulvMedidoGerente)||0));
   const medido = meds.filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.ulvMedido)||0), 0);
   return Math.max(0, base - medido);
 }
@@ -1092,6 +1146,11 @@ window.openObraModal=function(obraId){
     setChk('oTemImpedimento',obra.impedimento); setChk('oTemPendencia',obra.pendencia);
     setChk('oPendenciaResolvida',obra.pendenciaResolvida); setChk('oArmazenado',obra.armazenado);
     setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
+    // Restore USC/ULV medido gerente
+    const uscMedEl=document.getElementById('oUSCMedidoGerente');
+    const ulvMedEl=document.getElementById('oULVMedidoGerente');
+    if(uscMedEl) uscMedEl.value=obra.uscMedidoGerente!=null?obra.uscMedidoGerente:'';
+    if(ulvMedEl) ulvMedEl.value=obra.ulvMedidoGerente!=null?obra.ulvMedidoGerente:'';
     setChk('oContratosAssinado',obra.contratosAssinado); setChk('oMedicoesAssinadas',obra.medicoesAssinadas);
     setChk('oProjetosAsBuilt',obra.projetosAsBuilt); set('oCaixaArmazenada',obra.caixaArmazenada);
     // Enable oArmazenado if all deps met (delayed to allow DOM update)
@@ -1177,7 +1236,13 @@ window.openObraModal=function(obraId){
   } else {
     // Perfis normais: gerente, fiscal, empreiteira
 
-    if(p === 'gerente')     showSec('secIdentif');
+    if(p === 'gerente'){
+      showSec('secIdentif');
+      // Show USC/ULV medido field only for gerente when there are partial medicoes
+      const hasMedicoes=(obraAntiga?.medicoes||[]).length > 0;
+      const secUscEl=document.getElementById('secUSCMedidoGerente');
+      if(secUscEl) secUscEl.style.display=hasMedicoes?'grid':'none';
+    }
     if(p !== 'fiscal')      showSec('secExec');
     if(p === 'fiscal' && isEdit && obra?.conclusao) showSec('secTransfView');
     if(p === 'empreiteira') showSec('secImpedimento');
@@ -1438,8 +1503,9 @@ window.adicionarMedicao = function(){
   const med={
     id:'med_'+Date.now(),
     data, tipo,
-    uscMedido: tipo==='parcial'?(parseFloat(document.getElementById('oMedicaoUSC').value)||0):0,
-    ulvMedido: tipo==='parcial'?(parseFloat(document.getElementById('oMedicaoULV').value)||0):0,
+    // USC/ULV é definido pelo gerente no campo da obra, não no lançamento da medição
+    uscMedido: 0,
+    ulvMedido: 0,
   };
   _medicoesPendentes.push(med);
   renderListaMedicoes();
@@ -1469,15 +1535,15 @@ function renderListaMedicoes(){
   const sorted=[...all].sort((a,b)=>a.data>b.data?-1:1);
   cont.innerHTML=`
     <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(124,106,247,.1);color:var(--accent3);border:1px solid rgba(124,106,247,.2)">USC previsto: ${uscPrev} | medido: ${uscMedTotal} | <strong>pendente: ${uscPend}</strong></span>
-      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(255,107,53,.1);color:var(--accent2);border:1px solid rgba(255,107,53,.2)">ULV previsto: ${ulvPrev} | medido: ${ulvMedTotal} | <strong>pendente: ${ulvPend}</strong></span>
+      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(124,106,247,.1);color:var(--accent3);border:1px solid rgba(124,106,247,.2)">USC previsto: ${uscPrev} | <strong>pendente estimado: ${uscPend}</strong>${obra?.uscMedidoGerente!=null?' (definido pelo gerente)':''}</span>
+      <span style="font-size:10px;padding:3px 9px;border-radius:4px;background:rgba(255,107,53,.1);color:var(--accent2);border:1px solid rgba(255,107,53,.2)">ULV previsto: ${ulvPrev} | <strong>pendente estimado: ${ulvPend}</strong>${obra?.ulvMedidoGerente!=null?' (definido pelo gerente)':''}</span>
     </div>
     ${sorted.map(m=>{
       const isPend=_medicoesPendentes.some(p=>p.id===m.id);
       return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${isPend?'rgba(0,229,160,.06)':'var(--surface2)'};border-radius:6px;margin-bottom:5px;border:1px solid ${isPend?'rgba(0,229,160,.2)':'var(--border)'}">
         <span style="font-size:10px;color:var(--muted);min-width:70px">${fmtTxt(m.data)}</span>
         <span class="chip ${m.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${m.tipo==='final'?'✓ Final':'~ Parcial'}</span>
-        ${m.tipo==='parcial'?`<span style="font-size:10px;color:var(--muted)">USC: ${m.uscMedido} | ULV: ${m.ulvMedido}</span>`:'<span style="font-size:10px;color:var(--accent)">Encerra a medição</span>'}
+        ${m.tipo==='final'?'<span style="font-size:10px;color:var(--accent)">Encerra a medição</span>':'<span style="font-size:10px;color:var(--muted)">Parcial</span>'}
         ${isPend?`<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>
           <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerMedicaoPendente('${m.id}')">✕</button>`:''}
       </div>`;
@@ -1570,7 +1636,8 @@ window.saveObra=async function(){
       const kaffa=g('oKaffa')||(obraAntiga?.kaffa||'');
       const med=g('oMedicao')||(obraAntiga?.medicao||'');
       if(med&&kaffa&&med<kaffa) erros.push('Medição não pode ser anterior ao Kaffa.');
-      if(me.perfil!=='fiscal'&&g('oConclusao')){
+      // Conclusão: só empreiteira precisa preencher placas/SAP
+      if(me.perfil==='empreiteira'&&g('oConclusao')){
         if(!g('oPlacas')) erros.push('Informe as Placas Instaladas.');
         if(!g('oSAP'))    erros.push('Informe o Nº SAP do Transformador.');
         if(!g('oSerie'))  erros.push('Informe o Nº Série do Transformador.');
@@ -1594,21 +1661,33 @@ window.saveObra=async function(){
 
     let patch={};
     if(me.perfil==='gerente'){
+      // Build kaffaEntries and medicoes inline (same pattern as empreiteira/fiscal)
+      const existingKaffasG = obraAntiga?.kaffaEntries||[];
+      const allKaffasG = [...existingKaffasG, ..._kaffasPendentes];
+      const lastKaffaG = allKaffasG.map(k=>k.data).filter(Boolean).sort().slice(-1)[0] || obraAntiga?.kaffa || '';
+      const existingMedsG = obraAntiga?.medicoes||[];
+      const allMedsG = [...existingMedsG, ..._medicoesPendentes];
+      const lastMedG = allMedsG.map(m=>m.data).filter(Boolean).sort().slice(-1)[0] || obraAntiga?.medicao || '';
       patch={
         numero:g('oNum'), tipo:g('oTipo'), cidade:g('oCidade'), empreiteira:g('oEmp'),
         fiscal:g('oFiscalNome'), dataAbertura:ab, prazoExecucao:pr?parseInt(pr):null,
         dataLimite, usc:g('oUSC')?parseFloat(g('oUSC')):null, ulv:g('oULV')?parseFloat(g('oULV')):null,
+        uscMedidoGerente:g('oUSCMedidoGerente')?parseFloat(g('oUSCMedidoGerente')):null,
+        ulvMedidoGerente:g('oULVMedidoGerente')?parseFloat(g('oULVMedidoGerente')):null,
         dataDesligamento:g('oDesligamento'),
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
-        kaffa:g('oKaffa'),
+        kaffaEntries: allKaffasG,
+        kaffa: lastKaffaG,
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
-        medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
+        medicoes: allMedsG,
+        medicao: lastMedG,
+        medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
         armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
@@ -1617,6 +1696,8 @@ window.saveObra=async function(){
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
         atualizadaEm:serverTimestamp()
       };
+      if(_kaffasPendentes.length>0)  _kaffasPendentes=[];
+      if(_medicoesPendentes.length>0) _medicoesPendentes=[];
     } else if(me.perfil==='empreiteira'){
       // Build kaffaEntries right here for empreiteira
       const existingKaffasEmp = obraAntiga?.kaffaEntries||[];
@@ -2126,14 +2207,16 @@ function obraParaLinha(o){
   const d70=diasParaMedida(o,'med70'), d230=diasParaMedida(o,'med230');
   const statusDias=d=>d===null?'OK':d<0?'VENCIDA HÁ '+Math.abs(d)+'d':d<=5?'CRÍTICO '+d+'d':d<=15?'ATENÇÃO '+d+'d':'OK '+d+'d';
   const ultimoKaffa=(o.kaffaEntries||[]).slice(-1)[0];
+  // Datas em DD/MM/YYYY para o Excel
+  const xd=s=>fmtTxt(s)||'';
   return [
-    statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,o.dataAbertura,o.prazoExecucao,o.dataLimite,
-    o.conclusao,o.fiscalizacao,
-    ultimoKaffa?.data||o.kaffa||'', ultimoKaffa?.tipo||'',
-    o.medicao||((o.medicoes||[]).slice(-1)[0]?.data)||'',
+    statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,xd(o.dataAbertura),o.prazoExecucao,xd(o.dataLimite),
+    xd(o.conclusao),xd(o.fiscalizacao),
+    xd(ultimoKaffa?.data||o.kaffa||''), ultimoKaffa?.tipo||'',
+    xd(o.medicao||((o.medicoes||[]).slice(-1)[0]?.data)||''),
     tipoMedicao(o)||'',
     o.usc,o.ulv,calcUSCPendente(o).toFixed(1),calcULVPendente(o).toFixed(1),
-    o.medida70,statusDias(d70),o.medida230,statusDias(d230),o.medida280,
+    xd(o.medida70),statusDias(d70),xd(o.medida230),statusDias(d230),xd(o.medida280),
     o.armazenado?'Sim':'Não',o.cadastroConfirmado?'Sim':'Não',
     o.paralisada?'Sim':'Não',o.cancelado?'Sim':'Não'
   ];
@@ -2186,6 +2269,34 @@ window.exportCSV=window.exportXLSX;
 window.exportCSVFiltrado=window.exportXLSXFiltrado;
 
 // ══════════════════════════════════════════════════════
+
+// Converte DD/MM/YYYY → YYYY-MM-DD (para importação de Excel)
+function parseDateBR(s){
+  if(!s) return '';
+  s=String(s).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s; // já está no formato correto
+  const m=s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return s;
+}
+
+
+window.bulkDeleteEncerradas=async function(){
+  const list=visibleObras().filter(o=>o.armazenado);
+  if(!list.length){ toast('Nenhuma obra encerrada encontrada.','warn'); return; }
+  if(!confirm('⚠️ Excluir permanentemente '+list.length+' obras encerradas?\nEsta ação NÃO pode ser desfeita.')) return;
+  const btn=document.getElementById('btnBulkDelete');
+  if(btn){ btn.disabled=true; btn.textContent='Excluindo…'; }
+  let count=0, err=0;
+  for(const o of list){
+    try{ await deleteDoc(doc(db,'obras',o.id)); count++; }
+    catch(e){ console.error('Erro:',o.numero,e.message); err++; }
+  }
+  if(btn){ btn.disabled=false; btn.textContent='🗑️ Excluir seleção'; btn.style.display='none'; }
+  _filtroRapidoAtivo=null;
+  toast(err ? count+'excluídas, '+err+' com erro.':'✓ '+count+' obras excluídas.',(err?'warn':'warn'));
+};
+
 //  IMPORTAÇÃO EXCEL
 // ══════════════════════════════════════════════════════
 
