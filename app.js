@@ -1152,91 +1152,106 @@ window.openObraModal=function(obraId){
   const p=me.perfil;
   // Genesis: só mostra seção de cadastro
   // Estagiário: só mostra seção de armazenamento
-  const isGenesis   = p==='genesis';
-  const isEstagiario= p==='estagiario';
-  const isBasico    = isGenesis || isEstagiario;
+  // ── VISIBILIDADE POR PERFIL (reescrito limpo) ────────────────────
+  const isGenesis    = p === 'genesis';
+  const isEstagiario = p === 'estagiario';
+  const isBasico     = isGenesis || isEstagiario;
 
-  // For genesis: show ONLY secFisc (for dataCadastro field) and secCadastroConfirm
-  // For estagiário: show ONLY secArmazenamento
-  // For others: normal visibility
-  const allSections = ['secIdentif','secExec','secTransfView','secImpedimento','secFisc',
-    'secCadastro','secRegularizacao','secConfPendencia','secMedicao','secMedidas','secArmazenamento',
-    'secCancelamento','secParalisada','secCadastroConfirm','secDesligData','secDesligConfirm'];
+  // 1. Ocultar TODAS as modal-section via querySelectorAll (robusto, não depende de lista)
+  document.querySelectorAll('.modal-section').forEach(el => { el.style.display = 'none'; });
+
+  // 2. Mostrar só o que cada perfil precisa
+  function showSec(id){ const el=document.getElementById(id); if(el) el.style.display='block'; }
 
   if(isGenesis){
-    // Genesis: hide ALL sections, then show ONLY secCadastro
-    allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-    const secCad=document.getElementById('secCadastro'); if(secCad) secCad.style.display='block';
-    const secConf=document.getElementById('secCadastroConfirm'); if(secConf) secConf.style.display='block';
+    // Genesis: SOMENTE secCadastro (data envio + toggle confirmação)
+    showSec('secCadastro');
+    // Toggle de confirmação só aparece se já existe dataCadastro
+    if(obra?.dataCadastro) showSec('secCadastroConfirm');
+
   } else if(isEstagiario){
-    // Estagiário: hide ALL sections, show ONLY secArmazenamento
-    allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-    const armEl=document.getElementById('secArmazenamento'); if(armEl) armEl.style.display='block';
+    // Estagiário: SOMENTE secArmazenamento
+    showSec('secArmazenamento');
     setTimeout(checkArmazenamentoDeps, 100);
-    } else {
-    // Normal profiles
-    document.getElementById('secIdentif').style.display   = p==='gerente'?'block':'none';
-    document.getElementById('secExec').style.display      = p!=='fiscal'?'block':'none';
-    document.getElementById('secTransfView').style.display= (p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
-    document.getElementById('secImpedimento').style.display= p==='empreiteira'?'block':'none';
-    document.getElementById('secFisc').style.display      = p!=='empreiteira'?'block':'none';
-    // secCadastro: gerente and fiscal (NOT empreiteira)
-    document.getElementById('secCadastro').style.display  = p!=='empreiteira'?'block':'none';
-  }
-  // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
-  if(!isBasico){ document.getElementById('secDesligData').style.display='block'; const desEl2=document.getElementById('oDesligamento'); if(desEl2) desEl2.disabled=false; document.getElementById('secDesligConfirm').style.display=(['gerente','fiscal'].includes(p)&&isEdit&&obra?.dataDesligamento)?'block':'none'; }
-  toggleDesligamento();
-  // regularização só para empreiteira se tiver pendência não resolvida
-  if(!isBasico) document.getElementById('secRegularizacao').style.display=(p==='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
-  if(obra?.pendencia){
-    const tipos=(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
-    document.getElementById('msgPendencia').textContent=
-      `Pendência registrada: ${tipos||'—'}. Prazo: ${fmtTxt(obra.prazoPendencia)}`;
-  }
-  // confirmação pendência para fiscal/gerente
-  if(!isBasico) document.getElementById('secConfPendencia').style.display=(p!=='empreiteira'&&isEdit&&obra?.pendencia&&!obra?.pendenciaResolvida)?'block':'none';
-  if(!isBasico){ document.getElementById('secMedicao').style.display=p!=='empreiteira'?'block':'none'; document.getElementById('secMedidas').style.display=p!=='empreiteira'?'block':'none'; }
-  // armazenamento só após medida280
-  // Armazenamento (for normal profiles — estagiário handled in isBasico block)
-  if(!isBasico) document.getElementById('secArmazenamento').style.display=(isEdit&&(p==='gerente'||(p==='fiscal'&&obra?.medida280)))?'block':'none';
-  // If estagiário, override: disable all non-armazenamento fields
-  if(isEstagiario){
-    ['oFiscalizacao','oPrazoPendencia','oMedicaoData','oMedida70','oMedida230','oMedida280','oCadastro'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.disabled=true;
-    });
-  }
-  if(!isBasico){ document.getElementById('secCancelamento').style.display=p==='gerente'?'block':'none'; document.getElementById('secParalisada').style.display=p==='gerente'?'block':'none'; }
-  // cadastro: confirmar disponível se data preenchida
-  // secCadastroConfirm: gerente e genesis
-  const showCadastroConf = ['gerente','genesis'].includes(p);
-  // Genesis always sees the cadastro section to confirm
-  document.getElementById('secCadastroConfirm').style.display=
-    (showCadastroConf && isEdit)?'block':'none';
-  // Genesis: also show dataCadastro field
-  const secFiscEl=document.getElementById('secFisc');
-  if(isGenesis && secFiscEl) secFiscEl.style.display='block';
-  // secCadastroConfirm shown when dataCadastro is filled
-  const cadEl=document.getElementById('oCadastro');
-  if(cadEl){
-    const newCadEl=cadEl.cloneNode(true);
-    cadEl.parentNode.replaceChild(newCadEl, cadEl);
-    newCadEl.addEventListener('change',()=>{
-      document.getElementById('secCadastroConfirm').style.display=newCadEl.value?'block':'none';
-    });
-    // Show now if already has value
-    document.getElementById('secCadastroConfirm').style.display=cadEl.value?'block':'none';
+
+  } else {
+    // Perfis normais: gerente, fiscal, empreiteira
+
+    if(p === 'gerente')     showSec('secIdentif');
+    if(p !== 'fiscal')      showSec('secExec');
+    if(p === 'fiscal' && isEdit && obra?.conclusao) showSec('secTransfView');
+    if(p === 'empreiteira') showSec('secImpedimento');
+
+    // Fiscalização: só fiscal e gerente
+    if(p === 'fiscal' || p === 'gerente') showSec('secFisc');
+
+    // Desligamento: fiscal, empreiteira e gerente preenchem a data
+    if(p !== 'gerente' || true) showSec('secDesligData'); // todos veem
+    if(['gerente','fiscal'].includes(p) && isEdit && obra?.dataDesligamento) showSec('secDesligConfirm');
+    toggleDesligamento();
+
+    // Cadastro (data de envio): fiscal e gerente preenchem
+    if(p === 'fiscal' || p === 'gerente') showSec('secCadastro');
+
+    // Confirmação de cadastro: SOMENTE gerente (genesis tratado acima)
+    if(p === 'gerente' && isEdit && obra?.dataCadastro) showSec('secCadastroConfirm');
+
+    // Pendência
+    if(p === 'empreiteira' && isEdit && obra?.pendencia && !obra?.pendenciaResolvida) showSec('secRegularizacao');
+    if(p !== 'empreiteira' && isEdit && obra?.pendencia && !obra?.pendenciaResolvida)  showSec('secConfPendencia');
+
+    // Medições e medidas: fiscal e gerente
+    if(p !== 'empreiteira'){ showSec('secMedicao'); showSec('secMedidas'); }
+
+    // Armazenamento: gerente sempre; fiscal após Med.280
+    if(p === 'gerente' && isEdit) showSec('secArmazenamento');
+    if(p === 'fiscal' && isEdit && obra?.medida280) showSec('secArmazenamento');
+
+    // Cancelamento e paralização: somente gerente
+    if(p === 'gerente'){ showSec('secCancelamento'); showSec('secParalisada'); }
   }
 
-  // desabilitar campos do outro perfil
-  if(!isBasico){ ['oConclusao','oPlacas','oSAP','oSerie','oFabricante'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='fiscal'; }); }
-  if(!isBasico){ ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=p==='empreiteira'; }); }
-  // Medição: accessible for fiscal, gerente (not empreiteira, not genesis if medição isn't their job)
-  const btnMedEl=document.getElementById('btnNovaMedicao');
-  if(btnMedEl) btnMedEl.style.display=(p==='empreiteira'||isGenesis)?'none':'inline-flex';
-  // Kaffa: accessible for empreiteira and gerente (not fiscal-only)
-  const btnKaffaEl=document.getElementById('btnNovoKaffa');
-  if(btnKaffaEl) btnKaffaEl.style.display=(p==='empreiteira'||p==='gerente')?'inline-flex':'none';
-  document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled=p==='empreiteira'; });
+  // 3. Habilitar/desabilitar campos por perfil
+  if(!isBasico){
+    // Empreiteira não edita campos fiscais
+    ['oFiscalizacao','oPrazoPendencia','oMedida70','oMedida230','oMedida280','oMedida280Motivo','oCadastro'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.disabled = (p==='empreiteira');
+    });
+    // Fiscal não edita conclusão/dados de execução
+    ['oConclusao','oPlacas','oSAP','oSerie','oFabricante'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.disabled = (p==='fiscal');
+    });
+    // Pendência checkboxes: empreiteira não mexe
+    document.querySelectorAll('.chk-pendencia').forEach(el=>{ el.disabled = (p==='empreiteira'); });
+  }
+
+  // 4. Botões de ação específicos
+  const btnMedEl   = document.getElementById('btnNovaMedicao');
+  const btnKaffaEl = document.getElementById('btnNovoKaffa');
+  if(btnMedEl)   btnMedEl.style.display   = (!isBasico && p !== 'empreiteira') ? 'inline-flex' : 'none';
+  if(btnKaffaEl) btnKaffaEl.style.display = (p === 'empreiteira' || p === 'gerente') ? 'inline-flex' : 'none';
+
+  // 5. Listener do oCadastro para mostrar/ocultar confirmação
+  const cadEl = document.getElementById('oCadastro');
+  if(cadEl){
+    const newCadEl = cadEl.cloneNode(true);
+    cadEl.parentNode.replaceChild(newCadEl, cadEl);
+    newCadEl.addEventListener('change', ()=>{
+      // Confirmação só para gerente e genesis
+      const canConfirm = ['gerente','genesis'].includes(p);
+      document.getElementById('secCadastroConfirm').style.display = (newCadEl.value && canConfirm) ? 'block' : 'none';
+    });
+  }
+
+  // 6. Mensagem de pendência
+  if(obra?.pendencia){
+    const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
+    const msgEl = document.getElementById('msgPendencia');
+    if(msgEl) msgEl.textContent = 'Pendência: '+tipos+'. Prazo: '+fmtTxt(obra.prazoPendencia);
+  }
+
+  // 7. Armazenamento: habilita confirm só se todos deps marcados
+  if(isEdit) setTimeout(checkArmazenamentoDeps, 80);
 
   // atualiza toggles
   toggleImpedimento(); togglePendencia(); toggleCancelamento(); toggleParalisada();
@@ -1618,6 +1633,10 @@ window.saveObra=async function(){
       };
       if(_kaffasPendentes.length > 0) _kaffasPendentes=[];
     } else if(me.perfil==='fiscal'){
+      // Build medicoes array directly in the patch (same as empreiteira kaffa pattern)
+      const existingMedsF = obraAntiga?.medicoes||[];
+      const allMedsF = [...existingMedsF, ..._medicoesPendentes];
+      const lastMedDate = allMedsF.map(m=>m.data).filter(Boolean).sort().slice(-1)[0]||'';
       patch={
         dataDesligamento:g('oDesligamento'),
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
@@ -1625,14 +1644,18 @@ window.saveObra=async function(){
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
-        dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
-        medicao:g('oMedicao'), medida70:g('oMedida70'), medida230:g('oMedida230'),
+        dataCadastro:g('oCadastro'),
+        // cadastroConfirmado only valid for gerente/genesis, fiscal cannot confirm
+        medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
+        medicoes: allMedsF,
+        medicao: lastMedDate || obraAntiga?.medicao || '',
         armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
         atualizadaEm:serverTimestamp()
       };
+      if(_medicoesPendentes.length > 0) _medicoesPendentes=[];
     }
 
     // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
@@ -1658,16 +1681,14 @@ window.saveObra=async function(){
     if(isEdit){
       await updateDoc(doc(db,'obras',obraId),patch);
       // disparo de e-mails por evento
-      // Save new medições (ALWAYS include full array to prevent data loss)
-      {
+      // Save new medições: gerente (fiscal handles inline, empreiteira doesn't use medicoes)
+      // Also handles case where medicoes weren't added inline for any reason
+      if(_medicoesPendentes.length > 0 && (me.perfil==='gerente' || !patch.medicoes)){
         const existingMeds = obraAntiga?.medicoes||[];
-        const allMeds = [...existingMeds, ..._medicoesPendentes];
-        if(_medicoesPendentes.length > 0){
-          patch.medicoes = allMeds;
-          const allDates = allMeds.map(m=>m.data).filter(Boolean).sort();
-          if(allDates.length) patch.medicao = allDates[allDates.length-1];
-          _medicoesPendentes = [];
-        }
+        patch.medicoes = [...existingMeds, ..._medicoesPendentes];
+        const allDates = patch.medicoes.map(m=>m.data).filter(Boolean).sort();
+        if(allDates.length) patch.medicao = allDates[allDates.length-1];
+        _medicoesPendentes = [];
       }
       // Save kaffaEntries for non-empreiteira profiles (empreiteira handled in patch above)
       if(_kaffasPendentes.length > 0 && me.perfil !== 'empreiteira'){
