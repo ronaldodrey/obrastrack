@@ -1239,7 +1239,7 @@ window.openObraModal=function(obraId){
     if(p === 'gerente'){
       showSec('secIdentif');
       // Show USC/ULV medido field only for gerente when there are partial medicoes
-      const hasMedicoes=(obraAntiga?.medicoes||[]).length > 0;
+      const hasMedicoes=(obra?.medicoes||[]).length > 0; // 'obra' é a variável correta aqui (openObraModal)
       const secUscEl=document.getElementById('secUSCMedidoGerente');
       if(secUscEl) secUscEl.style.display=hasMedicoes?'grid':'none';
     }
