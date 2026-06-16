@@ -194,7 +194,7 @@ async function iniciarApp(){
 
   document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnImport').style.display=me.perfil==='gerente'?'inline-flex':'none';
-  document.getElementById('btnBulkDelete').style.display=me.perfil==='gerente'?'none':'none'; // shown by filtroRapido
+  document.getElementById('btnBulkDelete').style.display='none'; // shown by filtroRapido when encerradas selected
   buildTableHeader();
 
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
@@ -948,7 +948,7 @@ function renderObras(){
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
-  else if(_filtroRapidoAtivo === 'encerradas')    baseList = baseList.filter(o=>o.armazenado&&o.cadastroConfirmado&&o.medida280);
+  else if(_filtroRapidoAtivo === 'encerradas')    baseList = baseList.filter(o=>o.armazenado);
   const list = aplicarFiltros(baseList);
   const ativos = contarFiltrosAtivos() + (_filtroRapidoAtivo?1:0);
   const btnLimpar = document.getElementById('btnLimparFiltros');
@@ -1160,32 +1160,18 @@ window.openObraModal=function(obraId){
   // For estagiário: show ONLY secArmazenamento
   // For others: normal visibility
   const allSections = ['secIdentif','secExec','secTransfView','secImpedimento','secFisc',
-    'secRegularizacao','secConfPendencia','secMedicao','secMedidas','secArmazenamento',
+    'secCadastro','secRegularizacao','secConfPendencia','secMedicao','secMedidas','secArmazenamento',
     'secCancelamento','secParalisada','secCadastroConfirm','secDesligData','secDesligConfirm'];
 
   if(isGenesis){
-    // Genesis: hide ALL sections, show ONLY dataCadastro + secCadastroConfirm
+    // Genesis: hide ALL sections, then show ONLY secCadastro
     allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-    // Show minimal: just the cadastro section inside a clean context
-    const cadConf=document.getElementById('secCadastroConfirm'); if(cadConf) cadConf.style.display='block';
-    // Also expose the dataCadastro field (create a simple wrapper if needed)
-    // Show secFisc but hide everything inside except oCadastro row
-    const secF=document.getElementById('secFisc');
-    if(secF){
-      secF.style.display='block';
-      // Hide everything in secFisc except the cadastro row
-      Array.from(secF.querySelectorAll('.fg,.toggle-row,.sect-title,.modal-note')).forEach(el=>{
-        // Keep only the dataCadastro field
-        const hasOCadastro = el.querySelector && el.querySelector('#oCadastro');
-        if(!hasOCadastro) el.style.display='none';
-      });
-    }
+    const secCad=document.getElementById('secCadastro'); if(secCad) secCad.style.display='block';
+    const secConf=document.getElementById('secCadastroConfirm'); if(secConf) secConf.style.display='block';
   } else if(isEstagiario){
-    // Estagiário: hide ALL sections, show ONLY armazenamento
+    // Estagiário: hide ALL sections, show ONLY secArmazenamento
     allSections.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
-    const armEl=document.getElementById('secArmazenamento');
-    if(armEl) armEl.style.display='block';
-    // Reset and enable the armazenamento checkbox
+    const armEl=document.getElementById('secArmazenamento'); if(armEl) armEl.style.display='block';
     setTimeout(checkArmazenamentoDeps, 100);
     } else {
     // Normal profiles
@@ -1194,6 +1180,8 @@ window.openObraModal=function(obraId){
     document.getElementById('secTransfView').style.display= (p==='fiscal'&&isEdit&&obra?.conclusao)?'block':'none';
     document.getElementById('secImpedimento').style.display= p==='empreiteira'?'block':'none';
     document.getElementById('secFisc').style.display      = p!=='empreiteira'?'block':'none';
+    // secCadastro: gerente and fiscal (NOT empreiteira)
+    document.getElementById('secCadastro').style.display  = p!=='empreiteira'?'block':'none';
   }
   // Desligamento: data disponível para fiscal e empreiteira; confirmação só fiscal
   if(!isBasico){ document.getElementById('secDesligData').style.display='block'; const desEl2=document.getElementById('oDesligamento'); if(desEl2) desEl2.disabled=false; document.getElementById('secDesligConfirm').style.display=(['gerente','fiscal'].includes(p)&&isEdit&&obra?.dataDesligamento)?'block':'none'; }
@@ -1227,15 +1215,16 @@ window.openObraModal=function(obraId){
   // Genesis: also show dataCadastro field
   const secFiscEl=document.getElementById('secFisc');
   if(isGenesis && secFiscEl) secFiscEl.style.display='block';
-  // Show when date is filled (remove old listeners by replacing element clone)
+  // secCadastroConfirm shown when dataCadastro is filled
   const cadEl=document.getElementById('oCadastro');
   if(cadEl){
     const newCadEl=cadEl.cloneNode(true);
     cadEl.parentNode.replaceChild(newCadEl, cadEl);
     newCadEl.addEventListener('change',()=>{
-      if(showCadastroConf)
-        document.getElementById('secCadastroConfirm').style.display=newCadEl.value?'block':'none';
+      document.getElementById('secCadastroConfirm').style.display=newCadEl.value?'block':'none';
     });
+    // Show now if already has value
+    document.getElementById('secCadastroConfirm').style.display=cadEl.value?'block':'none';
   }
 
   // desabilitar campos do outro perfil
@@ -1614,14 +1603,20 @@ window.saveObra=async function(){
         atualizadaEm:serverTimestamp()
       };
     } else if(me.perfil==='empreiteira'){
+      // Build kaffaEntries right here for empreiteira
+      const existingKaffasEmp = obraAntiga?.kaffaEntries||[];
+      const allKaffasEmp = [...existingKaffasEmp, ..._kaffasPendentes];
+      const lastKaffaDate = allKaffasEmp.map(k=>k.data).filter(Boolean).sort().slice(-1)[0]||'';
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
         dataDesligamento:g('oDesligamento'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
+        kaffaEntries: allKaffasEmp,
+        kaffa: lastKaffaDate || g('oKaffa') || obraAntiga?.kaffa || '',
         atualizadaEm:serverTimestamp()
-        // kaffaEntries added below from _kaffasPendentes
       };
+      if(_kaffasPendentes.length > 0) _kaffasPendentes=[];
     } else if(me.perfil==='fiscal'){
       patch={
         dataDesligamento:g('oDesligamento'),
@@ -1642,7 +1637,15 @@ window.saveObra=async function(){
 
     // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
     if(me.perfil==='genesis'){
-      patch={ dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'), atualizadaEm:serverTimestamp() };
+      const cadData = g('oCadastro') || obraAntiga?.dataCadastro || '';
+      const cadConf = gChk('oCadastroConfirmado');
+      patch = { 
+        dataCadastro: cadData,
+        cadastroConfirmado: cadConf,
+        atualizadaEm: serverTimestamp()
+      };
+      // Record confirmation timestamp
+      if(cadConf && !obraAntiga?.cadastroConfirmado) patch.dataCadastroConfirmado = hojeStr();
     }
     if(me.perfil==='estagiario'){
       const finalCheckEl=document.getElementById('oArmazenado');
@@ -1666,8 +1669,8 @@ window.saveObra=async function(){
           _medicoesPendentes = [];
         }
       }
-      // Save kaffaEntries (always explicit to avoid data loss)
-      if(_kaffasPendentes.length > 0){
+      // Save kaffaEntries for non-empreiteira profiles (empreiteira handled in patch above)
+      if(_kaffasPendentes.length > 0 && me.perfil !== 'empreiteira'){
         const existingKaffas = obraAntiga?.kaffaEntries||[];
         patch.kaffaEntries = [...existingKaffas, ..._kaffasPendentes];
         const allKDates = patch.kaffaEntries.map(k=>k.data).filter(Boolean).sort();
@@ -2155,7 +2158,7 @@ window.exportXLSXFiltrado=function(){
   if(_filtroRapidoAtivo==='sem_medida70')     base=base.filter(o=>o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo==='sem_medida230') base=base.filter(o=>o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
-  else if(_filtroRapidoAtivo==='encerradas')    base=base.filter(o=>o.armazenado&&o.cadastroConfirmado&&o.medida280);
+  else if(_filtroRapidoAtivo==='encerradas')    base=base.filter(o=>o.armazenado);
   gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
 };
 window.exportCSV=window.exportXLSX;
