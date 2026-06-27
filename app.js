@@ -187,7 +187,7 @@ async function iniciarApp(){
   popularSelectEmpreiteiras();
 
   const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
-  if(me.perfil==='gerente'){ tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
+  if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML=tabs
     .map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
@@ -203,6 +203,7 @@ async function iniciarApp(){
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash'){ renderDash(); setTimeout(renderChart,200); }
     if(active?.id==='pgObras') window.renderObras();
+    if(active?.id==='pgCarteira') renderCarteira();
   });
 
   showPage('pgDash');
@@ -213,6 +214,7 @@ window.showPage=function(id){
   document.getElementById(id).classList.add('active');
   if(id==='pgDash') renderDash();
   if(id==='pgObras') window.renderObras();
+  if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
 };
@@ -361,6 +363,15 @@ function renderDash(){
 
   try{
     document.getElementById('dashContent').innerHTML = html;
+  // Render pendência charts after DOM is updated
+  setTimeout(() => {
+    if(me.perfil === 'gerente' && dashPerspectiva === 'gerente')
+      renderChartPendencias(visibleObras(), 'pendenciasChartGerente');
+    else if(me.perfil === 'fiscal')
+      renderChartPendencias(obras.filter(o=>o.fiscal===me.vinculo), 'pendenciasChartFiscal');
+    else if(me.perfil === 'gerente' && dashPerspectiva.startsWith('fiscal:'))
+      renderChartPendencias(obras.filter(o=>o.fiscal===dashPerspectiva.replace('fiscal:','')), 'pendenciasChartFiscal');
+  }, 100);
   }catch(e){
     console.error('renderDash error:',e);
     document.getElementById('dashContent').innerHTML='<div style="padding:20px;color:#EF4444">Erro ao renderizar dashboard: '+e.message+'</div>';
@@ -395,6 +406,9 @@ function renderDashGerente(list, listAll){
   html += renderMonitorPrazos(list);
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
   html += '<div class="vel-grid">' + velCards(list) + '</div>';
+  // Gráfico mensal de pendências
+  html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartGerente"></div>';
   return html;
 }
 
@@ -501,6 +515,8 @@ function renderDashFiscal(list, meuNome){
   html += pendenciaRankingPorEmpreiteira(minhas);
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:16px">Obras por Empreiteira</div>';
   html += '<div class="kpi-strip">' + emprKpis(minhas) + '</div>';
+  html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartFiscal"></div>';
   return html;
 }
 
@@ -562,6 +578,8 @@ function renderDashEmpreiteira(minhas){
   html += `<div class="kpi-strip">${['R1','R2','ODI'].map(t=>kpiCard(t,minhas.filter(o=>o.tipo===t).length,'obras',gc(t))).join('')}</div>`;
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:8px">Principais Pendências</div>';
   html += pendenciaRanking(minhas);
+  html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
+  html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartEmp"></div>';
   return html;
 }
 
@@ -645,6 +663,69 @@ function renderDashEstagiario(list){
   }
   return html;
 }
+
+// ── GRÁFICO MENSAL DE PENDÊNCIAS ─────────────────────────────────────
+function renderChartPendencias(list, containerId){
+  const cont = document.getElementById(containerId);
+  if(!cont) return;
+
+  // Filtrar obras com dataPendencia
+  const comData = list.filter(o => o.dataPendencia);
+  if(!comData.length){
+    cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:11px">Nenhuma pendência com data registrada ainda.</div>';
+    return;
+  }
+
+  // Agrupar por mês (MM/YYYY)
+  const grupos = {};
+  comData.forEach(o => {
+    const [y,m] = o.dataPendencia.split('-');
+    const key = `${m}/${y}`;
+    if(!grupos[key]) grupos[key] = { total: 0, resolvidas: 0 };
+    grupos[key].total++;
+    if(o.pendenciaResolvida) grupos[key].resolvidas++;
+  });
+
+  // Ordenar cronologicamente (últimos 12 meses)
+  const mesesOrd = Object.keys(grupos).sort((a,b) => {
+    const [ma,ya] = a.split('/'); const [mb,yb] = b.split('/');
+    return (+ya*12+ +ma) - (+yb*12+ +mb);
+  }).slice(-12);
+
+  const maxVal = Math.max(...mesesOrd.map(k => grupos[k].total), 1);
+  const barW = Math.max(30, Math.floor(560 / (mesesOrd.length + 1)));
+  const h = 120;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(600, mesesOrd.length * (barW + 12) + 60)}" height="${h + 70}" style="font-family:'DM Mono',monospace">`;
+
+  mesesOrd.forEach((mes, i) => {
+    const g = grupos[mes];
+    const x = 40 + i * (barW + 12);
+    const barH = Math.max(4, Math.round((g.total / maxVal) * h));
+    const barHRes = g.resolvidas > 0 ? Math.max(2, Math.round((g.resolvidas / maxVal) * h)) : 0;
+    const y = h - barH + 10;
+
+    // Total (laranja)
+    svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="rgba(249,115,22,.7)"/>`;
+    // Resolvidas (verde, em cima)
+    if(barHRes > 0)
+      svg += `<rect x="${x}" y="${h - barHRes + 10}" width="${barW}" height="${barHRes}" rx="3" fill="rgba(34,197,94,.7)"/>`;
+    // Label valor
+    svg += `<text x="${x+barW/2}" y="${y-4}" text-anchor="middle" font-size="9" fill="#F97316" font-weight="700">${g.total}</text>`;
+    // Label mês
+    svg += `<text x="${x+barW/2}" y="${h+26}" text-anchor="middle" font-size="9" fill="#6b7280">${mes}</text>`;
+  });
+
+  // Legenda
+  svg += `<rect x="40" y="${h+40}" width="10" height="8" rx="2" fill="rgba(249,115,22,.7)"/>
+    <text x="54" y="${h+48}" font-size="9" fill="#e8eaf0">Total de pendências</text>
+    <rect x="180" y="${h+40}" width="10" height="8" rx="2" fill="rgba(34,197,94,.7)"/>
+    <text x="194" y="${h+48}" font-size="9" fill="#e8eaf0">Resolvidas</text>`;
+
+  svg += '</svg>';
+  cont.innerHTML = svg;
+}
+
 function kpiCard(lbl,val,sub,cor){
   return `<div class="kpi-card" style="--card-color:${cor}">
     <div class="kpi-lbl">${lbl}</div>
@@ -1037,7 +1118,13 @@ function renderObras(){
     const kaffaDisp=o.kaffaEntries?.length
       ?`${fmtTxt((o.kaffaEntries||[]).slice(-1)[0]?.data)} <span class="chip ${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'Final':'Parc.'}</span>`
       :fmt(o.kaffa);
-    return `<tr>
+    // Row background color based on status
+    const rowBg = (o.pendencia&&!o.pendenciaResolvida)
+      ? 'background:rgba(249,115,22,.07);'
+      : (statusOf(o)==='Atrasada'||statusOf(o)==='Encaminhar Cadastro Urgente')
+        ? 'background:rgba(239,68,68,.07);'
+        : '';
+    return `<tr style="${rowBg}">
       <td>${statusHtml(o)}</td>
       <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
@@ -1787,8 +1874,13 @@ window.saveObra=async function(){
       }
       if(me.perfil==='empreiteira'&&!obraAntiga?.conclusao&&patch.conclusao)
         await enviarEmailConclusao({...obraAntiga,...patch});
-      if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia)
+      if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia){
+        patch.dataPendencia = hojeStr(); // registra a data em que a pendência foi cadastrada
         await enviarEmailPendencia({...obraAntiga,...patch});
+      }
+      if(me.perfil==='gerente'&&!obraAntiga?.pendencia&&patch.pendencia){
+        patch.dataPendencia = hojeStr(); // gerente também pode registrar pendência
+      }
       // Registrar se pendência foi resolvida dentro do prazo
       if((me.perfil==='fiscal'||me.perfil==='gerente')&&patch.pendenciaResolvida&&!obraAntiga?.pendenciaResolvida){
         const prazoLim=obraAntiga?.prazoPendencia;
@@ -2122,7 +2214,7 @@ function aplicarFiltros(list) {
   const h = hoje();
   return list.filter(o => {
     // _filtroRapidoAtivo is applied in renderObras before calling aplicarFiltros
-    if (f.srch && !(o.numero+o.cidade+o.fiscal+o.empreiteira+o.tipo).toLowerCase().includes(f.srch)) return false;
+    if (f.srch && !(o.numero||'').toLowerCase().includes(f.srch)) return false; // busca por Nº da obra
     if (f.status && statusOf(o) !== f.status) return false;
     if (f.tipo && o.tipo !== f.tipo) return false;
     if (f.empreiteira && o.empreiteira !== f.empreiteira) return false;
@@ -2548,3 +2640,210 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════
+//  CARTEIRA DE OBRAS — Dashboard estratégico (somente Gerente)
+// ══════════════════════════════════════════════════════════════════════
+function renderCarteira(){
+  const cont = document.getElementById('carteiraContent');
+  if(!cont) return;
+  if(me.perfil !== 'gerente'){ cont.innerHTML='<div class="empty"><p>Acesso restrito ao Gerente.</p></div>'; return; }
+
+  const ativas = obras.filter(o=>!o.cancelado);
+  const hoje_s = hojeStr();
+
+  // ── helpers ──────────────────────────────────────────────────────
+  const mesStr = s => { if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
+  const mesOrd  = s => { if(!s) return ''; const [y,m]=s.split('-'); return `${y}${m}`; };
+  const ultimosMeses = n => {
+    const res=[]; const d=new Date();
+    for(let i=n-1;i>=0;i--){
+      const dd=new Date(d.getFullYear(), d.getMonth()-i, 1);
+      const m=String(dd.getMonth()+1).padStart(2,'0');
+      res.push(`${m}/${dd.getFullYear()}`);
+    }
+    return res;
+  };
+  const MESES = ultimosMeses(12);
+  const svgBar = (dados, label, corBarra, corText='#e8eaf0', yLabel='Qtd') => {
+    const vals = MESES.map(m=>dados[m]||0);
+    const max = Math.max(...vals, 1);
+    const w = 44, h = 100, pad = 36;
+    const totalW = pad + MESES.length*(w+6) + 10;
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${h+56}" style="font-family:'DM Mono',monospace;display:block">`;
+    svg += `<text x="10" y="12" font-size="9" fill="#6b7280" transform="rotate(-90,10,12)" text-anchor="end">${yLabel}</text>`;
+    vals.forEach((v,i)=>{
+      const x = pad + i*(w+6);
+      const bh = v>0 ? Math.max(4, Math.round((v/max)*h)) : 0;
+      const y  = h - bh + 4;
+      svg += `<rect x="${x}" y="${y}" width="${w}" height="${bh}" rx="3" fill="${corBarra}" opacity="0.85"/>`;
+      if(v>0) svg += `<text x="${x+w/2}" y="${y-3}" text-anchor="middle" font-size="9" fill="${corText}" font-weight="700">${typeof v==='number'&&v%1!==0?v.toFixed(1):v}</text>`;
+      svg += `<text x="${x+w/2}" y="${h+18}" text-anchor="middle" font-size="8" fill="#6b7280" transform="rotate(-35,${x+w/2},${h+18})">${MESES[i]}</text>`;
+    });
+    svg += '</svg>';
+    return `<div><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="overflow-x:auto">${svg}</div></div>`;
+  };
+
+  // ── 1. KPIs globais ───────────────────────────────────────────────
+  const totalUSC = ativas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const totalULV = ativas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const emNoPrazo = ativas.filter(o=>!o.conclusao&&o.dataLimite&&hoje_s<=o.dataLimite).length;
+  const atrasadas = ativas.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite).length;
+  const conclNoP  = ativas.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao<=o.dataLimite).length;
+  const conclForaP= ativas.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao>o.dataLimite).length;
+  const encerradas= ativas.filter(o=>o.armazenado).length;
+
+  let html = `<div style="margin-bottom:8px">
+    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">📈 Carteira de Obras</div>
+    <div style="font-size:11px;color:var(--muted)">Foto atual da carteira · ${ativas.length} obras ativas · gerado em ${fmtTxt(hoje_s)}</div>
+  </div>
+  <div class="kpi-strip" style="margin-bottom:24px">
+    ${kpiCard('Total de Obras',ativas.length,'na carteira','#00e5a0')}
+    ${kpiCard('USC Total',totalUSC.toFixed(1),'previsto','#7c6af7')}
+    ${kpiCard('ULV Total',totalULV.toFixed(1),'previsto','#ff6b35')}
+    ${kpiCard('Em Execução no Prazo',emNoPrazo,'dentro do prazo','#3B82F6')}
+    ${kpiCard('Atrasadas',atrasadas,'sem Med.230 após vencimento','#EF4444')}
+    ${kpiCard('Concluídas no Prazo',conclNoP,'dentro do prazo','#22C55E')}
+    ${kpiCard('Concluídas Fora do Prazo',conclForaP,'após vencimento','#DC2626')}
+    ${kpiCard('Encerradas',encerradas,'armazenadas','#16A34A')}
+  </div>`;
+
+  // ── 2. Distribuição por Empreiteira (R1 / R2 / ODI / USC) ────────
+  html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px">Distribuição por Empreiteira</div>`;
+  const emprNames = [...new Set(ativas.map(o=>o.empreiteira).filter(Boolean))].sort();
+  const tipos = ['R1','R2','ODI'];
+  const corTipo = {'R1':'#7c6af7','R2':'#ff6b35','ODI':'#00e5a0'};
+  let tblEmp = `<div class="tbl-wrap" style="margin-bottom:24px;max-height:none"><table>
+    <thead><tr>
+      <th>Empreiteira</th>
+      ${tipos.map(t=>`<th style="text-align:center;color:${corTipo[t]}">${t}</th>`).join('')}
+      <th style="text-align:center">Total</th>
+      <th style="text-align:center;color:#7c6af7">USC</th>
+      <th style="text-align:center;color:#ff6b35">ULV</th>
+      <th style="text-align:center;color:#00e5a0">USC em Mãos</th>
+      <th style="text-align:center">Atrasadas</th>
+      <th style="text-align:center">Conc. Prazo</th>
+      <th style="text-align:center">Conc. Fora</th>
+    </tr></thead><tbody>`;
+  emprNames.forEach(e=>{
+    const sub = ativas.filter(o=>o.empreiteira===e);
+    const usc = sub.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const ulv = sub.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+    const uscMaos = sub.reduce((s,o)=>s+calcUSCPendente(o),0);
+    const atr = sub.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite).length;
+    const cnp = sub.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao<=o.dataLimite).length;
+    const cfp = sub.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao>o.dataLimite).length;
+    const c = gc(e);
+    tblEmp += `<tr>
+      <td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${c}"></span><strong>${e}</strong></span></td>
+      ${tipos.map(t=>`<td style="text-align:center">${sub.filter(o=>o.tipo===t).length}</td>`).join('')}
+      <td style="text-align:center;font-weight:700">${sub.length}</td>
+      <td style="text-align:center;color:#7c6af7">${usc.toFixed(1)}</td>
+      <td style="text-align:center;color:#ff6b35">${ulv.toFixed(1)}</td>
+      <td style="text-align:center;color:#00e5a0">${uscMaos.toFixed(1)}</td>
+      <td style="text-align:center;color:${atr>0?'#EF4444':'var(--muted)'}"><strong>${atr}</strong></td>
+      <td style="text-align:center;color:#22C55E">${cnp}</td>
+      <td style="text-align:center;color:${cfp>0?'#DC2626':'var(--muted)'}">${cfp}</td>
+    </tr>`;
+  });
+  tblEmp += `</tbody><tfoot><tr style="background:var(--surface2);font-weight:700">
+    <td>TOTAL</td>
+    ${tipos.map(t=>`<td style="text-align:center">${ativas.filter(o=>o.tipo===t).length}</td>`).join('')}
+    <td style="text-align:center">${ativas.length}</td>
+    <td style="text-align:center;color:#7c6af7">${totalUSC.toFixed(1)}</td>
+    <td style="text-align:center;color:#ff6b35">${totalULV.toFixed(1)}</td>
+    <td style="text-align:center;color:#00e5a0">${ativas.reduce((s,o)=>s+calcUSCPendente(o),0).toFixed(1)}</td>
+    <td style="text-align:center;color:#EF4444">${atrasadas}</td>
+    <td style="text-align:center;color:#22C55E">${conclNoP}</td>
+    <td style="text-align:center;color:#DC2626">${conclForaP}</td>
+  </tr></tfoot></table></div>`;
+  html += tblEmp;
+
+  // ── 3. Gráficos mensais por empreiteira (vencimento + conclusão) ──
+  // Detecta as duas principais empreiteiras (CS e ELETELSUL)
+  const empPrincipais = emprNames.filter(e=>
+    e.toUpperCase().includes('CS') || e.toUpperCase().includes('ELET')
+  ).slice(0,4); // máx 4
+
+  if(empPrincipais.length){
+    html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">Análise Mensal por Empreiteira</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(580px,1fr));gap:20px;margin-bottom:24px">`;
+
+    empPrincipais.forEach(e=>{
+      const sub = ativas.filter(o=>o.empreiteira===e);
+      const cor = gc(e);
+
+      // Vencimentos por mês (dataLimite)
+      const vencQtd={}, vencUSC={};
+      sub.forEach(o=>{
+        const m=mesStr(o.dataLimite); if(!m) return;
+        vencQtd[m]=(vencQtd[m]||0)+1;
+        vencUSC[m]=(vencUSC[m]||0)+(parseFloat(o.usc)||0);
+      });
+
+      // Conclusões por mês (conclusao)
+      const conclQtd={}, conclUSC={};
+      sub.filter(o=>o.conclusao).forEach(o=>{
+        const m=mesStr(o.conclusao); if(!m) return;
+        conclQtd[m]=(conclQtd[m]||0)+1;
+        conclUSC[m]=(conclUSC[m]||0)+(parseFloat(o.usc)||0);
+      });
+
+      html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;border-top:3px solid ${cor}">
+        <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:${cor};margin-bottom:14px">${e}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px">
+          ${svgBar(vencQtd,'Obras por Mês de Vencimento',cor,'#e8eaf0','Qtd')}
+          ${svgBar(vencUSC,'USC por Mês de Vencimento',cor+'bb','#e8eaf0','USC')}
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:14px">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px;font-weight:600">CONCLUSÕES REALIZADAS</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            ${svgBar(conclQtd,'Obras Concluídas por Mês','#22C55E','#e8eaf0','Qtd')}
+            ${svgBar(conclUSC,'USC Concluída por Mês','#16A34A','#e8eaf0','USC')}
+          </div>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // ── 4. Obras Atrasadas (tabela detalhada) ─────────────────────────
+  const listaAtrasadas = ativas.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite)
+    .sort((a,b)=>a.dataLimite>b.dataLimite?1:-1);
+
+  html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#EF4444;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px">
+    ⚠️ Obras Atrasadas (${listaAtrasadas.length})
+    <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0"> — sem Medida 230 após vencimento</span>
+  </div>`;
+
+  if(!listaAtrasadas.length){
+    html += `<div class="empty" style="padding:20px"><div class="ico">✅</div><p>Nenhuma obra atrasada!</p></div>`;
+  } else {
+    const rows = listaAtrasadas.map(o=>{
+      const diasAtr = diff(o.dataLimite, hoje_s);
+      const etapa = statusOf(o);
+      const etCor = STATUS_DEF[etapa]?.cor||'var(--muted)';
+      return `<tr style="background:rgba(239,68,68,.05)">
+        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td><span class="chip">${o.tipo||'—'}</span></td>
+        <td>${o.cidade||'—'}</td>
+        <td>${o.empreiteira||'—'}</td>
+        <td>${o.fiscal||'—'}</td>
+        <td style="color:#EF4444;font-weight:700">${fmt(o.dataLimite)}</td>
+        <td style="color:#EF4444;font-weight:700">${diasAtr!==null?diasAtr+'d':'—'}</td>
+        <td>${o.usc||'—'}</td>
+        <td><span style="color:${etCor};font-size:10px;font-weight:600">${etapa}</span></td>
+        <td>${o.conclusao?`<span style="color:${o.conclusao>o.dataLimite?'#EF4444':'#22C55E'}">${fmt(o.conclusao)}</span>`:'<span class="chip chip-red">Pendente</span>'}</td>
+      </tr>`;
+    }).join('');
+    html += `<div class="tbl-wrap" style="max-height:none"><table>
+      <thead><tr>
+        <th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Empreiteira</th><th>Fiscal</th>
+        <th>Vencimento</th><th>Dias Atraso</th><th>USC</th><th>Status Atual</th><th>Conclusão</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+
+  cont.innerHTML = html;
+}
