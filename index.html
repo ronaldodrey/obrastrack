@@ -51,7 +51,7 @@
       <div class="page-title" id="obrasTit">Obras</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="toggleFiltros()">🔽 Filtros</button>
-        <div class="search-wrap"><span class="search-ico">🔍</span><input type="text" id="srch" placeholder="Buscar…" oninput="renderObras()"></div>
+        <div class="search-wrap"><span class="search-ico">🔍</span><input type="text" id="srch" placeholder="🔍 Nº da obra…" oninput="renderObras()"></div>
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
@@ -186,6 +186,10 @@
   </div>
 
   <!-- EMPREITEIRAS -->
+  <div class="page" id="pgCarteira">
+    <div id="carteiraContent"><div class="loading">Carregando...</div></div>
+  </div>
+
   <div class="page" id="pgEmpreiteiras">
     <div class="tbl-head">
       <div class="page-title">Empreiteiras</div>
@@ -327,8 +331,19 @@
         <input type="number" id="oPrazo" placeholder="Digite os dias" min="1"
           style="margin-top:6px;display:none">
       </div>
-      <div class="fg"><label>USC</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
-      <div class="fg"><label>ULV</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
+      <div class="fg"><label>USC Previsto</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
+      <div class="fg"><label>ULV Previsto</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
+    </div>
+    <div class="fg-grid" id="secUSCMedidoGerente" style="display:none">
+      <div class="fg">
+        <label>USC Medido (definido pelo Gerente)</label>
+        <input type="number" id="oUSCMedidoGerente" placeholder="Quantidade já medida" min="0" step="0.01">
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Deixe em branco se não houver medição parcial.</div>
+      </div>
+      <div class="fg">
+        <label>ULV Medido (definido pelo Gerente)</label>
+        <input type="number" id="oULVMedidoGerente" placeholder="Quantidade já medida" min="0" step="0.01">
+      </div>
     </div>
     <div class="fg" id="secDesligData"><label>Data de Desligamento Programado</label>
       <input type="date" id="oDesligamento" min="">
@@ -498,11 +513,7 @@
         </div>
       </div>
       <div id="secMedicaoParcialFields" style="display:none">
-        <div class="modal-note" style="margin-bottom:8px">Informe as quantidades medidas nesta parcial.</div>
-        <div class="fg-grid">
-          <div class="fg"><label>USC Medido</label><input type="number" id="oMedicaoUSC" min="0" step="0.01" placeholder="0"></div>
-          <div class="fg"><label>ULV Medido</label><input type="number" id="oMedicaoULV" min="0" step="0.01" placeholder="0"></div>
-        </div>
+        <div class="modal-note">Medição parcial registrada. O gerente pode informar as quantidades USC/ULV medidas na seção de identificação da obra.</div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn btn-primary btn-sm" onclick="adicionarMedicao()">✓ Adicionar</button>
