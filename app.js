@@ -2665,23 +2665,90 @@ function renderCarteira(){
     return res;
   };
   const MESES = ultimosMeses(12);
-  const svgBar = (dados, label, corBarra, corText='#e8eaf0', yLabel='Qtd') => {
-    const vals = MESES.map(m=>dados[m]||0);
-    const max = Math.max(...vals, 1);
-    const w = 44, h = 100, pad = 36;
-    const totalW = pad + MESES.length*(w+6) + 10;
-    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${h+56}" style="font-family:'DM Mono',monospace;display:block">`;
-    svg += `<text x="10" y="12" font-size="9" fill="#6b7280" transform="rotate(-90,10,12)" text-anchor="end">${yLabel}</text>`;
-    vals.forEach((v,i)=>{
-      const x = pad + i*(w+6);
-      const bh = v>0 ? Math.max(4, Math.round((v/max)*h)) : 0;
-      const y  = h - bh + 4;
-      svg += `<rect x="${x}" y="${y}" width="${w}" height="${bh}" rx="3" fill="${corBarra}" opacity="0.85"/>`;
-      if(v>0) svg += `<text x="${x+w/2}" y="${y-3}" text-anchor="middle" font-size="9" fill="${corText}" font-weight="700">${typeof v==='number'&&v%1!==0?v.toFixed(1):v}</text>`;
-      svg += `<text x="${x+w/2}" y="${h+18}" text-anchor="middle" font-size="8" fill="#6b7280" transform="rotate(-35,${x+w/2},${h+18})">${MESES[i]}</text>`;
+  // Formata número: >= 1000 → "1.5k", inteiro → sem decimal
+  // Formata número compacto: 1500 → "1.5k", 15000 → "15k"
+  const fmtNum = v => {
+    if(!v || v===0) return '0';
+    if(v >= 10000) return Math.round(v/1000)+'k';
+    if(v >= 1000)  return (v/1000).toFixed(1).replace('.0','')+'k';
+    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  };
+
+  // Gráfico combinado: barra = nº de obras, rótulo duplo (obras + USC) por mês
+  const svgBarDuplo = (qtdMap, uscMap, titulo, cor) => {
+    const qtds = MESES.map(m => qtdMap[m]||0);
+    const uscs = MESES.map(m => uscMap[m]||0);
+    const maxQ  = Math.max(...qtds, 1);
+    const totQ  = qtds.reduce((a,b)=>a+b, 0);
+    const totU  = uscs.reduce((a,b)=>a+b, 0);
+
+    const w=54, h=100, topPad=32, botPad=44, colW=w+10;
+    const pad=8, totalW = pad + MESES.length*colW + pad;
+    const svgH = topPad + h + botPad;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalW}" height="${svgH}"
+      style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+
+    // Linha de base
+    svg += `<line x1="${pad}" y1="${topPad+h}" x2="${totalW-pad}" y2="${topPad+h}"
+      stroke="#374151" stroke-width="1"/>`;
+
+    qtds.forEach((q, i) => {
+      const x  = pad + i * colW;
+      const cx = x + w/2;
+      const usc = uscs[i];
+
+      // —— barra ——
+      const bh   = q > 0 ? Math.max(8, Math.round((q/maxQ)*h)) : 0;
+      const barY = topPad + h - bh;
+      if(bh > 0) {
+        svg += `<rect x="${x}" y="${barY}" width="${w}" height="${bh}" rx="5"
+          fill="${cor}" opacity="0.82"/>`;
+        // gradiente de brilho no topo da barra
+        svg += `<rect x="${x}" y="${barY}" width="${w}" height="${Math.min(bh,8)}" rx="5"
+          fill="white" opacity="0.12"/>`;
+      }
+
+      // —— rótulo QTD acima da barra (sempre visível) ——
+      const lblQ = q > 0 ? `${q} obra${q!==1?'s':''}` : '—';
+      const lblY = barY - 6;
+      // fundo pill
+      const pillW = Math.max(lblQ.length*6.5+10, 44);
+      svg += `<rect x="${cx-pillW/2}" y="${lblY-14}" width="${pillW}" height="16" rx="8"
+        fill="${q>0?cor:'#374151'}" opacity="${q>0?'0.22':'0.15'}"/>`;
+      svg += `<text x="${cx}" y="${lblY}" text-anchor="middle"
+        font-size="${q>0?10:9}" font-weight="800"
+        fill="${q>0?cor:'#6b7280'}">${lblQ}</text>`;
+
+      // —— linha de USC abaixo do rótulo QTD ——
+      if(q > 0 && usc > 0) {
+        const uscLbl = fmtNum(usc)+' USC';
+        svg += `<text x="${cx}" y="${lblY-18}" text-anchor="middle"
+          font-size="9" font-weight="600" fill="${cor}cc">${uscLbl}</text>`;
+      }
+
+      // —— mês no eixo X ——
+      svg += `<text x="${cx}" y="${topPad+h+14}" text-anchor="middle"
+        font-size="10" fill="#9ca3af" font-weight="600">${MESES[i]}</text>`;
     });
+
     svg += '</svg>';
-    return `<div><div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="overflow-x:auto">${svg}</div></div>`;
+
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-weight:700;font-size:12px;color:${cor};margin-bottom:10px;
+        text-transform:uppercase;letter-spacing:.8px">${titulo}</div>
+      <div style="overflow-x:auto">${svg}</div>
+      <div style="display:flex;gap:20px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-size:10px;color:var(--muted)">TOTAL OBRAS (12 meses)</div>
+          <div style="font-size:20px;font-weight:800;color:${cor}">${totQ}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted)">TOTAL USC (12 meses)</div>
+          <div style="font-size:20px;font-weight:800;color:${cor}cc">${fmtNum(totU)} USC</div>
+        </div>
+      </div>
+    </div>`;
   };
 
   // ── 1. KPIs globais ───────────────────────────────────────────────
@@ -2790,17 +2857,22 @@ function renderCarteira(){
       });
 
       html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;border-top:3px solid ${cor}">
-        <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:${cor};margin-bottom:14px">${e}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px">
-          ${svgBar(vencQtd,'Obras por Mês de Vencimento',cor,'#e8eaf0','Qtd')}
-          ${svgBar(vencUSC,'USC por Mês de Vencimento',cor+'bb','#e8eaf0','USC')}
-        </div>
-        <div style="border-top:1px solid var(--border);padding-top:14px">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:8px;font-weight:600">CONCLUSÕES REALIZADAS</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-            ${svgBar(conclQtd,'Obras Concluídas por Mês','#22C55E','#e8eaf0','Qtd')}
-            ${svgBar(conclUSC,'USC Concluída por Mês','#16A34A','#e8eaf0','USC')}
+        <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:800;color:${cor};margin-bottom:16px">${e}</div>
+
+        <!-- Vencimentos -->
+        <div style="margin-bottom:16px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
+            📅 Por Mês de Vencimento (data limite)
           </div>
+          ${svgBarDuplo(vencQtd, vencUSC, 'Obras a vencer / USC em carteira por mês', cor)}
+        </div>
+
+        <!-- Conclusões -->
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
+            ✅ Conclusões Registradas por Mês
+          </div>
+          ${svgBarDuplo(conclQtd, conclUSC, 'Obras concluídas / USC concluída por mês', '#22C55E')}
         </div>
       </div>`;
     });
