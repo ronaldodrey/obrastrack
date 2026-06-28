@@ -2840,39 +2840,220 @@ function renderCarteira(){
       const sub = ativas.filter(o=>o.empreiteira===e);
       const cor = gc(e);
 
-      // Vencimentos por mês (dataLimite)
-      const vencQtd={}, vencUSC={};
-      sub.forEach(o=>{
+      // ── helper: comparar meses MM/YYYY ──────────────────────────
+      const mesVal = m => { const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
+      const hoje_d = new Date();
+      const mesAtualVal = hoje_d.getFullYear()*100 + (hoje_d.getMonth()+1);
+      const mes12Val    = mesAtualVal + (mesAtualVal%100 === 12 ? 89 : 12); // +12 meses
+
+      // próximos 12 meses (incluindo mês atual)
+      const prox12 = [];
+      for(let i=0;i<=12;i++){
+        const d=new Date(hoje_d.getFullYear(), hoje_d.getMonth()+i, 1);
+        prox12.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
+      }
+
+      // ── GRÁFICO 1: Obras SEM conclusão por linha do tempo ───────
+      const semConcl = sub.filter(o=>!o.conclusao);
+
+      // coluna de atrasadas: dataLimite < mês atual
+      const atrasadasCol = semConcl.filter(o=>o.dataLimite && mesVal(mesStr(o.dataLimite)||'01/1900') < mesAtualVal);
+
+      // obras dentro dos próximos 12 meses (inclusive mês atual)
+      const prox12Map = {};
+      prox12.forEach(m=>{ prox12Map[m] = semConcl.filter(o=>mesStr(o.dataLimite)===m); });
+
+      // obras além dos 12 meses: agrupar por mês, somente se tiver obra
+      const alem12Map = {};
+      semConcl.forEach(o=>{
         const m=mesStr(o.dataLimite); if(!m) return;
-        vencQtd[m]=(vencQtd[m]||0)+1;
-        vencUSC[m]=(vencUSC[m]||0)+(parseFloat(o.usc)||0);
+        if(mesVal(m) > mesVal(prox12[12])){
+          if(!alem12Map[m]) alem12Map[m]=[];
+          alem12Map[m].push(o);
+        }
+      });
+      const alem12Meses = Object.keys(alem12Map).sort((a,b)=>mesVal(a)-mesVal(b));
+
+      // Montar colunas
+      const cols = [
+        { lbl:'⚠️ Atras.', obras:atrasadasCol, cor:'#EF4444', isAtras:true },
+        ...prox12.map(m=>({ lbl:m, obras:prox12Map[m]||[], cor:m===prox12[0]?'#22C55E':cor, isMesAtual:m===prox12[0] })),
+        ...alem12Meses.map(m=>({ lbl:m+'*', obras:alem12Map[m], cor:cor+'88' })),
+      ];
+
+      // SVG da linha do tempo
+      const colW2=62, barH2=110, topPad2=52, botPad2=36, padL=8;
+      const svgW = padL + cols.length*colW2 + padL;
+      const svgH2 = topPad2 + barH2 + botPad2;
+      const maxQ2 = Math.max(...cols.map(c=>c.obras.length), 1);
+
+      let svgVenc = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH2}"
+        style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+      svgVenc += `<line x1="${padL}" y1="${topPad2+barH2}" x2="${svgW-padL}" y2="${topPad2+barH2}" stroke="#374151" stroke-width="1"/>`;
+
+      // Separador visual entre prox12 e além
+      if(alem12Meses.length){
+        const sepX = padL + (1+13)*colW2 - 4;
+        svgVenc += `<line x1="${sepX}" y1="${topPad2}" x2="${sepX}" y2="${topPad2+barH2+24}" stroke="#374151" stroke-dasharray="4,3" stroke-width="1"/>`;
+        svgVenc += `<text x="${sepX+4}" y="${topPad2-4}" font-size="8" fill="#6b7280">além de 12m</text>`;
+      }
+
+      cols.forEach((col,i)=>{
+        const x = padL + i*colW2;
+        const cx = x + colW2/2 - 4;
+        const q = col.obras.length;
+        const usc = col.obras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+        const bh = q>0 ? Math.max(8, Math.round((q/maxQ2)*barH2)) : 0;
+        const barY = topPad2 + barH2 - bh;
+        const w2 = colW2-10;
+
+        if(bh>0){
+          svgVenc += `<rect x="${x+4}" y="${barY}" width="${w2}" height="${bh}" rx="5" fill="${col.cor}" opacity="0.85"/>`;
+          if(bh>12) svgVenc += `<rect x="${x+4}" y="${barY}" width="${w2}" height="${Math.min(bh,8)}" rx="5" fill="white" opacity="0.12"/>`;
+        }
+
+        if(q>0){
+          // USC acima (menor)
+          svgVenc += `<text x="${cx}" y="${barY-28}" text-anchor="middle" font-size="9" font-weight="600" fill="${col.cor}cc">${fmtNum(usc)} USC</text>`;
+          // Qtd obras (grande, bold)
+          svgVenc += `<text x="${cx}" y="${barY-14}" text-anchor="middle" font-size="12" font-weight="800" fill="${col.cor}">${q} obra${q!==1?'s':''}</text>`;
+        } else {
+          svgVenc += `<text x="${cx}" y="${topPad2+barH2-6}" text-anchor="middle" font-size="9" fill="#374151">—</text>`;
+        }
+
+        // Label mês
+        const lblColor = col.isAtras ? '#EF4444' : col.isMesAtual ? '#22C55E' : '#9ca3af';
+        svgVenc += `<text x="${cx}" y="${topPad2+barH2+14}" text-anchor="middle" font-size="9" fill="${lblColor}" font-weight="${col.isMesAtual||col.isAtras?'700':'400'}">${col.lbl}</text>`;
+      });
+      svgVenc += '</svg>';
+
+      const totVencQ = cols.reduce((s,c)=>s+c.obras.length,0);
+      const totVencUSC = cols.reduce((s,c)=>s+c.obras.reduce((ss,o)=>ss+(parseFloat(o.usc)||0),0),0);
+
+      // ── GRÁFICO 2: Conclusões — barras empilhadas por urgência ──
+      const comConcl = sub.filter(o=>o.conclusao&&o.dataLimite);
+      const meses12back = [];
+      for(let i=11;i>=0;i--){
+        const d=new Date(hoje_d.getFullYear(), hoje_d.getMonth()-i, 1);
+        meses12back.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
+      }
+
+      const stackCols = meses12back.map(m=>{
+        const obras_m = comConcl.filter(o=>mesStr(o.conclusao)===m);
+        const atras   = obras_m.filter(o=>o.conclusao>o.dataLimite);
+        const noPrazo = obras_m.filter(o=>o.conclusao<=o.dataLimite && diff(o.conclusao,o.dataLimite)<=30);
+        const comFolga= obras_m.filter(o=>o.conclusao<=o.dataLimite && diff(o.conclusao,o.dataLimite)>30);
+        return { m, atras, noPrazo, comFolga, total:obras_m.length,
+          uscAtras:atras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+          uscPrazo:noPrazo.reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+          uscFolga:comFolga.reduce((s,o)=>s+(parseFloat(o.usc)||0),0) };
       });
 
-      // Conclusões por mês (conclusao)
-      const conclQtd={}, conclUSC={};
-      sub.filter(o=>o.conclusao).forEach(o=>{
-        const m=mesStr(o.conclusao); if(!m) return;
-        conclQtd[m]=(conclQtd[m]||0)+1;
-        conclUSC[m]=(conclUSC[m]||0)+(parseFloat(o.usc)||0);
+      const maxStack = Math.max(...stackCols.map(c=>c.total), 1);
+      const colWS=62, barHS=110, topPadS=44, botPadS=36;
+      const svgWS = padL + stackCols.length*colWS + padL;
+      const svgHS = topPadS + barHS + botPadS;
+
+      let svgConcl = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWS}" height="${svgHS}"
+        style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+      svgConcl += `<line x1="${padL}" y1="${topPadS+barHS}" x2="${svgWS-padL}" y2="${topPadS+barHS}" stroke="#374151" stroke-width="1"/>`;
+
+      stackCols.forEach((col,i)=>{
+        const x  = padL + i*colWS;
+        const cx = x + colWS/2 - 4;
+        const wS = colWS-10;
+        const tot= col.total;
+        if(tot===0){
+          svgConcl += `<text x="${cx}" y="${topPadS+barHS-6}" text-anchor="middle" font-size="9" fill="#374151">—</text>`;
+        } else {
+          // Calcular alturas de cada segmento (proporcional ao total geral)
+          const scale = v => Math.round((v/maxStack)*barHS);
+          const hA = col.atras.length   > 0 ? Math.max(4, scale(col.atras.length))   : 0;
+          const hP = col.noPrazo.length > 0 ? Math.max(4, scale(col.noPrazo.length)) : 0;
+          const hF = col.comFolga.length> 0 ? Math.max(4, scale(col.comFolga.length)): 0;
+          const hTot = hA+hP+hF;
+          let curY = topPadS + barHS - hTot;
+
+          // 🟢 COM FOLGA (fundo)
+          if(hF>0){
+            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hF}" rx="${curY===topPadS+barHS-hTot?'5 5 0 0':'0'}" fill="#22C55E" opacity="0.85"/>`;
+            curY += hF;
+          }
+          // 🟡 NO PRAZO
+          if(hP>0){
+            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hP}" fill="#F59E0B" opacity="0.85"/>`;
+            curY += hP;
+          }
+          // 🔴 ATRASADA (topo)
+          if(hA>0){
+            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hA}" rx="${hP===0&&hF===0?'5 5 0 0':'0'}" fill="#EF4444" opacity="0.85"/>`;
+          }
+
+          // Label total acima
+          const lblY = topPadS + barHS - hTot - 5;
+          svgConcl += `<text x="${cx}" y="${lblY}" text-anchor="middle" font-size="12" font-weight="800" fill="#e8eaf0">${tot}</text>`;
+          // USC total acima do número
+          const totUSC = col.uscAtras+col.uscPrazo+col.uscFolga;
+          svgConcl += `<text x="${cx}" y="${lblY-14}" text-anchor="middle" font-size="9" font-weight="600" fill="#9ca3af">${fmtNum(totUSC)} USC</text>`;
+        }
+        // Mês
+        svgConcl += `<text x="${cx}" y="${topPadS+barHS+14}" text-anchor="middle" font-size="9" fill="#9ca3af">${col.m}</text>`;
       });
+
+      // Legenda
+      const legY = topPadS+barHS+28;
+      svgConcl += `
+        <rect x="${padL}" y="${legY}" width="10" height="10" rx="2" fill="#EF4444"/>
+        <text x="${padL+14}" y="${legY+9}" font-size="9" fill="#9ca3af">Concluiu atrasada</text>
+        <rect x="${padL+130}" y="${legY}" width="10" height="10" rx="2" fill="#F59E0B"/>
+        <text x="${padL+144}" y="${legY+9}" font-size="9" fill="#9ca3af">No prazo (≤30d)</text>
+        <rect x="${padL+260}" y="${legY}" width="10" height="10" rx="2" fill="#22C55E"/>
+        <text x="${padL+274}" y="${legY+9}" font-size="9" fill="#9ca3af">Com folga (>30d)</text>`;
+      svgConcl += '</svg>';
+
+      const totConclQ = stackCols.reduce((s,c)=>s+c.total,0);
 
       html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;border-top:3px solid ${cor}">
         <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:800;color:${cor};margin-bottom:16px">${e}</div>
 
-        <!-- Vencimentos -->
-        <div style="margin-bottom:16px">
-          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
-            📅 Por Mês de Vencimento (data limite)
+        <!-- Gráfico 1: Obras em mãos (sem conclusão) por linha do tempo -->
+        <div style="margin-bottom:20px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">
+            📅 Obras em Mãos — sem conclusão, por data de vencimento
           </div>
-          ${svgBarDuplo(vencQtd, vencUSC, 'Obras a vencer / USC em carteira por mês', cor)}
+          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">
+            <span style="color:#EF4444">⚠️ Atrasadas</span> &nbsp;|&nbsp;
+            <span style="color:#22C55E">Mês atual</span> &nbsp;|&nbsp;
+            Próximos 12 meses &nbsp;|&nbsp; <span style="color:#9ca3af">*Além de 12 meses (apenas meses com obra)</span>
+          </div>
+          <div style="overflow-x:auto">${svgVenc}</div>
+          <div style="display:flex;gap:20px;margin-top:10px;padding:8px 12px;background:var(--surface2);border-radius:8px">
+            <div><span style="font-size:10px;color:var(--muted)">OBRAS EM MÃOS:</span>
+              <span style="font-size:16px;font-weight:800;color:${cor};margin-left:8px">${totVencQ}</span></div>
+            <div><span style="font-size:10px;color:var(--muted)">USC EM MÃOS:</span>
+              <span style="font-size:16px;font-weight:800;color:${cor};margin-left:8px">${fmtNum(totVencUSC)} USC</span></div>
+          </div>
         </div>
 
-        <!-- Conclusões -->
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
-            ✅ Conclusões Registradas por Mês
+        <!-- Gráfico 2: Conclusões com urgência empilhada -->
+        <div style="border-top:1px solid var(--border);padding-top:16px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">
+            ✅ Obras Concluídas — últimos 12 meses (por urgência)
           </div>
-          ${svgBarDuplo(conclQtd, conclUSC, 'Obras concluídas / USC concluída por mês', '#22C55E')}
+          <div style="font-size:10px;color:var(--muted);margin-bottom:10px">
+            Cada barra mostra se a empreiteira priorizou obras urgentes ou obras com folga de prazo
+          </div>
+          <div style="overflow-x:auto">${svgConcl}</div>
+          <div style="display:flex;gap:20px;margin-top:10px;padding:8px 12px;background:var(--surface2);border-radius:8px">
+            <div><span style="font-size:10px;color:var(--muted)">TOTAL CONCLUÍDAS (12m):</span>
+              <span style="font-size:16px;font-weight:800;color:#22C55E;margin-left:8px">${totConclQ}</span></div>
+            <div><span style="font-size:10px;color:#EF4444">🔴 Atrasadas:</span>
+              <span style="font-weight:700;color:#EF4444;margin-left:4px">${stackCols.reduce((s,c)=>s+c.atras.length,0)}</span></div>
+            <div><span style="font-size:10px;color:#F59E0B">🟡 No prazo:</span>
+              <span style="font-weight:700;color:#F59E0B;margin-left:4px">${stackCols.reduce((s,c)=>s+c.noPrazo.length,0)}</span></div>
+            <div><span style="font-size:10px;color:#22C55E">🟢 Com folga:</span>
+              <span style="font-weight:700;color:#22C55E;margin-left:4px">${stackCols.reduce((s,c)=>s+c.comFolga.length,0)}</span></div>
+          </div>
         </div>
       </div>`;
     });
