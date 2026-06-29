@@ -2802,7 +2802,7 @@ function renderCarteira(){
   const totalUSC = ativas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
   const totalULV = ativas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
   const emNoPrazo = ativas.filter(o=>!o.conclusao&&o.dataLimite&&hoje_s<=o.dataLimite).length;
-  const atrasadas = ativas.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite).length;
+  const atrasadas = ativas.filter(o=>!o.conclusao&&o.dataLimite&&hoje_s>o.dataLimite).length;
   const conclNoP  = ativas.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao<=o.dataLimite).length;
   const conclForaP= ativas.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao>o.dataLimite).length;
   const encerradas= ativas.filter(o=>o.armazenado).length;
@@ -2844,7 +2844,7 @@ function renderCarteira(){
     const usc = sub.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
     const ulv = sub.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
     const uscMaos = sub.reduce((s,o)=>s+calcUSCPendente(o),0);
-    const atr = sub.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite).length;
+    const atr = sub.filter(o=>!o.conclusao&&o.dataLimite&&hoje_s>o.dataLimite).length; // atrasada = sem conclusão após vencimento
     const cnp = sub.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao<=o.dataLimite).length;
     const cfp = sub.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao>o.dataLimite).length;
     const c = gc(e);
@@ -2888,32 +2888,38 @@ function renderCarteira(){
       const sub = ativas.filter(o=>o.empreiteira===e && (o.tipo==='R1'||o.tipo==='R2'));
       const cor = gc(e);
 
-      // ── helper: comparar meses MM/YYYY ──────────────────────────
-      const mesVal = m => { const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
-      const hoje_d = new Date();
-      const mesAtualVal = hoje_d.getFullYear()*100 + (hoje_d.getMonth()+1);
-      const mes12Val    = mesAtualVal + (mesAtualVal%100 === 12 ? 89 : 12); // +12 meses
+      // ── helpers ──────────────────────────────────────────────────
+      const mesVal  = m => { const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
+      const hoje_d  = new Date();
+      const hoje_s_chart = hoje_s; // YYYY-MM-DD string do dia de hoje
 
-      // próximos 12 meses (incluindo mês atual)
+      // próximos 12 meses a partir do mês atual (índice 0 = mês atual)
       const prox12 = [];
       for(let i=0;i<=12;i++){
         const d=new Date(hoje_d.getFullYear(), hoje_d.getMonth()+i, 1);
         prox12.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
       }
 
-      // ── GRÁFICO 1: Obras SEM conclusão por linha do tempo ───────
-      // Somente obras sem conclusão (único critério para sair de "ativa")
+      // ── GRÁFICO 1: Obras SEM conclusão por linha do tempo ────────
       const semConcl = sub.filter(o=>!o.conclusao);
 
-      // ATRASADAS: sem conclusão E dataLimite < início do mês atual
-      // (independente de Med.70 ou Med.230 — só a conclusão libera a obra)
-      const atrasadasCol = semConcl.filter(o=>o.dataLimite && mesVal(mesStr(o.dataLimite)||'01/1900') < mesAtualVal);
+      // ATRASADAS: sem conclusão E dataLimite ANTERIOR a HOJE (comparação diária exata)
+      // Obras que venceram ontem ou antes, mesmo que seja dentro do mês atual
+      const atrasadasCol = semConcl.filter(o => o.dataLimite && o.dataLimite < hoje_s_chart);
 
-      // obras dentro dos próximos 12 meses (inclusive mês atual)
+      // MÊS ATUAL: sem conclusão, dataLimite >= hoje (ainda não venceu), vence este mês
       const prox12Map = {};
-      prox12.forEach(m=>{ prox12Map[m] = semConcl.filter(o=>mesStr(o.dataLimite)===m); });
+      prox12.forEach((m, i) => {
+        if(i === 0){
+          // Mês atual: só obras que ainda NÃO venceram (dataLimite >= hoje)
+          prox12Map[m] = semConcl.filter(o => mesStr(o.dataLimite)===m && o.dataLimite >= hoje_s_chart);
+        } else {
+          // Meses futuros: todas as obras desse mês (nenhuma pode estar vencida)
+          prox12Map[m] = semConcl.filter(o => mesStr(o.dataLimite)===m);
+        }
+      });
 
-      // obras além dos 12 meses: agrupar por mês, somente se tiver obra
+      // além dos 12 meses: somente se tiver obra
       const alem12Map = {};
       semConcl.forEach(o=>{
         const m=mesStr(o.dataLimite); if(!m) return;
@@ -3111,7 +3117,7 @@ function renderCarteira(){
   }
 
   // ── 4. Obras Atrasadas (tabela detalhada) ─────────────────────────
-  const listaAtrasadas = ativas.filter(o=>!o.medida230&&o.dataLimite&&hoje_s>o.dataLimite)
+  const listaAtrasadas = ativas.filter(o=>!o.conclusao&&o.dataLimite&&hoje_s>o.dataLimite)
     .sort((a,b)=>a.dataLimite>b.dataLimite?1:-1);
 
   html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#EF4444;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px">
