@@ -172,6 +172,7 @@
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida230')">📋 Sem Med. 230</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('med230_sem280')">📋 Med.230 s/ 280</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('encerradas')">✅ Encerradas completas</button>
+          <button class="btn btn-secondary btn-sm" style="border-color:rgba(168,85,247,.4);color:#A855F7" onclick="filtroRapido('proc_cancelamento')">⏸ Proc. Cancelamento</button>
         <button class="btn btn-danger btn-sm" id="btnBulkDelete" style="display:none" onclick="bulkDeleteEncerradas()">🗑️ Excluir seleção</button>
         <button class="btn btn-sm" id="btnApagarTodas" style="display:none;background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.3);font-size:10px" onclick="apagarTodasObras()">⚠️ Apagar TODAS as obras</button>
       </div>
@@ -574,6 +575,19 @@
     </div>
   </div>
   <div class="modal-section" id="secCancelamento">
+    <!-- Processo de Cancelamento (destacar sem cancelar) -->
+    <div class="toggle-row" style="margin-bottom:14px;padding:10px 14px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.25);border-radius:8px">
+      <label class="toggle">
+        <input type="checkbox" id="oProcessoCancelamento">
+        <span class="toggle-slider" style="background:#A855F7"></span>
+      </label>
+      <div>
+        <span class="toggle-lbl" style="color:#A855F7">⏸ Processo de Cancelamento</span>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">
+          Obra continua ativa mas fica destacada em roxo para acompanhamento e futura cancelação formal.
+        </div>
+      </div>
+    </div>
     <div class="modal-section-title" style="color:var(--red)">⛔ Cancelamento da Obra</div>
     <div class="toggle-row">
       <label class="toggle"><input type="checkbox" id="oCancelado" onchange="toggleCancelamento()"><span class="toggle-slider"></span></label>
