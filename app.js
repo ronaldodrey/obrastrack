@@ -1085,7 +1085,8 @@ function renderObras(){
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
-  else if(_filtroRapidoAtivo === 'encerradas')    baseList = baseList.filter(o=>o.armazenado);
+  else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
+  else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
   const list = aplicarFiltros(baseList);
   const ativos = contarFiltrosAtivos() + (_filtroRapidoAtivo?1:0);
   const btnLimpar = document.getElementById('btnLimparFiltros');
@@ -1121,13 +1122,18 @@ function renderObras(){
       ?`${fmtTxt((o.kaffaEntries||[]).slice(-1)[0]?.data)} <span class="chip ${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'Final':'Parc.'}</span>`
       :fmt(o.kaffa);
     // Row background color based on status
-    const rowBg = (o.pendencia&&!o.pendenciaResolvida)
-      ? 'background:rgba(249,115,22,.07);'
-      : (statusOf(o)==='Atrasada'||statusOf(o)==='Encaminhar Cadastro Urgente')
-        ? 'background:rgba(239,68,68,.07);'
-        : '';
+    const rowBg = o.processoCancelamento && !o.cancelado
+      ? 'background:rgba(168,85,247,.08);border-left:2px solid #A855F7;'
+      : (o.pendencia&&!o.pendenciaResolvida)
+        ? 'background:rgba(249,115,22,.07);'
+        : (statusOf(o)==='Atrasada'||statusOf(o)==='Encaminhar Cadastro Urgente')
+          ? 'background:rgba(239,68,68,.07);'
+          : '';
+    const procCancBadge = o.processoCancelamento && !o.cancelado
+      ? '<span style="font-size:8px;background:rgba(168,85,247,.2);color:#A855F7;border:1px solid rgba(168,85,247,.4);padding:1px 5px;border-radius:4px;margin-left:4px">⏸ CANC.</span>'
+      : '';
     return `<tr style="${rowBg}">
-      <td>${statusHtml(o)}</td>
+      <td>${statusHtml(o)}${procCancBadge}</td>
       <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
       <td>${o.cidade||'—'}</td>
@@ -1784,6 +1790,7 @@ window.saveObra=async function(){
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
         paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
+        processoCancelamento:gChk('oProcessoCancelamento'),
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
         atualizadaEm:serverTimestamp()
       };
@@ -2257,7 +2264,7 @@ window.filtroRapido=function(tipo){
   const btnLimpar=document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display=tipo?'inline-flex':'none';
   const resumo=document.getElementById('filtrosResumo');
-  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','encerradas':'Encerradas completas'};
+  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
   if(resumo) resumo.textContent=tipo?'Filtro rápido: '+(labels[tipo]||tipo):'';
   renderObras();
 };
@@ -2358,7 +2365,8 @@ window.exportXLSXFiltrado=function(){
   if(_filtroRapidoAtivo==='sem_medida70')     base=base.filter(o=>o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo==='sem_medida230') base=base.filter(o=>o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
-  else if(_filtroRapidoAtivo==='encerradas')    base=base.filter(o=>o.armazenado);
+  else if(_filtroRapidoAtivo==='encerradas')          base=base.filter(o=>o.armazenado);
+  else if(_filtroRapidoAtivo==='proc_cancelamento')   base=base.filter(o=>o.processoCancelamento&&!o.cancelado);
   gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
 };
 window.exportCSV=window.exportXLSX;
@@ -2876,7 +2884,8 @@ function renderCarteira(){
     html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(580px,1fr));gap:20px;margin-bottom:24px">`;
 
     empPrincipais.forEach(e=>{
-      const sub = ativas.filter(o=>o.empreiteira===e);
+      // Somente R1 e R2 para o gráfico de empreiteira
+      const sub = ativas.filter(o=>o.empreiteira===e && (o.tipo==='R1'||o.tipo==='R2'));
       const cor = gc(e);
 
       // ── helper: comparar meses MM/YYYY ──────────────────────────
@@ -2893,9 +2902,11 @@ function renderCarteira(){
       }
 
       // ── GRÁFICO 1: Obras SEM conclusão por linha do tempo ───────
+      // Somente obras sem conclusão (único critério para sair de "ativa")
       const semConcl = sub.filter(o=>!o.conclusao);
 
-      // coluna de atrasadas: dataLimite < mês atual
+      // ATRASADAS: sem conclusão E dataLimite < início do mês atual
+      // (independente de Med.70 ou Med.230 — só a conclusão libera a obra)
       const atrasadasCol = semConcl.filter(o=>o.dataLimite && mesVal(mesStr(o.dataLimite)||'01/1900') < mesAtualVal);
 
       // obras dentro dos próximos 12 meses (inclusive mês atual)
