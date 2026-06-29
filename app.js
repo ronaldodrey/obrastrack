@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════
-//  SPCC_ARLAG — app.js
+//  SPPC_ARLAG — app.js
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged }
@@ -20,7 +20,7 @@ const db     = getFirestore(fbApp);
 
 // ── GLOBAL ERROR HANDLER ─────────────────────────────
 window.addEventListener('error', e => {
-  console.error('SPCC_ARLAG Error:', e.message, e.filename, e.lineno);
+  console.error('SPPC_ARLAG Error:', e.message, e.filename, e.lineno);
   const dc = document.getElementById('dashContent');
   if(dc && dc.innerHTML.includes('Carregando')) {
     dc.innerHTML = `<div style="padding:24px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#EF4444;font-size:12px">
@@ -30,7 +30,7 @@ window.addEventListener('error', e => {
   }
 });
 window.addEventListener('unhandledrejection', e => {
-  console.error('SPCC_ARLAG Promise Error:', e.reason);
+  console.error('SPPC_ARLAG Promise Error:', e.reason);
 });
 
 // EmailJS
@@ -2833,6 +2833,232 @@ function renderCarteira(){
   </div>`;
 
   // ── 2. Distribuição por Empreiteira (R1 / R2 / ODI / USC) ────────
+  // ── GRÁFICO GERAL: Obras sem conclusão por mês de vencimento ──────
+  (()=>{
+    const semConclAll = ativas.filter(o=>!o.conclusao&&!o.cancelado);
+    const hoje_d2 = new Date();
+    const hoje_str = hojeStr();
+    const mesVal2  = m=>{ const [mm,yy]=m.split('/'); return +yy*100+ +mm; };
+    const mesStr2  = s=>{ if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
+
+    // Próximos 12 meses (0 = mês atual)
+    const prox12g = [];
+    for(let i=0;i<=12;i++){
+      const d=new Date(hoje_d2.getFullYear(),hoje_d2.getMonth()+i,1);
+      prox12g.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
+    }
+
+    // Atrasadas (sem conclusão, dataLimite < hoje)
+    const atrAll = semConclAll.filter(o=>o.dataLimite&&o.dataLimite<hoje_str);
+    const uscAtr = atrAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+
+    // Mês atual (não vencidas ainda)
+    const mesAtualObras = semConclAll.filter(o=>mesStr2(o.dataLimite)===prox12g[0]&&o.dataLimite>=hoje_str);
+    const uscMesAtual = mesAtualObras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+
+    // Próximos 12 meses
+    const prox12gMap = {};
+    prox12g.forEach((m,i)=>{
+      if(i===0) prox12gMap[m] = mesAtualObras;
+      else prox12gMap[m] = semConclAll.filter(o=>mesStr2(o.dataLimite)===m);
+    });
+
+    // Além de 12 meses
+    const alem12gMap = {};
+    semConclAll.forEach(o=>{
+      const m=mesStr2(o.dataLimite); if(!m) return;
+      if(mesVal2(m) > mesVal2(prox12g[12])){
+        if(!alem12gMap[m]) alem12gMap[m]=[];
+        alem12gMap[m].push(o);
+      }
+    });
+    const alem12gMeses = Object.keys(alem12gMap).sort((a,b)=>mesVal2(a)-mesVal2(b));
+
+    // Montar colunas
+    const colsG = [
+      { lbl:'⚠️ Atras.', q:atrAll.length,   usc:uscAtr,      cor:'#EF4444', isAtras:true },
+      ...prox12g.map((m,i)=>({
+        lbl: m,
+        q:   prox12gMap[m].length,
+        usc: prox12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+        cor: i===0?'#22C55E':'#7c6af7',
+        isMesAtual: i===0
+      })),
+      ...alem12gMeses.map(m=>({
+        lbl: m+'*',
+        q:   alem12gMap[m].length,
+        usc: alem12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+        cor: '#7c6af788'
+      }))
+    ];
+
+    const maxQg = Math.max(...colsG.map(c=>c.q), 1);
+    const colWg=62, barHg=120, topPadg=54, botPadg=36, padLg=8;
+    const svgWg = padLg + colsG.length*colWg + padLg;
+    const svgHg = topPadg + barHg + botPadg;
+
+    let svgG = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWg}" height="${svgHg}"
+      style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+    svgG += `<line x1="${padLg}" y1="${topPadg+barHg}" x2="${svgWg-padLg}" y2="${topPadg+barHg}" stroke="#374151" stroke-width="1"/>`;
+
+    // Separador "além de 12 meses"
+    if(alem12gMeses.length){
+      const sepX = padLg + (1+13)*colWg - 4;
+      svgG += `<line x1="${sepX}" y1="${topPadg-4}" x2="${sepX}" y2="${topPadg+barHg+20}" stroke="#374151" stroke-dasharray="4,3" stroke-width="1" opacity="0.5"/>`;
+      svgG += `<text x="${sepX+4}" y="${topPadg-8}" font-size="8" fill="#6b7280">além 12m</text>`;
+    }
+
+    colsG.forEach((col,i)=>{
+      const x = padLg + i*colWg;
+      const cx = x + colWg/2 - 4;
+      const wg = colWg-10;
+      const bh = col.q>0 ? Math.max(8, Math.round((col.q/maxQg)*barHg)) : 0;
+      const barY = topPadg + barHg - bh;
+
+      if(bh>0){
+        svgG += `<rect x="${x+4}" y="${barY}" width="${wg}" height="${bh}" rx="5" fill="${col.cor}" opacity="0.85"/>`;
+        svgG += `<rect x="${x+4}" y="${barY}" width="${wg}" height="${Math.min(bh,8)}" rx="5" fill="white" opacity="0.1"/>`;
+      }
+
+      if(col.q>0){
+        const uscLbl = col.usc>=1000?(col.usc/1000).toFixed(1).replace('.0','')+'k USC':`${col.usc.toFixed(0)} USC`;
+        svgG += `<text x="${cx}" y="${barY-30}" text-anchor="middle" font-size="9" font-weight="600" fill="${col.cor}bb">${uscLbl}</text>`;
+        svgG += `<text x="${cx}" y="${barY-15}" text-anchor="middle" font-size="12" font-weight="800" fill="${col.cor}">${col.q} obra${col.q!==1?'s':''}</text>`;
+      } else {
+        svgG += `<text x="${cx}" y="${topPadg+barHg-6}" text-anchor="middle" font-size="9" fill="#374151">—</text>`;
+      }
+      const lblColor = col.isAtras?'#EF4444':col.isMesAtual?'#22C55E':'#9ca3af';
+      svgG += `<text x="${cx}" y="${topPadg+barHg+16}" text-anchor="middle" font-size="9" font-weight="${col.isAtras||col.isMesAtual?'700':'400'}" fill="${lblColor}">${col.lbl}</text>`;
+    });
+    svgG += '</svg>';
+
+    const totQ   = semConclAll.length;
+    const totUSC = semConclAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const totULC_fmt = totUSC>=1000?(totUSC/1000).toFixed(1).replace('.0','')+'k':totUSC.toFixed(1);
+
+    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;margin-bottom:2px">📅 Visão Geral — Obras em Mãos por Mês de Vencimento</div>
+          <div style="font-size:10px;color:var(--muted)">
+            <span style="color:#EF4444">⚠️ Atrasadas</span> &nbsp;|&nbsp;
+            <span style="color:#22C55E">Mês atual</span> &nbsp;|&nbsp;
+            Próximos 12 meses &nbsp;|&nbsp;
+            <span style="color:var(--muted)">*Além de 12 meses (só meses com obra)</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:20px">
+          <div style="text-align:center">
+            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${totQ}</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">Obras em mãos</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${totULC_fmt} USC</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">USC em mãos</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#EF4444">${atrAll.length}</div>
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">Atrasadas</div>
+          </div>
+        </div>
+      </div>
+      <div style="overflow-x:auto">${svgG}</div>
+    </div>`;
+  })();
+
+
+  // ── GRÁFICO GERAL DE CARTEIRA ───────────────────────────────────────
+  {
+    const semConclAll = ativas.filter(o=>!o.conclusao&&!o.cancelado);
+    const hoje_str2 = hojeStr();
+    const mesVal2 = m => { const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
+    const mesStr2 = s => { if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
+    const hoje_d2 = new Date();
+
+    // Colunas do eixo: [Atrasadas] + [Mês Atual] + [próximos 12 meses] + [além 12m com obra]
+    const prox12g = [];
+    for(let i=0;i<=12;i++){
+      const d=new Date(hoje_d2.getFullYear(),hoje_d2.getMonth()+i,1);
+      prox12g.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
+    }
+    const atrAll = semConclAll.filter(o=>o.dataLimite && o.dataLimite < hoje_str2);
+    const prox12gMap = {};
+    prox12g.forEach((m,i)=>{
+      if(i===0) prox12gMap[m] = semConclAll.filter(o=>mesStr2(o.dataLimite)===m&&o.dataLimite>=hoje_str2);
+      else      prox12gMap[m] = semConclAll.filter(o=>mesStr2(o.dataLimite)===m);
+    });
+    const alem12gMap = {};
+    semConclAll.forEach(o=>{
+      const m=mesStr2(o.dataLimite); if(!m||mesVal2(m)<=mesVal2(prox12g[12])) return;
+      if(!alem12gMap[m]) alem12gMap[m]=[]; alem12gMap[m].push(o);
+    });
+    const alem12gMeses = Object.keys(alem12gMap).sort((a,b)=>mesVal2(a)-mesVal2(b));
+
+    const colsG = [
+      { lbl:'⚠️ Atras.', q:atrAll.length, usc:atrAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0), cor:'#EF4444', isAtras:true },
+      ...prox12g.map((m,i)=>({
+        lbl:m, q:prox12gMap[m].length,
+        usc:prox12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+        cor:i===0?'#22C55E':'#7c6af7', isMesAtual:i===0
+      })),
+      ...alem12gMeses.map(m=>({ lbl:m+'*', q:alem12gMap[m].length, usc:alem12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0), cor:'#7c6af766' }))
+    ];
+
+    const maxQg=Math.max(...colsG.map(c=>c.q),1);
+    const colWg=64,barHg=120,topPadg=56,botPadg=30,padLg=8;
+    const svgWg=padLg+colsG.length*colWg+padLg;
+
+    let svgG=`<svg xmlns="http://www.w3.org/2000/svg" width="${svgWg}" height="${topPadg+barHg+botPadg}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+    svgG+=`<line x1="${padLg}" y1="${topPadg+barHg}" x2="${svgWg-padLg}" y2="${topPadg+barHg}" stroke="#374151" stroke-width="1"/>`;
+    if(alem12gMeses.length){
+      const sx=padLg+(1+13)*colWg-4;
+      svgG+=`<line x1="${sx}" y1="${topPadg-6}" x2="${sx}" y2="${topPadg+barHg+20}" stroke="#374151" stroke-dasharray="4,3" stroke-width="1" opacity="0.4"/>`;
+      svgG+=`<text x="${sx+4}" y="${topPadg-10}" font-size="8" fill="#6b7280">+12m</text>`;
+    }
+    colsG.forEach((col,i)=>{
+      const x=padLg+i*colWg, cx=x+colWg/2-4, wg=colWg-10;
+      const bh=col.q>0?Math.max(8,Math.round((col.q/maxQg)*barHg)):0;
+      const barY=topPadg+barHg-bh;
+      if(bh>0){
+        svgG+=`<rect x="${x+4}" y="${barY}" width="${wg}" height="${bh}" rx="5" fill="${col.cor}" opacity="0.85"/>`;
+        svgG+=`<rect x="${x+4}" y="${barY}" width="${wg}" height="${Math.min(bh,8)}" rx="5" fill="white" opacity="0.1"/>`;
+      }
+      if(col.q>0){
+        const u=col.usc; const uLbl=u>=1000?(u/1000).toFixed(1).replace('.0','')+'k':u.toFixed(0);
+        svgG+=`<text x="${cx}" y="${barY-30}" text-anchor="middle" font-size="9" font-weight="600" fill="${col.cor}bb">${uLbl} USC</text>`;
+        svgG+=`<text x="${cx}" y="${barY-14}" text-anchor="middle" font-size="13" font-weight="800" fill="${col.cor}">${col.q}</text>`;
+      } else {
+        svgG+=`<text x="${cx}" y="${topPadg+barHg-8}" text-anchor="middle" font-size="9" fill="#374151">—</text>`;
+      }
+      const lc=col.isAtras?'#EF4444':col.isMesAtual?'#22C55E':'#9ca3af';
+      svgG+=`<text x="${cx}" y="${topPadg+barHg+18}" text-anchor="middle" font-size="9" font-weight="${col.isAtras||col.isMesAtual?700:400}" fill="${lc}">${col.lbl}</text>`;
+    });
+    svgG+='</svg>';
+
+    const totQ=semConclAll.length;
+    const totUSC=semConclAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const fN=v=>v>=1000?(v/1000).toFixed(1).replace('.0','')+'k':v.toFixed(1);
+    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+        <div>
+          <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;margin-bottom:4px">📅 Visão Geral da Carteira — Obras em Mãos por Mês de Vencimento</div>
+          <div style="font-size:10px;color:var(--muted)">
+            <span style="color:#EF4444">⚠️ Atrasadas</span> &nbsp;|&nbsp;
+            <span style="color:#22C55E">Mês atual</span> &nbsp;|&nbsp;
+            <span style="color:#7c6af7">Próximos 12 meses</span> &nbsp;|&nbsp;
+            <span style="color:var(--muted)">*Além de 12m (só meses com obra)</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:24px;flex-shrink:0">
+          <div style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${totQ}</div><div style="font-size:9px;color:var(--muted)">OBRAS EM MÃOS</div></div>
+          <div style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${fN(totUSC)} USC</div><div style="font-size:9px;color:var(--muted)">USC EM MÃOS</div></div>
+          <div style="text-align:center"><div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#EF4444">${atrAll.length}</div><div style="font-size:9px;color:var(--muted)">ATRASADAS</div></div>
+        </div>
+      </div>
+      <div style="overflow-x:auto">${svgG}</div>
+    </div>`;
+  }
+
   html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px">Distribuição por Empreiteira</div>`;
   const emprNames = [...new Set(ativas.map(o=>o.empreiteira).filter(Boolean))].sort();
   const tipos = ['R1','R2','ODI'];
@@ -3463,8 +3689,8 @@ window.gerarRelatorio = function(){
 </div>
 
 <div class="footer">
-  <span>SPCC ARLAG · ${empNome} · ${periodoLabel}</span>
-  <span>Relatório gerado em ${dataGer} via SPCC_ARLAG</span>
+  <span>SPPC ARLAG · ${empNome} · ${periodoLabel}</span>
+  <span>Relatório gerado em ${dataGer} via SPPC_ARLAG</span>
 </div>
 
 </body></html>`;
