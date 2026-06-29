@@ -100,7 +100,8 @@ function statusOf(o){
   if(o.medida280)    return 'Aguard. Armazenamento';
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70)     return 'Aguard. Medida 230';
-  if(o.medicao)      return 'Aguard. Medida 70';
+  // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
+  if(o.medicao)      return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>30) return 'Encaminhar Cadastro Urgente';
@@ -885,7 +886,7 @@ function prazoMedida70e230(o)  { return o.dataLimite || null; }
 function prazoMedida280(o)      { return o.medida230 ? ultimoDiaMesSeginte(o.medida230) : null; }
 
 function diasParaMedida(o, tipo){
-  if(tipo === 'med70')  return o.medida70  ? null : diasRestantes(prazoMedida70e230(o));
+  if(tipo === 'med70')  return (o.medida70 || o.tipo==='R2') ? null : diasRestantes(prazoMedida70e230(o));
   if(tipo === 'med230') return o.medida230 ? null : diasRestantes(prazoMedida70e230(o));
   if(tipo === 'med280') return o.medida280 ? null : diasRestantes(prazoMedida280(o));
   return null;
@@ -925,7 +926,7 @@ function renderMonitorPrazos(list){
   }
 
   // Obras que precisam de Med.70: tem conclusão, sem med70 (prazo = dataLimite)
-  const sem70  = ativas.filter(o => o.conclusao && !o.medida70);
+  const sem70  = ativas.filter(o => o.conclusao && !o.medida70 && o.tipo !== 'R2'); // R2 não exige Med.70
   // Obras que precisam de Med.230: tem conclusão, sem med230 (prazo = dataLimite)
   const sem230 = ativas.filter(o => o.conclusao && !o.medida230);
   // Obras que precisam de Med.280: tem med230, sem med280
@@ -1152,8 +1153,8 @@ function renderObras(){
       <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
       <td>${o.usc||'—'}</td>
       <td>${o.ulv||'—'}</td>
-      <td>${fmt(o.medida70)}</td>
-      <td>${celulaPrazo(diasParaMedida(o,'med70'))}</td>
+      <td>${o.tipo==='R2'?'<span style="color:var(--muted);font-size:10px">N/A</span>':fmt(o.medida70)}</td>
+      <td>${o.tipo==='R2'?'<span style="color:var(--muted)">—</span>':celulaPrazo(diasParaMedida(o,'med70'))}</td>
       <td>${fmt(o.medida230)}</td>
       <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
@@ -1234,6 +1235,9 @@ window.openObraModal=function(obraId){
     set('oPendenciaOutro',obra.pendenciaOutro); set('oPrazoPendencia',obra.prazoPendencia);
     set('oRegularizacao',obra.regularizacaoData); set('oMedicao',obra.medicao);
     set('oMedida70',obra.medida70); set('oMedida230',obra.medida230); set('oMedida280',obra.medida280);
+    // R2 não exige Med.70: desabilitar campo e mostrar aviso
+    const m70el=document.getElementById('oMedida70');
+    if(m70el){ m70el.disabled=(obra.tipo==='R2'); m70el.title=(obra.tipo==='R2'?'Medida 70 não se aplica a obras R2':''); }
     set('oMedida280Motivo',obra.medida280Motivo);
     set('oTipoImpedimento',obra.tipoImpedimento); set('oImpedimentoOutro',obra.impedimentoOutro);
     set('oDataCancelamento',obra.dataCancelamento); set('oMotivoCancelamento',obra.motivoCancelamento);
@@ -2091,8 +2095,8 @@ async function verificarNotificacoes(){
         }
       }
     }
-    // Medida 70 próxima de vencer
-    if(!o.medida70&&o.dataLimite){
+    // Medida 70 próxima de vencer (somente R1 e ODI)
+    if(!o.medida70&&o.dataLimite&&o.tipo!=='R2'){
       const diasM=diasRestantes(o.dataLimite);
       if(diasM<=EMAILJS_CONFIG.diasAvisoMedida){
         const fiscal=users.find(u=>u.vinculo===o.fiscal&&u.perfil==='fiscal');
