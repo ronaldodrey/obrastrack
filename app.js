@@ -2811,10 +2811,16 @@ function renderCarteira(){
   const conclForaP= ativas.filter(o=>o.conclusao&&o.dataLimite&&o.conclusao>o.dataLimite).length;
   const encerradas= ativas.filter(o=>o.armazenado).length;
 
-  let html = `<div style="margin-bottom:8px">
-    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">📈 Carteira de Obras</div>
-    <div style="font-size:11px;color:var(--muted)">Foto atual da carteira · ${ativas.length} obras ativas · gerado em ${fmtTxt(hoje_s)}</div>
-  </div>
+  let html = `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px;flex-wrap:wrap">
+    <div>
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">📈 Carteira de Obras</div>
+      <div style="font-size:11px;color:var(--muted)">Foto atual da carteira · ${ativas.length} obras ativas · gerado em ${fmtTxt(hoje_s)}</div>
+    </div>
+    <button onclick="abrirModalRelatorio()"
+      style="flex-shrink:0;padding:10px 18px;background:linear-gradient(135deg,#7c6af7,#00e5a0);color:#0d1117;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px">
+      📄 Gerar Relatório de Empreiteira
+    </button>
+  </div>`;
   <div class="kpi-strip" style="margin-bottom:24px">
     ${kpiCard('Total de Obras',ativas.length,'na carteira','#00e5a0')}
     ${kpiCard('USC Total',totalUSC.toFixed(1),'previsto','#7c6af7')}
@@ -3160,3 +3166,310 @@ function renderCarteira(){
 
   cont.innerHTML = html;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  RELATÓRIO DE EMPREITEIRA
+// ══════════════════════════════════════════════════════════════════════
+window.abrirModalRelatorio = function(){
+  // Populate empreiteiras
+  const sel = document.getElementById('relEmpreiteira');
+  const emps = [...new Set(obras.filter(o=>!o.cancelado).map(o=>o.empreiteira).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">Selecione a empreiteira...</option>' +
+    emps.map(e=>`<option value="${e}">${e}</option>`).join('');
+
+  // Default custom period to last month
+  const d = new Date();
+  const ateM = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const deD  = new Date(d.getFullYear(), d.getMonth()-1, 1);
+  const deM  = `${deD.getFullYear()}-${String(deD.getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('relDe').value  = deM;
+  document.getElementById('relAte').value = ateM;
+
+  document.getElementById('ovRelatorio').style.display = 'flex';
+
+  document.getElementById('relPeriodo').onchange = function(){
+    document.getElementById('relCustomPeriodo').style.display =
+      this.value === 'custom' ? 'grid' : 'none';
+  };
+};
+
+window.fecharModalRelatorio = function(){
+  document.getElementById('ovRelatorio').style.display = 'none';
+};
+
+window.gerarRelatorio = function(){
+  const empNome = document.getElementById('relEmpreiteira').value;
+  if(!empNome){ alert('Selecione uma empreiteira.'); return; }
+
+  const periodo = document.getElementById('relPeriodo').value;
+  const hoje_d  = new Date();
+  let de, ate, periodoLabel;
+
+  if(periodo === 'mesAnterior'){
+    de  = new Date(hoje_d.getFullYear(), hoje_d.getMonth()-1, 1);
+    ate = new Date(hoje_d.getFullYear(), hoje_d.getMonth(),   0); // último dia mês anterior
+    const m = de.toLocaleString('pt-BR', {month:'long',year:'numeric'});
+    periodoLabel = m.charAt(0).toUpperCase()+m.slice(1);
+  } else if(periodo === 'mesAtual'){
+    de  = new Date(hoje_d.getFullYear(), hoje_d.getMonth(), 1);
+    ate = hoje_d;
+    const m = de.toLocaleString('pt-BR', {month:'long',year:'numeric'});
+    periodoLabel = m.charAt(0).toUpperCase()+m.slice(1)+' (em andamento)';
+  } else if(periodo === 'ultimos30'){
+    ate = hoje_d;
+    de  = new Date(hoje_d.getTime() - 30*86400000);
+    periodoLabel = 'Últimos 30 dias';
+  } else if(periodo === 'ultimos90'){
+    ate = hoje_d;
+    de  = new Date(hoje_d.getTime() - 90*86400000);
+    periodoLabel = 'Últimos 90 dias';
+  } else {
+    const deVal  = document.getElementById('relDe').value;
+    const ateVal = document.getElementById('relAte').value;
+    if(!deVal||!ateVal){ alert('Preencha o período.'); return; }
+    de  = new Date(deVal+'-01');
+    const [ay,am] = ateVal.split('-');
+    ate = new Date(+ay, +am, 0); // último dia do mês "até"
+    periodoLabel = `${fmtTxt(deVal+'-01')} a ${fmtTxt(ateVal+'-'+String(new Date(+ay,+am,0).getDate()).padStart(2,'0'))}`;
+  }
+
+  const deStr  = de.toISOString().split('T')[0];
+  const ateStr = ate.toISOString().split('T')[0];
+
+  // Obras da empreiteira concluídas no período
+  const subAll    = obras.filter(o=>o.empreiteira===empNome&&!o.cancelado);
+  const concluidas= subAll.filter(o=>o.conclusao&&o.conclusao>=deStr&&o.conclusao<=ateStr);
+  const em_mao    = subAll.filter(o=>!o.conclusao);
+
+  // ── Métricas de tempo ──────────────────────────────────────────
+  const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : null;
+  const lbl = v => v===null ? '—' : v+'d';
+
+  // 1. Tempo abertura → conclusão
+  const tConc = concluidas.map(o=>diff(o.dataAbertura,o.conclusao)).filter(v=>v!==null&&v>0);
+
+  // 2. Tempo conclusão → kaffa final
+  const tKaffa = concluidas
+    .map(o=>{
+      const kf=(o.kaffaEntries||[]).find(k=>k.tipo==='final');
+      return kf&&o.conclusao ? diff(o.conclusao,kf.data) : null;
+    }).filter(v=>v!==null&&v>=0);
+
+  // 3. Tempo kaffa → medição (par-a-par)
+  const tMedicao = [];
+  concluidas.forEach(o=>{
+    const kaffas = (o.kaffaEntries||[]).slice().sort((a,b)=>a.data>b.data?1:-1);
+    const meds   = (o.medicoes||[]).slice().sort((a,b)=>a.data>b.data?1:-1);
+    const kP = kaffas.filter(k=>k.tipo==='parcial');
+    const mP = meds.filter(m=>m.tipo==='parcial');
+    Math.min(kP.length,mP.length) && [...Array(Math.min(kP.length,mP.length))].forEach((_,i)=>{
+      const d=diff(kP[i].data,mP[i].data); if(d!==null&&d>=0) tMedicao.push(d);
+    });
+    const kF=kaffas.find(k=>k.tipo==='final'), mF=meds.find(m=>m.tipo==='final');
+    if(kF&&mF){ const d=diff(kF.data,mF.data); if(d!==null&&d>=0) tMedicao.push(d); }
+  });
+
+  // 4. Pontualidade
+  const noPrazo  = concluidas.filter(o=>o.dataLimite&&o.conclusao<=o.dataLimite).length;
+  const foraPrazo= concluidas.filter(o=>o.dataLimite&&o.conclusao>o.dataLimite).length;
+  const semLimite= concluidas.filter(o=>!o.dataLimite).length;
+
+  // USC
+  const uscConc  = concluidas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const uscMao   = em_mao.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+
+  // R1/R2/ODI breakdown
+  const byTipo   = t => concluidas.filter(o=>o.tipo===t).length;
+
+  // ── Montar HTML do relatório ───────────────────────────────────
+  const cor = gc(empNome)||'#00e5a0';
+  const dataGer = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
+
+  const rowsObras = concluidas
+    .sort((a,b)=>a.conclusao>b.conclusao?1:-1)
+    .map(o=>{
+      const kf=(o.kaffaEntries||[]).find(k=>k.tipo==='final');
+      const dias_prazo = o.dataLimite ? diff(o.conclusao,o.dataLimite) : null;
+      const status_prazo = dias_prazo===null?'—':dias_prazo>=0?`✅ +${dias_prazo}d`:`❌ ${dias_prazo}d`;
+      return `<tr>
+        <td>${o.numero||'—'}</td>
+        <td>${o.tipo||'—'}</td>
+        <td>${o.cidade||'—'}</td>
+        <td>${fmtTxt(o.conclusao)}</td>
+        <td>${fmtTxt(o.dataLimite)||'—'}</td>
+        <td style="text-align:center">${status_prazo}</td>
+        <td style="text-align:right">${o.usc||'—'}</td>
+        <td>${fmtTxt(kf?.data)||'—'}</td>
+        <td>${o.fiscal||'—'}</td>
+      </tr>`;
+    }).join('');
+
+  const relHtml = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Relatório — ${empNome} — ${periodoLabel}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'DM Mono',monospace;font-size:11px;color:#1a1a2e;background:#fff;padding:28px 36px}
+  .header{border-bottom:3px solid ${cor};padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end}
+  .header-left h1{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:${cor}}
+  .header-left h2{font-size:14px;font-weight:700;margin-top:4px}
+  .header-right{text-align:right;font-size:10px;color:#666;line-height:1.6}
+  .secao{margin-bottom:24px}
+  .secao-titulo{font-family:'Syne',sans-serif;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:#666;border-bottom:1px solid #e5e7eb;padding-bottom:6px;margin-bottom:12px}
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .kpi{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;border-left:3px solid ${cor}}
+  .kpi-val{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:${cor}}
+  .kpi-lbl{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .kpi-sub{font-size:10px;color:#374151;margin-top:4px}
+  .kpi-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .kpi-tempo{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;text-align:center}
+  .kpi-tempo .val{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:#1a1a2e}
+  .kpi-tempo .lbl{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .kpi-tempo .desc{font-size:10px;color:#374151;margin-top:6px;line-height:1.4}
+  .prazo-bar{display:flex;gap:0;border-radius:6px;overflow:hidden;height:20px;margin:8px 0}
+  .prazo-bar span{display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff}
+  table{width:100%;border-collapse:collapse;font-size:10px}
+  th{background:#f1f5f9;text-align:left;padding:7px 10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;font-size:9px;color:#374151;border-bottom:2px solid #e5e7eb}
+  td{padding:6px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  tr:nth-child(even) td{background:#fafafa}
+  .badge-prazo{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700}
+  .footer{margin-top:32px;border-top:1px solid #e5e7eb;padding-top:12px;font-size:9px;color:#9ca3af;display:flex;justify-content:space-between}
+  .em-maos{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;display:flex;gap:24px;margin-top:8px}
+  .em-maos .item{display:flex;flex-direction:column}
+  .em-maos .vv{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:#16a34a}
+  .em-maos .ll{font-size:9px;color:#15803d;text-transform:uppercase}
+  @media print{body{padding:16px 24px}.no-print{display:none!important}}
+  .btn-print{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:${cor};color:#0d1117;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;margin-bottom:20px}
+</style>
+</head>
+<body>
+
+<div class="no-print" style="margin-bottom:16px;display:flex;gap:12px;align-items:center">
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+  <span style="font-size:11px;color:#666">Use "Salvar como PDF" na impressora para exportar em PDF</span>
+</div>
+
+<div class="header">
+  <div class="header-left">
+    <h1>${empNome}</h1>
+    <h2>Relatório de Desempenho Mensal · Período: ${periodoLabel}</h2>
+  </div>
+  <div class="header-right">
+    <div style="font-weight:700">CELESC Distribuição S.A.</div>
+    <div>ARLAG — Agência Regional de Lages</div>
+    <div>DVPC / DVTC</div>
+    <div style="margin-top:4px">Gerado em ${dataGer}</div>
+  </div>
+</div>
+
+<!-- Seção 1: Resumo de Produção -->
+<div class="secao">
+  <div class="secao-titulo">1. Resumo de Produção no Período</div>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-val">${concluidas.length}</div>
+      <div class="kpi-lbl">Obras Concluídas</div>
+      <div class="kpi-sub">R1: ${byTipo('R1')} · R2: ${byTipo('R2')} · ODI: ${byTipo('ODI')}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val">${uscConc.toFixed(1)}</div>
+      <div class="kpi-lbl">USC Concluída</div>
+      <div class="kpi-sub">no período</div>
+    </div>
+    <div class="kpi" style="border-left-color:#22C55E">
+      <div class="kpi-val" style="color:#22C55E">${noPrazo}</div>
+      <div class="kpi-lbl">Concluídas no Prazo</div>
+      <div class="kpi-sub">${concluidas.length>0?Math.round(noPrazo/concluidas.length*100):0}% do total</div>
+    </div>
+    <div class="kpi" style="border-left-color:#EF4444">
+      <div class="kpi-val" style="color:#EF4444">${foraPrazo}</div>
+      <div class="kpi-lbl">Concluídas Fora do Prazo</div>
+      <div class="kpi-sub">${concluidas.length>0?Math.round(foraPrazo/concluidas.length*100):0}% do total</div>
+    </div>
+  </div>
+
+  ${concluidas.length>0?`
+  <div style="margin-bottom:6px;font-size:10px;color:#666">Pontualidade de entregas</div>
+  <div class="prazo-bar">
+    <span style="background:#22C55E;width:${Math.round(noPrazo/concluidas.length*100)}%">
+      ${noPrazo>0?noPrazo+'':''}
+    </span>
+    <span style="background:#EF4444;width:${Math.round(foraPrazo/concluidas.length*100)}%;${foraPrazo===0?'display:none':''}">
+      ${foraPrazo>0?foraPrazo:''}
+    </span>
+    ${semLimite>0?`<span style="background:#9ca3af;width:${Math.round(semLimite/concluidas.length*100)}%">${semLimite}</span>`:''}
+  </div>
+  <div style="display:flex;gap:16px;font-size:9px;color:#666">
+    <span>🟢 No prazo: ${noPrazo}</span>
+    <span>🔴 Fora do prazo: ${foraPrazo}</span>
+    ${semLimite>0?`<span>⚪ Sem data limite: ${semLimite}</span>`:''}
+  </div>
+  `:''}
+</div>
+
+<!-- Seção 2: Indicadores de Tempo -->
+<div class="secao">
+  <div class="secao-titulo">2. Indicadores de Tempo (média do período)</div>
+  <div class="kpi-grid-3">
+    <div class="kpi-tempo">
+      <div class="val">${lbl(avg(tConc))}</div>
+      <div class="lbl">Tempo de Execução</div>
+      <div class="desc">Média: abertura da obra → conclusão informada pela empreiteira</div>
+    </div>
+    <div class="kpi-tempo">
+      <div class="val">${lbl(avg(tKaffa))}</div>
+      <div class="lbl">Tempo para Kaffa Final</div>
+      <div class="desc">Média: conclusão da obra → registro do kaffa final</div>
+    </div>
+    <div class="kpi-tempo">
+      <div class="val">${lbl(avg(tMedicao))}</div>
+      <div class="lbl">Tempo para Medição (Fiscal)</div>
+      <div class="desc">Média: kaffa (parcial/final) → medição correspondente do fiscal</div>
+    </div>
+  </div>
+  ${tConc.length===0&&concluidas.length>0?'<p style="margin-top:8px;font-size:10px;color:#9ca3af">⚠️ Datas de abertura não disponíveis para cálculo de tempo de execução.</p>':''}
+</div>
+
+<!-- Seção 3: Obras em Mãos -->
+<div class="secao">
+  <div class="secao-titulo">3. Obras Ainda em Execução (sem conclusão)</div>
+  <div class="em-maos">
+    <div class="item"><div class="vv">${em_mao.length}</div><div class="ll">Obras em mãos</div></div>
+    <div class="item"><div class="vv">${uscMao.toFixed(1)}</div><div class="ll">USC em mãos</div></div>
+    <div class="item"><div class="vv">${em_mao.filter(o=>o.dataLimite&&o.dataLimite<hoje_s).length}</div><div class="ll" style="color:#dc2626">Atrasadas</div></div>
+    <div class="item"><div class="vv">${em_mao.filter(o=>o.dataLimite&&o.dataLimite>=hoje_s).length}</div><div class="ll" style="color:#0284c7">No prazo / futuras</div></div>
+  </div>
+</div>
+
+<!-- Seção 4: Lista de Obras Concluídas -->
+<div class="secao">
+  <div class="secao-titulo">4. Lista de Obras Concluídas no Período (${concluidas.length})</div>
+  ${concluidas.length===0
+    ? '<p style="color:#9ca3af;font-size:11px">Nenhuma obra concluída neste período.</p>'
+    : `<table>
+    <thead><tr>
+      <th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Conclusão</th>
+      <th>Vencimento</th><th style="text-align:center">Prazo</th>
+      <th style="text-align:right">USC</th><th>Kaffa Final</th><th>Fiscal</th>
+    </tr></thead>
+    <tbody>${rowsObras}</tbody>
+  </table>`}
+</div>
+
+<div class="footer">
+  <span>SPCC ARLAG · ${empNome} · ${periodoLabel}</span>
+  <span>Relatório gerado em ${dataGer} via SPCC_ARLAG</span>
+</div>
+
+</body></html>`;
+
+  // Abrir em nova janela
+  const win = window.open('','_blank','width=1000,height=800');
+  win.document.write(relHtml);
+  win.document.close();
+  fecharModalRelatorio();
+};
