@@ -195,6 +195,8 @@ async function iniciarApp(){
   document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnImport').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnBulkDelete').style.display='none'; // shown by filtroRapido when encerradas selected
+  const btnApagarTodas=document.getElementById('btnApagarTodas');
+  if(btnApagarTodas) btnApagarTodas.style.display=me.perfil==='gerente'?'inline-flex':'none';
   buildTableHeader();
 
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
@@ -2384,6 +2386,29 @@ function parseDateBR(s){
 }
 
 
+
+// ══ EXCLUIR TODAS AS OBRAS ═══════════════════════════════════════════
+window.apagarTodasObras = async function(){
+  if(me?.perfil !== 'gerente'){ toast('Somente o gerente pode excluir todas as obras.','err'); return; }
+  if(!obras.length){ toast('Nenhuma obra para excluir.','warn'); return; }
+  // Confirmação dupla com digitação
+  const conf1 = confirm(`⚠️ ATENÇÃO\n\nIsso irá excluir PERMANENTEMENTE todas as ${obras.length} obras do sistema.\n\nEsta ação NÃO pode ser desfeita!\n\nClique OK para continuar ou Cancelar para abortar.`);
+  if(!conf1) return;
+  const digitado = prompt(`Para confirmar, digite exatamente:\n\nAPAGAR TUDO\n`);
+  if((digitado||'').trim().toUpperCase() !== 'APAGAR TUDO'){
+    toast('Confirmação inválida. Operação cancelada.','warn'); return;
+  }
+  const total = obras.length;
+  toast(`Excluindo ${total} obras...`,'warn');
+  let count=0, erros=0;
+  for(const o of [...obras]){
+    try{ await deleteDoc(doc(db,'obras',o.id)); count++; }
+    catch(e){ console.error('Erro ao excluir',o.numero,e.message); erros++; }
+  }
+  if(erros) toast(`${count} excluídas, ${erros} com erro.`,'warn');
+  else toast(`✓ ${count} obras excluídas com sucesso.`,'warn');
+};
+
 window.bulkDeleteEncerradas=async function(){
   const list=visibleObras().filter(o=>o.armazenado);
   if(!list.length){ toast('Nenhuma obra encerrada encontrada.','warn'); return; }
@@ -2456,20 +2481,30 @@ window.downloadModelo = function() {
 
 // Converter data do Excel para string YYYY-MM-DD
 function excelDateToStr(val) {
-  if (!val) return '';
-  if (typeof val === 'number') {
-    // Número serial do Excel
-    const date = new Date(Math.round((val - 25569) * 86400 * 1000));
-    if (isNaN(date.getTime())) return '';
+  if(val === null || val === undefined || val === '') return '';
+  // JS Date object (cellDates:true or pre-parsed)
+  if(val instanceof Date){
+    if(isNaN(val.getTime())) return '';
+    const y=val.getUTCFullYear(),m=String(val.getUTCMonth()+1).padStart(2,'0'),d=String(val.getUTCDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  if(typeof val === 'number') {
+    // Número serial do Excel (epoch 30/12/1899)
+    const date = new Date(Date.UTC(1899,11,30) + val * 86400000);
+    if(isNaN(date.getTime())) return '';
     return date.toISOString().split('T')[0];
   }
-  if (typeof val === 'string') {
-    // Tentar parsear datas como DD/MM/YYYY ou YYYY-MM-DD
+  if(typeof val === 'string') {
     const s = val.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-    if (m) {
-      const y = m[3].length === 2 ? '20'+m[3] : m[3];
+    if(!s) return '';
+    // ISO com hora: "2025-07-05T00:00:00.000Z"
+    if(s.includes('T')) return s.split('T')[0];
+    // YYYY-MM-DD
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // DD/MM/YYYY ou DD-MM-YYYY
+    const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+    if(m){
+      const y = m[3].length===2?'20'+m[3]:m[3];
       return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
     }
   }
@@ -2492,12 +2527,15 @@ window.handleXlsxUpload = function(input) {
       xlsxHeaders = rows[0].map(h => String(h||'').trim());
       xlsxDados   = rows.slice(1).filter(r => r.some(c => c !== ''));
 
-      // Auto-mapeamento
+      // Auto-mapeamento — normaliza ambos os lados (remove acentos + chars especiais)
+      const _norm = s => (s||'').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')  // remove diacríticos
+        .replace(/[^a-z0-9 ]/g,'')                          // remove pontuação/º/%...
+        .replace(/\s+/g,' ').trim();
       mapeamento = {};
       COLUNAS_SISTEMA.forEach(col => {
-        const idx = xlsxHeaders.findIndex(h =>
-          col.aliases.includes(h.toLowerCase().replace(/[^a-zà-ú0-9 ]/g,'').trim())
-        );
+        const candidatos = [col.label, ...col.aliases].map(a => _norm(a));
+        const idx = xlsxHeaders.findIndex(h => candidatos.includes(_norm(h)));
         if (idx >= 0) mapeamento[col.campo] = idx;
       });
 
@@ -2535,6 +2573,7 @@ function renderImportStep2(rows) {
   const preview = document.getElementById('previewTable');
   const previewRows = rows.slice(0, 6); // header + 5 linhas
   // Convert dates in preview (serial numbers → DD/MM/YYYY)
+  const _normP = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,'').trim();
   const dateCols = new Set(COLUNAS_SISTEMA.filter(c=>c.tipo==='data').map(c=>mapeamento[c.campo]).filter(i=>i!=null));
   preview.innerHTML =
     `<thead><tr>${xlsxHeaders.map(h=>`<th>${h||'—'}</th>`).join('')}</tr></thead>` +
