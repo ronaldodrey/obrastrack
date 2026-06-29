@@ -3201,6 +3201,8 @@ window.gerarRelatorio = function(){
   const empNome = document.getElementById('relEmpreiteira').value;
   if(!empNome){ alert('Selecione uma empreiteira.'); return; }
 
+  try {
+  const hoje_s  = hojeStr(); // YYYY-MM-DD de hoje (era indefinido aqui antes)
   const periodo = document.getElementById('relPeriodo').value;
   const hoje_d  = new Date();
   let de, ate, periodoLabel;
@@ -3467,9 +3469,20 @@ window.gerarRelatorio = function(){
 
 </body></html>`;
 
-  // Abrir em nova janela
-  const win = window.open('','_blank','width=1000,height=800');
+  // Abrir em nova janela (handle popup blocker)
+  const win = window.open('', '_blank', 'width=1100,height=850,scrollbars=yes,resizable=yes');
+  if(!win || win.closed || typeof win.closed === 'undefined'){
+    // Popup bloqueado — copiar para clipboard e avisar
+    toast('Popup bloqueado pelo navegador. Permita popups para este site e tente novamente.', 'err');
+    return;
+  }
+  win.document.open();
   win.document.write(relHtml);
   win.document.close();
   fecharModalRelatorio();
+
+  } catch(err) {
+    console.error('Erro ao gerar relatório:', err);
+    alert('Erro ao gerar relatório: ' + err.message);
+  }
 };
