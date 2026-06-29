@@ -2820,7 +2820,7 @@ function renderCarteira(){
       style="flex-shrink:0;padding:10px 18px;background:linear-gradient(135deg,#7c6af7,#00e5a0);color:#0d1117;border:none;border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px">
       📄 Gerar Relatório de Empreiteira
     </button>
-  </div>`;
+  </div>
   <div class="kpi-strip" style="margin-bottom:24px">
     ${kpiCard('Total de Obras',ativas.length,'na carteira','#00e5a0')}
     ${kpiCard('USC Total',totalUSC.toFixed(1),'previsto','#7c6af7')}
