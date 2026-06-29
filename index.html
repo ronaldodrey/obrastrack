@@ -657,5 +657,42 @@
 
 <div id="toast"></div>
 <script type="module" src="app.js"></script>
+
+  <!-- Modal Relatório de Empreiteira -->
+  <div id="ovRelatorio" class="modal-overlay" onclick="if(event.target===this)fecharModalRelatorio()" style="display:none">
+    <div class="modal-box" style="max-width:420px">
+      <div class="modal-header">
+        <h2>📄 Gerar Relatório</h2>
+        <button class="btn-close" onclick="fecharModalRelatorio()">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+        <div class="fg">
+          <label>Empreiteira</label>
+          <select id="relEmpreiteira" style="width:100%">
+            <option value="">Selecione a empreiteira...</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>Período — Mês de Conclusão</label>
+          <select id="relPeriodo" style="width:100%">
+            <option value="mesAnterior">Mês anterior (padrão)</option>
+            <option value="mesAtual">Mês atual (em andamento)</option>
+            <option value="ultimos30">Últimos 30 dias</option>
+            <option value="ultimos90">Últimos 90 dias</option>
+            <option value="custom">Período personalizado</option>
+          </select>
+        </div>
+        <div id="relCustomPeriodo" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="fg"><label>De</label><input type="month" id="relDe"></div>
+          <div class="fg"><label>Até</label><input type="month" id="relAte"></div>
+        </div>
+        <button onclick="gerarRelatorio()"
+          style="padding:12px;background:linear-gradient(135deg,#7c6af7,#00e5a0);color:#0d1117;border:none;border-radius:8px;font-weight:800;font-size:13px;cursor:pointer">
+          📄 Gerar e Abrir Relatório
+        </button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
