@@ -2833,140 +2833,6 @@ function renderCarteira(){
   </div>`;
 
   // ── 2. Distribuição por Empreiteira (R1 / R2 / ODI / USC) ────────
-  // ── GRÁFICO GERAL: Obras sem conclusão por mês de vencimento ──────
-  (()=>{
-    const semConclAll = ativas.filter(o=>!o.conclusao&&!o.cancelado);
-    const hoje_d2 = new Date();
-    const hoje_str = hojeStr();
-    const mesVal2  = m=>{ const [mm,yy]=m.split('/'); return +yy*100+ +mm; };
-    const mesStr2  = s=>{ if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
-
-    // Próximos 12 meses (0 = mês atual)
-    const prox12g = [];
-    for(let i=0;i<=12;i++){
-      const d=new Date(hoje_d2.getFullYear(),hoje_d2.getMonth()+i,1);
-      prox12g.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);
-    }
-
-    // Atrasadas (sem conclusão, dataLimite < hoje)
-    const atrAll = semConclAll.filter(o=>o.dataLimite&&o.dataLimite<hoje_str);
-    const uscAtr = atrAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-
-    // Mês atual (não vencidas ainda)
-    const mesAtualObras = semConclAll.filter(o=>mesStr2(o.dataLimite)===prox12g[0]&&o.dataLimite>=hoje_str);
-    const uscMesAtual = mesAtualObras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-
-    // Próximos 12 meses
-    const prox12gMap = {};
-    prox12g.forEach((m,i)=>{
-      if(i===0) prox12gMap[m] = mesAtualObras;
-      else prox12gMap[m] = semConclAll.filter(o=>mesStr2(o.dataLimite)===m);
-    });
-
-    // Além de 12 meses
-    const alem12gMap = {};
-    semConclAll.forEach(o=>{
-      const m=mesStr2(o.dataLimite); if(!m) return;
-      if(mesVal2(m) > mesVal2(prox12g[12])){
-        if(!alem12gMap[m]) alem12gMap[m]=[];
-        alem12gMap[m].push(o);
-      }
-    });
-    const alem12gMeses = Object.keys(alem12gMap).sort((a,b)=>mesVal2(a)-mesVal2(b));
-
-    // Montar colunas
-    const colsG = [
-      { lbl:'⚠️ Atras.', q:atrAll.length,   usc:uscAtr,      cor:'#EF4444', isAtras:true },
-      ...prox12g.map((m,i)=>({
-        lbl: m,
-        q:   prox12gMap[m].length,
-        usc: prox12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
-        cor: i===0?'#22C55E':'#7c6af7',
-        isMesAtual: i===0
-      })),
-      ...alem12gMeses.map(m=>({
-        lbl: m+'*',
-        q:   alem12gMap[m].length,
-        usc: alem12gMap[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
-        cor: '#7c6af788'
-      }))
-    ];
-
-    const maxQg = Math.max(...colsG.map(c=>c.q), 1);
-    const colWg=62, barHg=120, topPadg=54, botPadg=36, padLg=8;
-    const svgWg = padLg + colsG.length*colWg + padLg;
-    const svgHg = topPadg + barHg + botPadg;
-
-    let svgG = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWg}" height="${svgHg}"
-      style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
-    svgG += `<line x1="${padLg}" y1="${topPadg+barHg}" x2="${svgWg-padLg}" y2="${topPadg+barHg}" stroke="#374151" stroke-width="1"/>`;
-
-    // Separador "além de 12 meses"
-    if(alem12gMeses.length){
-      const sepX = padLg + (1+13)*colWg - 4;
-      svgG += `<line x1="${sepX}" y1="${topPadg-4}" x2="${sepX}" y2="${topPadg+barHg+20}" stroke="#374151" stroke-dasharray="4,3" stroke-width="1" opacity="0.5"/>`;
-      svgG += `<text x="${sepX+4}" y="${topPadg-8}" font-size="8" fill="#6b7280">além 12m</text>`;
-    }
-
-    colsG.forEach((col,i)=>{
-      const x = padLg + i*colWg;
-      const cx = x + colWg/2 - 4;
-      const wg = colWg-10;
-      const bh = col.q>0 ? Math.max(8, Math.round((col.q/maxQg)*barHg)) : 0;
-      const barY = topPadg + barHg - bh;
-
-      if(bh>0){
-        svgG += `<rect x="${x+4}" y="${barY}" width="${wg}" height="${bh}" rx="5" fill="${col.cor}" opacity="0.85"/>`;
-        svgG += `<rect x="${x+4}" y="${barY}" width="${wg}" height="${Math.min(bh,8)}" rx="5" fill="white" opacity="0.1"/>`;
-      }
-
-      if(col.q>0){
-        const uscLbl = col.usc>=1000?(col.usc/1000).toFixed(1).replace('.0','')+'k USC':`${col.usc.toFixed(0)} USC`;
-        svgG += `<text x="${cx}" y="${barY-30}" text-anchor="middle" font-size="9" font-weight="600" fill="${col.cor}bb">${uscLbl}</text>`;
-        svgG += `<text x="${cx}" y="${barY-15}" text-anchor="middle" font-size="12" font-weight="800" fill="${col.cor}">${col.q} obra${col.q!==1?'s':''}</text>`;
-      } else {
-        svgG += `<text x="${cx}" y="${topPadg+barHg-6}" text-anchor="middle" font-size="9" fill="#374151">—</text>`;
-      }
-      const lblColor = col.isAtras?'#EF4444':col.isMesAtual?'#22C55E':'#9ca3af';
-      svgG += `<text x="${cx}" y="${topPadg+barHg+16}" text-anchor="middle" font-size="9" font-weight="${col.isAtras||col.isMesAtual?'700':'400'}" fill="${lblColor}">${col.lbl}</text>`;
-    });
-    svgG += '</svg>';
-
-    const totQ   = semConclAll.length;
-    const totUSC = semConclAll.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-    const totULC_fmt = totUSC>=1000?(totUSC/1000).toFixed(1).replace('.0','')+'k':totUSC.toFixed(1);
-
-    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:24px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
-        <div>
-          <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;margin-bottom:2px">📅 Visão Geral — Obras em Mãos por Mês de Vencimento</div>
-          <div style="font-size:10px;color:var(--muted)">
-            <span style="color:#EF4444">⚠️ Atrasadas</span> &nbsp;|&nbsp;
-            <span style="color:#22C55E">Mês atual</span> &nbsp;|&nbsp;
-            Próximos 12 meses &nbsp;|&nbsp;
-            <span style="color:var(--muted)">*Além de 12 meses (só meses com obra)</span>
-          </div>
-        </div>
-        <div style="display:flex;gap:20px">
-          <div style="text-align:center">
-            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${totQ}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">Obras em mãos</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#7c6af7">${totULC_fmt} USC</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">USC em mãos</div>
-          </div>
-          <div style="text-align:center">
-            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:#EF4444">${atrAll.length}</div>
-            <div style="font-size:9px;color:var(--muted);text-transform:uppercase">Atrasadas</div>
-          </div>
-        </div>
-      </div>
-      <div style="overflow-x:auto">${svgG}</div>
-    </div>`;
-  })();
-
-
   // ── GRÁFICO GERAL DE CARTEIRA ───────────────────────────────────────
   {
     const semConclAll = ativas.filter(o=>!o.conclusao&&!o.cancelado);
@@ -3513,6 +3379,45 @@ window.gerarRelatorio = function(){
   const cor = gc(empNome)||'#00e5a0';
   const dataGer = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
 
+  // ── Gráfico de barras: obras em mãos por mês de vencimento ─────
+  const _mS = s=>{ if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
+  const _mV = m=>{ const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
+  const hd2=new Date(), hs2=hojeStr();
+  const rMeses=[]; for(let i=0;i<=12;i++){ const d=new Date(hd2.getFullYear(),hd2.getMonth()+i,1); rMeses.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`); }
+  const rSemC=subAll.filter(o=>!o.conclusao);
+  const rAtr =rSemC.filter(o=>o.dataLimite&&o.dataLimite<hs2);
+  const rM12 ={};
+  rMeses.forEach((m,i)=>{ rM12[m]=i===0?rSemC.filter(o=>_mS(o.dataLimite)===m&&o.dataLimite>=hs2):rSemC.filter(o=>_mS(o.dataLimite)===m); });
+  const rAlem={};
+  rSemC.forEach(o=>{ const m=_mS(o.dataLimite); if(!m||_mV(m)<=_mV(rMeses[12])) return; if(!rAlem[m]) rAlem[m]=[]; rAlem[m].push(o); });
+  const rAlemM=Object.keys(rAlem).sort((a,b)=>_mV(a)-_mV(b));
+
+  const rCols=[
+    {lbl:'Atrasadas',q:rAtr.length,usc:rAtr.reduce((s,o)=>s+(parseFloat(o.usc)||0),0),isAtr:true},
+    ...rMeses.map((m,i)=>({lbl:m,q:(rM12[m]||[]).length,usc:(rM12[m]||[]).reduce((s,o)=>s+(parseFloat(o.usc)||0),0),isCur:i===0})),
+    ...rAlemM.map(m=>({lbl:m+'*',q:rAlem[m].length,usc:rAlem[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0)}))
+  ];
+  const rMaxQ=Math.max(...rCols.map(c=>c.q),1);
+  const rW=50,rH=90,rTP=50,rBP=26,rPL=6,rCW=rW+6;
+  const rSvgW=rPL+rCols.length*rCW+rPL;
+  const fNr=v=>v>=1000?(v/1000).toFixed(1).replace('.0','')+'k':v.toFixed(0);
+  let rSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="${rSvgW}" height="${rTP+rH+rBP}" style="font-family:monospace;display:block">`;
+  rSvg+=`<line x1="${rPL}" y1="${rTP+rH}" x2="${rSvgW-rPL}" y2="${rTP+rH}" stroke="#e5e7eb" stroke-width="1"/>`;
+  rCols.forEach((c,i)=>{
+    const x=rPL+i*rCW,cx=x+rCW/2-2,bh=c.q>0?Math.max(5,Math.round((c.q/rMaxQ)*rH)):0,by=rTP+rH-bh;
+    const bcor=c.isAtr?'#EF4444':c.isCur?'#22C55E':cor;
+    if(bh>0) rSvg+=`<rect x="${x+2}" y="${by}" width="${rW}" height="${bh}" rx="3" fill="${bcor}" opacity="0.85"/>`;
+    if(c.q>0){
+      rSvg+=`<text x="${cx}" y="${by-28}" text-anchor="middle" font-size="7.5" fill="#374151">${fNr(c.usc)} USC</text>`;
+      rSvg+=`<text x="${cx}" y="${by-13}" text-anchor="middle" font-size="11" font-weight="bold" fill="${bcor}">${c.q}</text>`;
+    } else {
+      rSvg+=`<text x="${cx}" y="${rTP+rH-6}" text-anchor="middle" font-size="8" fill="#d1d5db">—</text>`;
+    }
+    rSvg+=`<text x="${cx}" y="${rTP+rH+16}" text-anchor="middle" font-size="7" fill="${c.isAtr?'#EF4444':c.isCur?'#22C55E':'#6b7280'}" font-weight="${i<=1?'bold':'normal'}">${c.lbl}</text>`;
+  });
+  rSvg+='</svg>';
+  const rTotQ=rSemC.length, rTotU=rSemC.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+
   const rowsObras = concluidas
     .sort((a,b)=>a.conclusao>b.conclusao?1:-1)
     .map(o=>{
@@ -3670,6 +3575,23 @@ window.gerarRelatorio = function(){
     <div class="item"><div class="vv">${uscMao.toFixed(1)}</div><div class="ll">USC em mãos</div></div>
     <div class="item"><div class="vv">${em_mao.filter(o=>o.dataLimite&&o.dataLimite<hoje_s).length}</div><div class="ll" style="color:#dc2626">Atrasadas</div></div>
     <div class="item"><div class="vv">${em_mao.filter(o=>o.dataLimite&&o.dataLimite>=hoje_s).length}</div><div class="ll" style="color:#0284c7">No prazo / futuras</div></div>
+  </div>
+</div>
+
+<!-- Seção 3b: Gráfico de obras em mãos por mês de vencimento -->
+<div class="secao">
+  <div class="secao-titulo">3a. Obras em Mãos — Por Mês de Vencimento</div>
+  <div style="margin-bottom:8px;font-size:10px;color:#374151">
+    <span style="color:#EF4444;font-weight:700">▪ Atrasadas</span> &nbsp;·&nbsp;
+    <span style="color:#22C55E;font-weight:700">▪ Mês atual</span> &nbsp;·&nbsp;
+    <span style="font-weight:700">▪ Próximos 12 meses</span> &nbsp;·&nbsp;
+    <span style="color:#6b7280">▪ *Além de 12m (só meses com obra)</span>
+  </div>
+  <div style="overflow-x:auto;padding-bottom:4px">\${rSvg}</div>
+  <div style="display:flex;gap:24px;margin-top:10px;padding:8px 12px;background:#f8fafc;border-radius:6px;border:1px solid #e5e7eb">
+    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">Obras em mãos:</span> <span style="font-weight:800;color:#1a1a2e">\${rTotQ}</span></div>
+    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">USC em mãos:</span> <span style="font-weight:800;color:#1a1a2e">\${fNr(rTotU)} USC</span></div>
+    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">Atrasadas:</span> <span style="font-weight:800;color:#EF4444">\${rAtr.length}</span></div>
   </div>
 </div>
 
