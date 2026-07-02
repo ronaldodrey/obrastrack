@@ -55,6 +55,7 @@
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none">📐 Medidas em Lote</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
     </div>
@@ -165,7 +166,25 @@
     </div>
 
     <!-- FILTROS RÁPIDOS -->
-    <div id="filtrosRapidos" style="margin-bottom:10px">
+    <!-- Bulk medidas bar -->
+  <div id="bulkMedidasBar" style="display:none;align-items:center;gap:12px;padding:10px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin:8px 0;flex-wrap:wrap">
+    <span style="font-size:11px;font-weight:700;color:var(--accent)">📐 Atualizar Medidas em Lote</span>
+    <span style="font-size:11px;color:var(--muted)">Marque as obras na tabela, selecione a(s) medida(s) e data:</span>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <input type="checkbox" class="chk-med-tipo" value="70"> Medida 70
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <input type="checkbox" class="chk-med-tipo" value="230"> Medida 230
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <input type="checkbox" class="chk-med-tipo" value="280"> Medida 280
+    </label>
+    <input type="date" id="bulkMedData" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px">
+    <button id="btnBulkConfirmar" onclick="confirmarBulkMedidas()" class="btn btn-primary btn-sm">✓ Atualizar</button>
+    <span id="bulkMedidasCount" style="font-size:11px;color:var(--muted)"></span>
+  </div>
+
+  <div id="filtrosRapidos" style="margin-bottom:10px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <span style="font-size:10px;color:var(--muted);font-weight:600">FILTROS RÁPIDOS:</span>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida70')">📋 Sem Med. 70</button>
@@ -190,6 +209,10 @@
   <!-- EMPREITEIRAS -->
   <div class="page" id="pgCarteira">
     <div id="carteiraContent"><div class="loading">Carregando...</div></div>
+  </div>
+
+  <div class="page" id="pgObrasODI">
+    <div id="obrasBodyODI" style="display:none"></div><!-- rendered by renderObras with _obrasTipoTab=ODI -->
   </div>
 
   <div class="page" id="pgEmpreiteiras">
