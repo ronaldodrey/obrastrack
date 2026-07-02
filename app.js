@@ -44,7 +44,9 @@ function ini(n){ return n.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCas
 
 // ── ESTADO ────────────────────────────────────────────
 let me=null, obras=[], users=[], empreiteiras=[], unsubObras=null;
-let _filtroRapidoAtivo=null; // módulo-level quick filter (not window-scoped)
+let _filtroRapidoAtivo=null;
+let _sortCol=null, _sortDir=1; // Fix #6: column sort state
+let _obrasTipoTab='RD';         // Fix #4: 'RD' | 'ODI' // módulo-level quick filter (not window-scoped)
 
 // ── HELPERS DE DATA ───────────────────────────────────
 function hoje(){ const d=new Date(); d.setHours(0,0,0,0); return d; }
@@ -98,6 +100,8 @@ function statusOf(o){
   if(o.paralisada)   return 'Obra Paralisada';
   if(o.armazenado)   return 'Encerrada';
   if(o.medida280)    return 'Aguard. Armazenamento';
+  // Fix #7: medidas só avançam o status SE a fiscalização já foi confirmada
+  if(o.conclusao && !o.fiscalizacao) return 'Aguard. Fiscalização'; // persiste até fiscal confirmar
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70)     return 'Aguard. Medida 230';
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
@@ -109,7 +113,6 @@ function statusOf(o){
   if(o.kaffa)        return 'Aguard. Medição';
   if(o.fiscalizacao) return 'Aguardando Kaffa';
   if(o.impedimento)  return 'Prob. Executivo – Celesc';
-  if(o.conclusao)    return 'Aguard. Fiscalização';
   if(o.dataLimite && hoje()>parseD(o.dataLimite)) return 'Atrasada';
   return 'Em Execução';
 }
@@ -187,7 +190,7 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
+  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras RD'],['pgObrasODI','🔧 Obras ODI']];
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML=tabs
@@ -198,6 +201,12 @@ async function iniciarApp(){
   document.getElementById('btnBulkDelete').style.display='none'; // shown by filtroRapido when encerradas selected
   const btnApagarTodas=document.getElementById('btnApagarTodas');
   if(btnApagarTodas) btnApagarTodas.style.display=me.perfil==='gerente'?'inline-flex':'none';
+  // Fix #2: bulk medidas button
+  const btnBulkMed=document.getElementById('btnBulkMedidas');
+  if(btnBulkMed){
+    btnBulkMed.style.display=['gerente','fiscal'].includes(me.perfil)?'inline-flex':'none';
+    btnBulkMed.onclick=window.abrirBulkMedidas;
+  }
   buildTableHeader();
 
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
@@ -205,7 +214,7 @@ async function iniciarApp(){
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash'){ renderDash(); setTimeout(renderChart,200); }
-    if(active?.id==='pgObras') window.renderObras();
+    if(active?.id==='pgObras'||active?.id==='pgObrasODI') window.renderObras();
     if(active?.id==='pgCarteira') renderCarteira();
   });
 
@@ -216,7 +225,8 @@ window.showPage=function(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page===id));
   document.getElementById(id).classList.add('active');
   if(id==='pgDash') renderDash();
-  if(id==='pgObras') window.renderObras();
+  if(id==='pgObras'){ _obrasTipoTab='RD'; window.renderObras(); }
+  if(id==='pgObrasODI'){ _obrasTipoTab='ODI'; window.renderObras(); }
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
@@ -583,6 +593,29 @@ function renderDashEmpreiteira(minhas){
   html += pendenciaRanking(minhas);
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartEmp"></div>';
+
+  // Fix #1: Lista de obras atrasadas no dashboard da empreiteira
+  const empAtrasadas = minhas.filter(o=>!o.conclusao&&o.dataLimite&&o.dataLimite<hojeStr());
+  if(empAtrasadas.length){
+    html += `<div class="sect-title" style="margin-bottom:10px;margin-top:20px;color:#EF4444">⚠️ Obras Atrasadas (${empAtrasadas.length})</div>`;
+    html += '<div class="tbl-wrap"><table><thead><tr><th>Nº</th><th>Tipo</th><th>Cidade</th><th>Fiscal</th><th>Vencimento</th><th>Dias Atraso</th><th>USC</th><th>Status</th></tr></thead><tbody>';
+    html += empAtrasadas.sort((a,b)=>a.dataLimite>b.dataLimite?1:-1).map(o=>{
+      const da=diff(o.dataLimite,hojeStr());
+      return `<tr style="background:rgba(239,68,68,.07)">
+        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+        <td><span class="chip">${o.tipo||'—'}</span></td>
+        <td>${o.cidade||'—'}</td>
+        <td>${o.fiscal||'—'}</td>
+        <td style="color:#EF4444">${fmt(o.dataLimite)}</td>
+        <td style="color:#EF4444;font-weight:700">${da!==null?da+'d':'—'}</td>
+        <td>${o.usc||'—'}</td>
+        <td>${statusHtml(o)}</td>
+      </tr>`;
+    }).join('');
+    html += '</tbody></table></div>';
+  } else {
+    html += '<div class="modal-note" style="margin-top:16px;color:#22C55E">✅ Nenhuma obra atrasada!</div>';
+  }
   return html;
 }
 
@@ -1078,6 +1111,13 @@ function buildTableHeader(){
 
 // ── TABELA OBRAS ──────────────────────────────────────
 // ── renderObras ÚNICA — sempre usa aplicarFiltros ────────────────────
+
+// Fix #6: sort obras by column
+window.sortObras = function(col){
+  if(_sortCol===col) _sortDir*=-1; else { _sortCol=col; _sortDir=1; }
+  window.renderObras();
+};
+
 function renderObras(){
   if(!document.getElementById('obrasBody')) return;
   try{
@@ -1088,7 +1128,16 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
-  const list = aplicarFiltros(baseList);
+  let list = aplicarFiltros(baseList);
+  // Fix #6: apply column sort
+  if(_sortCol){
+    list = [...list].sort((a,b)=>{
+      let va=a[_sortCol]||'', vb=b[_sortCol]||'';
+      if(_sortCol==='dias'){ va=a.dataLimite?diff(hojeStr(),a.dataLimite):9999; vb=b.dataLimite?diff(hojeStr(),b.dataLimite):9999; va=va||0; vb=vb||0; }
+      if(typeof va==='number') return _sortDir*(va-vb);
+      return _sortDir*String(va).localeCompare(String(vb),'pt');
+    });
+  }
   const ativos = contarFiltrosAtivos() + (_filtroRapidoAtivo?1:0);
   const btnLimpar = document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display = ativos>0?'inline-flex':'none';
@@ -1123,6 +1172,7 @@ function renderObras(){
       ?`${fmtTxt((o.kaffaEntries||[]).slice(-1)[0]?.data)} <span class="chip ${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'Final':'Parc.'}</span>`
       :fmt(o.kaffa);
     // Row background color based on status
+    const isChkMode = document.getElementById('bulkMedidasBar')?.style.display!=='none';
     const rowBg = o.processoCancelamento && !o.cancelado
       ? 'background:rgba(168,85,247,.08);border-left:2px solid #A855F7;'
       : (o.pendencia&&!o.pendenciaResolvida)
@@ -1134,6 +1184,10 @@ function renderObras(){
       ? '<span style="font-size:8px;background:rgba(168,85,247,.2);color:#A855F7;border:1px solid rgba(168,85,247,.4);padding:1px 5px;border-radius:4px;margin-left:4px">⏸ CANC.</span>'
       : '';
     return `<tr style="${rowBg}">
+      <td class="col-chk" style="display:none;width:32px;padding:4px 8px">
+        <input type="checkbox" class="chk-obra" data-id="${o.id}"
+          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkMedidasCount'); if(el) el.textContent=n+' obras selecionadas'; })()">
+      </td>
       <td>${statusHtml(o)}${procCancBadge}</td>
       <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
@@ -1344,7 +1398,8 @@ window.openObraModal=function(obraId){
       if(secUscEl) secUscEl.style.display=hasMedicoes?'grid':'none';
     }
     if(p !== 'fiscal')      showSec('secExec');
-    if(p === 'fiscal' && isEdit && obra?.conclusao) showSec('secTransfView');
+    // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante)
+    if((p === 'fiscal' || p === 'gerente') && isEdit && (obra?.conclusao||obra?.placas||obra?.sap)) showSec('secTransfView');
     if(p === 'empreiteira') showSec('secImpedimento');
 
     // Fiscalização: só fiscal e gerente
@@ -2303,6 +2358,47 @@ window.exportCSVFiltrado = function() {
 
 // renderObras is now consolidated — see function above
 
+
+
+// ══ FIX #2: ATUALIZAÇÃO DE MEDIDAS EM LOTE ═══════════════════════════
+window.abrirBulkMedidas = function(){
+  // Reset selection
+  document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
+  document.getElementById('bulkMedidasBar').style.display='flex';
+  document.querySelectorAll('.col-chk').forEach(el => el.style.display='table-cell');
+  document.getElementById('btnBulkMedidas').textContent='✕ Cancelar';
+  document.getElementById('btnBulkMedidas').onclick = window.fecharBulkMedidas;
+};
+window.fecharBulkMedidas = function(){
+  document.getElementById('bulkMedidasBar').style.display='none';
+  document.querySelectorAll('.col-chk').forEach(el => el.style.display='none');
+  document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
+  document.getElementById('btnBulkMedidas').textContent='📐 Medidas em Lote';
+  document.getElementById('btnBulkMedidas').onclick = window.abrirBulkMedidas;
+};
+window.confirmarBulkMedidas = async function(){
+  const selecionadas = [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id);
+  if(!selecionadas.length){ toast('Selecione pelo menos uma obra.','err'); return; }
+  const data = document.getElementById('bulkMedData').value;
+  if(!data){ toast('Informe a data.','err'); return; }
+  if(data > hojeStr()){ toast('Data não pode ser futura.','err'); return; }
+  const tipos = [...document.querySelectorAll('.chk-med-tipo:checked')].map(el=>el.value);
+  if(!tipos.length){ toast('Selecione pelo menos um tipo de medida.','err'); return; }
+  const btn = document.getElementById('btnBulkConfirmar');
+  btn.disabled=true; btn.textContent='Atualizando…';
+  let count=0, erros=0;
+  for(const id of selecionadas){
+    const patch={atualizadaEm:serverTimestamp()};
+    if(tipos.includes('70'))  patch.medida70=data;
+    if(tipos.includes('230')) patch.medida230=data;
+    if(tipos.includes('280')) patch.medida280=data;
+    try{ await updateDoc(doc(db,'obras',id),patch); count++; }
+    catch(e){ console.error('Erro medida lote',id,e.message); erros++; }
+  }
+  btn.disabled=false; btn.textContent='✓ Atualizar';
+  toast(erros?`${count} atualizadas, ${erros} com erro.`:`✓ ${count} obras atualizadas!`,(erros?'err':''));
+  window.fecharBulkMedidas();
+};
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
