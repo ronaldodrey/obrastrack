@@ -190,11 +190,11 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras RD'],['pgObrasODI','🔧 Obras ODI']];
+  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
-  document.getElementById('tabBar').innerHTML=tabs
-    .map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
+  document.getElementById('tabBar').innerHTML =
+    tabs.map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
 
   document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnImport').style.display=me.perfil==='gerente'?'inline-flex':'none';
@@ -221,25 +221,23 @@ async function iniciarApp(){
   showPage('pgDash');
 }
 window.showPage=function(id){
-  // Fix #4: ODI tab reuses pgObras content (avoids duplicate obrasBody issues)
-  if(id==='pgObrasODI'){
-    _obrasTipoTab='ODI';
-    // Show pgObras page but highlight pgObrasODI tab
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page==='pgObrasODI'));
-    document.getElementById('pgObras').classList.add('active');
-    window.renderObras();
-    return;
-  }
   if(id==='pgObras') _obrasTipoTab='RD';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page===id));
-  document.getElementById(id).classList.add('active');
+  document.getElementById(id)?.classList.add('active');
   if(id==='pgDash') renderDash();
   if(id==='pgObras') window.renderObras();
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
+};
+// Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
+window.switchObrasSubTab = function(tipo){
+  _obrasTipoTab = tipo;
+  document.querySelectorAll('.subtab-obras').forEach(el=>{
+    el.classList.toggle('active-subtab', el.dataset.tipo===tipo);
+  });
+  window.renderObras();
 };
 
 // ── FILTRO POR PERFIL ─────────────────────────────────
@@ -1181,6 +1179,27 @@ window.sortObras = function(col){
 function renderObras(){
   if(!document.getElementById('obrasBody')) return;
   try{
+  buildTableHeader(); // Fix #6: rebuild headers so sort icons are always current
+  // Inject RD/ODI sub-tabs
+  const subTabEl = document.getElementById('subTabObras');
+  if(subTabEl){
+    const rdAct = _obrasTipoTab!=='ODI';
+    subTabEl.innerHTML =
+      `<button onclick="window.switchObrasSubTab('RD')"
+        style="padding:6px 16px;border-radius:6px 6px 0 0;border:1px solid var(--border);
+          border-bottom:${rdAct?'2px solid var(--accent)':'none'};margin-bottom:${rdAct?'-1px':'0'};
+          background:${rdAct?'var(--surface2)':'var(--surface)'};color:${rdAct?'var(--accent)':'var(--muted)'};
+          font-weight:${rdAct?700:400};font-size:11px;cursor:pointer">
+        🏗️ Obras RD <span style="font-size:9px;opacity:.7">(R1+R2)</span>
+      </button>
+      <button onclick="window.switchObrasSubTab('ODI')"
+        style="padding:6px 16px;border-radius:6px 6px 0 0;border:1px solid var(--border);
+          border-bottom:${!rdAct?'2px solid #ff6b35':'none'};margin-bottom:${!rdAct?'-1px':'0'};
+          background:${!rdAct?'var(--surface2)':'var(--surface)'};color:${!rdAct?'#ff6b35':'var(--muted)'};
+          font-weight:${!rdAct?700:400};font-size:11px;cursor:pointer">
+        🔧 Obras ODI <span style="font-size:9px;opacity:.7">(execução cliente)</span>
+      </button>`;
+  }
   // Apply module-level quick filter first, then form filters
   let baseList = visibleObras();
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
@@ -1407,10 +1426,11 @@ window.openObraModal=function(obraId){
     }
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
-    // Preenche view-only do transformador para fiscal
+    // Preenche view-only do transformador para fiscal e gerente
     ['oPlacasView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
       const val=[obra.placas,obra.sap,obra.serie,obra.fabricante][i];
-      const el=document.getElementById(id); if(el) el.value=val||'';
+      const el=document.getElementById(id);
+      if(el){ el.textContent=val||'—'; } // use textContent (são <div>, não <input>)
     });
     // Mostra data de regularização na confirmação fiscal
     const infoReg=document.getElementById('infoRegularizacao');
@@ -2424,20 +2444,17 @@ window.exportCSVFiltrado = function() {
 // ══ FIX #2: ATUALIZAÇÃO DE MEDIDAS EM LOTE ═══════════════════════════
 window.abrirBulkMedidas = function(){
   window._bulkMedidasMode = true; // Fix #3: fiscal vê todas as obras
-  // Reset selection
-  document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
   document.getElementById('bulkMedidasBar').style.display='flex';
-  document.querySelectorAll('.col-chk').forEach(el => el.style.display='table-cell');
   document.getElementById('btnBulkMedidas').textContent='✕ Cancelar';
   document.getElementById('btnBulkMedidas').onclick = window.fecharBulkMedidas;
+  window.renderObras(); // CRÍTICO: re-renderiza mostrando TODAS as obras para seleção
 };
 window.fecharBulkMedidas = function(){
   window._bulkMedidasMode = false; // Fix #3
   document.getElementById('bulkMedidasBar').style.display='none';
-  document.querySelectorAll('.col-chk').forEach(el => el.style.display='none');
-  document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
   document.getElementById('btnBulkMedidas').textContent='📐 Medidas em Lote';
   document.getElementById('btnBulkMedidas').onclick = window.abrirBulkMedidas;
+  window.renderObras(); // Volta a mostrar só obras do fiscal
 };
 window.confirmarBulkMedidas = async function(){
   const selecionadas = [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id);
