@@ -17,7 +17,11 @@ service cloud.firestore {
         perfil() == 'genesis' ||
         perfil() == 'estagiario' ||
         (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
-        (perfil() == 'fiscal' && resource.data.fiscal == vinculo())
+        (perfil() == 'fiscal' && resource.data.fiscal == vinculo()) ||
+        // Fix #3: qualquer fiscal pode atualizar medidas de controle de qualquer obra
+        (perfil() == 'fiscal' &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['medida70','medida230','medida280','medida280Motivo','atualizadaEm']))
       );
       allow delete: if request.auth != null && perfil() == 'gerente';
     }
