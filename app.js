@@ -3379,44 +3379,43 @@ window.gerarRelatorio = function(){
   const cor = gc(empNome)||'#00e5a0';
   const dataGer = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'long',year:'numeric'});
 
-  // ── Gráfico de barras: obras em mãos por mês de vencimento ─────
-  const _mS = s=>{ if(!s) return null; const [y,m]=s.split('-'); return `${m}/${y}`; };
-  const _mV = m=>{ const [mm,yy]=m.split('/'); return +yy*100 + +mm; };
-  const hd2=new Date(), hs2=hojeStr();
-  const rMeses=[]; for(let i=0;i<=12;i++){ const d=new Date(hd2.getFullYear(),hd2.getMonth()+i,1); rMeses.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`); }
-  const rSemC=subAll.filter(o=>!o.conclusao);
-  const rAtr =rSemC.filter(o=>o.dataLimite&&o.dataLimite<hs2);
-  const rM12 ={};
-  rMeses.forEach((m,i)=>{ rM12[m]=i===0?rSemC.filter(o=>_mS(o.dataLimite)===m&&o.dataLimite>=hs2):rSemC.filter(o=>_mS(o.dataLimite)===m); });
-  const rAlem={};
-  rSemC.forEach(o=>{ const m=_mS(o.dataLimite); if(!m||_mV(m)<=_mV(rMeses[12])) return; if(!rAlem[m]) rAlem[m]=[]; rAlem[m].push(o); });
-  const rAlemM=Object.keys(rAlem).sort((a,b)=>_mV(a)-_mV(b));
+  // ── Dados para tabelas das seções 3a, 5, 6 ──────────────────────
+  const _mS2 = s => { if(!s) return null; const [y,m]=s.split('-'); return m+'/'+y; };
+  const _mV2 = m => { if(!m) return 0; const p=m.split('/'); return +p[1]*100 + +p[0]; };
+  const hd2 = new Date(), hs2 = hojeStr();
+  const rSemC = subAll.filter(o=>!o.conclusao);
+  const rAtr  = rSemC.filter(o=>o.dataLimite && o.dataLimite < hs2);
 
-  const rCols=[
-    {lbl:'Atrasadas',q:rAtr.length,usc:rAtr.reduce((s,o)=>s+(parseFloat(o.usc)||0),0),isAtr:true},
-    ...rMeses.map((m,i)=>({lbl:m,q:(rM12[m]||[]).length,usc:(rM12[m]||[]).reduce((s,o)=>s+(parseFloat(o.usc)||0),0),isCur:i===0})),
-    ...rAlemM.map(m=>({lbl:m+'*',q:rAlem[m].length,usc:rAlem[m].reduce((s,o)=>s+(parseFloat(o.usc)||0),0)}))
-  ];
-  const rMaxQ=Math.max(...rCols.map(c=>c.q),1);
-  const rW=50,rH=90,rTP=50,rBP=26,rPL=6,rCW=rW+6;
-  const rSvgW=rPL+rCols.length*rCW+rPL;
-  const fNr=v=>v>=1000?(v/1000).toFixed(1).replace('.0','')+'k':v.toFixed(0);
-  let rSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="${rSvgW}" height="${rTP+rH+rBP}" style="font-family:monospace;display:block">`;
-  rSvg+=`<line x1="${rPL}" y1="${rTP+rH}" x2="${rSvgW-rPL}" y2="${rTP+rH}" stroke="#e5e7eb" stroke-width="1"/>`;
-  rCols.forEach((c,i)=>{
-    const x=rPL+i*rCW,cx=x+rCW/2-2,bh=c.q>0?Math.max(5,Math.round((c.q/rMaxQ)*rH)):0,by=rTP+rH-bh;
-    const bcor=c.isAtr?'#EF4444':c.isCur?'#22C55E':cor;
-    if(bh>0) rSvg+=`<rect x="${x+2}" y="${by}" width="${rW}" height="${bh}" rx="3" fill="${bcor}" opacity="0.85"/>`;
-    if(c.q>0){
-      rSvg+=`<text x="${cx}" y="${by-28}" text-anchor="middle" font-size="7.5" fill="#374151">${fNr(c.usc)} USC</text>`;
-      rSvg+=`<text x="${cx}" y="${by-13}" text-anchor="middle" font-size="11" font-weight="bold" fill="${bcor}">${c.q}</text>`;
-    } else {
-      rSvg+=`<text x="${cx}" y="${rTP+rH-6}" text-anchor="middle" font-size="8" fill="#d1d5db">—</text>`;
-    }
-    rSvg+=`<text x="${cx}" y="${rTP+rH+16}" text-anchor="middle" font-size="7" fill="${c.isAtr?'#EF4444':c.isCur?'#22C55E':'#6b7280'}" font-weight="${i<=1?'bold':'normal'}">${c.lbl}</text>`;
+  // Agrupar obras em mãos por mês de vencimento (próximos 24 meses + além)
+  const rMesMap = {};
+  rSemC.forEach(o => {
+    const m = _mS2(o.dataLimite);
+    if(!m) return;
+    if(!rMesMap[m]) rMesMap[m] = [];
+    rMesMap[m].push(o);
   });
-  rSvg+='</svg>';
-  const rTotQ=rSemC.length, rTotU=rSemC.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  // Próximos 24 meses (0 = mês atual)
+  const rMeses24 = [];
+  for(let i=0;i<=24;i++){
+    const d = new Date(hd2.getFullYear(), hd2.getMonth()+i, 1);
+    rMeses24.push(String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear());
+  }
+  // Meses além dos 24 que têm obra
+  const r24set = new Set(rMeses24);
+  const rAlemMeses = Object.keys(rMesMap).filter(m=>!r24set.has(m) && _mV2(m)>_mV2(rMeses24[24])).sort((a,b)=>_mV2(a)-_mV2(b));
+  // Todas as entradas da tabela
+  const rTodasCols = [
+    ...rMeses24.filter(m=>rMesMap[m]||rMeses24.indexOf(m)<=1).map(m=>({m, obras:(rMesMap[m]||[]) })),
+    ...rAlemMeses.map(m=>({m, obras:rMesMap[m], além:true}))
+  ];
+
+  // Obras com vencimento no mês atual (para seção 5)
+  const mesAtualStr = String(hd2.getMonth()+1).padStart(2,'0')+'/'+hd2.getFullYear();
+  const rVencMesAtual = rSemC.filter(o => _mS2(o.dataLimite)===mesAtualStr);
+
+  const fNr = v => !v ? '0' : v>=1000 ? (v/1000).toFixed(1).replace('.0','')+'k' : v.toFixed(1);
+  const rTotQ = rSemC.length;
+  const rTotU = rSemC.reduce((s,o)=>s+(parseFloat(o.usc)||0), 0);
 
   const rowsObras = concluidas
     .sort((a,b)=>a.conclusao>b.conclusao?1:-1)
@@ -3578,23 +3577,6 @@ window.gerarRelatorio = function(){
   </div>
 </div>
 
-<!-- Seção 3b: Gráfico de obras em mãos por mês de vencimento -->
-<div class="secao">
-  <div class="secao-titulo">3a. Obras em Mãos — Por Mês de Vencimento</div>
-  <div style="margin-bottom:8px;font-size:10px;color:#374151">
-    <span style="color:#EF4444;font-weight:700">▪ Atrasadas</span> &nbsp;·&nbsp;
-    <span style="color:#22C55E;font-weight:700">▪ Mês atual</span> &nbsp;·&nbsp;
-    <span style="font-weight:700">▪ Próximos 12 meses</span> &nbsp;·&nbsp;
-    <span style="color:#6b7280">▪ *Além de 12m (só meses com obra)</span>
-  </div>
-  <div style="overflow-x:auto;padding-bottom:4px">\${rSvg}</div>
-  <div style="display:flex;gap:24px;margin-top:10px;padding:8px 12px;background:#f8fafc;border-radius:6px;border:1px solid #e5e7eb">
-    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">Obras em mãos:</span> <span style="font-weight:800;color:#1a1a2e">\${rTotQ}</span></div>
-    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">USC em mãos:</span> <span style="font-weight:800;color:#1a1a2e">\${fNr(rTotU)} USC</span></div>
-    <div><span style="font-size:9px;color:#6b7280;text-transform:uppercase">Atrasadas:</span> <span style="font-weight:800;color:#EF4444">\${rAtr.length}</span></div>
-  </div>
-</div>
-
 <!-- Seção 4: Lista de Obras Concluídas -->
 <div class="secao">
   <div class="secao-titulo">4. Lista de Obras Concluídas no Período (${concluidas.length})</div>
@@ -3608,6 +3590,83 @@ window.gerarRelatorio = function(){
     </tr></thead>
     <tbody>${rowsObras}</tbody>
   </table>`}
+</div>
+
+<div class="footer">
+  <span>SPPC ARLAG · ${empNome} · ${periodoLabel}</span>
+  <span>Relatório g<!-- Seção 3a: Obras em Mãos por Mês (Tabela) -->
+<div class="secao">
+  <div class="secao-titulo">3a. Obras em Mãos — Por Mês de Vencimento (sem conclusão)</div>
+  <table>
+    <thead><tr>
+      <th>Mês de Vencimento</th>
+      <th style="text-align:center">R1</th>
+      <th style="text-align:center">R2</th>
+      <th style="text-align:center;font-weight:800">Total</th>
+      <th style="text-align:right">USC</th>
+      <th>Obs.</th>
+    </tr></thead>
+    <tbody>
+      <tr style="background:#fef2f2">
+        <td><strong style="color:#EF4444">⚠️ Atrasadas</strong></td>
+        <td style="text-align:center;color:#EF4444">${rAtr.filter(o=>o.tipo==='R1').length}</td>
+        <td style="text-align:center;color:#EF4444">${rAtr.filter(o=>o.tipo==='R2').length}</td>
+        <td style="text-align:center;font-weight:800;color:#EF4444">${rAtr.length}</td>
+        <td style="text-align:right;color:#EF4444">${fNr(rAtr.reduce((s,o)=>s+(parseFloat(o.usc)||0),0))} USC</td>
+        <td style="font-size:9px;color:#EF4444">Prazo vencido</td>
+      </tr>
+      ${rTodasCols.map((col,idx)=>{
+        const r1=col.obras.filter(o=>o.tipo==='R1').length;
+        const r2=col.obras.filter(o=>o.tipo==='R2').length;
+        const tot=r1+r2;
+        const usc=col.obras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+        const isAtual=col.m===mesAtualStr;
+        const bg=isAtual?'background:#f0fdf4':'';
+        const lbl=col.além?col.m+'*':col.m;
+        const obs=isAtual?'<span style="color:#16a34a;font-size:9px">← Mês atual</span>':col.além?'<span style="color:#9ca3af;font-size:9px">*Além de 12m</span>':'';
+        if(!tot && idx>1) return '<tr><td style="color:#d1d5db">'+lbl+'</td><td colspan="3" style="text-align:center;color:#d1d5db">—</td><td style="color:#d1d5db">—</td><td>'+obs+'</td></tr>';
+        return '<tr style="'+bg+'"><td><strong>'+lbl+'</strong></td><td style="text-align:center">'+r1+'</td><td style="text-align:center">'+r2+'</td><td style="text-align:center;font-weight:700">'+tot+'</td><td style="text-align:right">'+fNr(usc)+' USC</td><td>'+obs+'</td></tr>';
+      }).join('')}
+      <tr style="background:#f1f5f9;font-weight:800;border-top:2px solid #cbd5e1">
+        <td>TOTAL</td>
+        <td style="text-align:center">${rSemC.filter(o=>o.tipo==='R1').length}</td>
+        <td style="text-align:center">${rSemC.filter(o=>o.tipo==='R2').length}</td>
+        <td style="text-align:center;color:#7c6af7">${rTotQ}</td>
+        <td style="text-align:right;color:#7c6af7">${fNr(rTotU)} USC</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Seção 5: Obras com vencimento no mês atual -->
+<div class="secao">
+  <div class="secao-titulo">5. Obras com Vencimento em ${mesAtualStr}</div>
+  ${rVencMesAtual.length===0
+    ? '<p style="color:#9ca3af;font-size:11px">Nenhuma obra com vencimento neste mês.</p>'
+    : '<table><thead><tr><th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Fiscal</th><th>Vencimento</th><th style="text-align:right">USC</th><th>Kaffa Final</th><th>Status</th></tr></thead><tbody>'
+      + rVencMesAtual.sort((a,b)=>a.dataLimite>b.dataLimite?1:-1).map(o=>{
+          const kf=(o.kaffaEntries||[]).find(k=>k.tipo==='final');
+          const dr=diff(hoje_s,o.dataLimite);
+          const pl=dr!==null&&dr>=0?'<span style="color:#16a34a">+'+dr+'d</span>':'<span style="color:#EF4444;font-weight:700">'+Math.abs(dr||0)+'d atraso</span>';
+          return '<tr><td><strong>'+o.numero+'</strong></td><td>'+o.tipo+'</td><td>'+o.cidade+'</td><td>'+o.fiscal+'</td><td>'+fmtTxt(o.dataLimite)+' '+pl+'</td><td style="text-align:right">'+(o.usc||'—')+'</td><td>'+(kf?fmtTxt(kf.data):'—')+'</td><td style="font-size:9px">'+statusOf(o)+'</td></tr>';
+        }).join('')
+      + '</tbody></table>'
+  }
+</div>
+
+<!-- Seção 6: Obras Atrasadas -->
+<div class="secao">
+  <div class="secao-titulo" style="color:#EF4444">6. Obras Atrasadas — Sem Conclusão (${rAtr.length})</div>
+  ${rAtr.length===0
+    ? '<p style="color:#16a34a;font-weight:700">✅ Nenhuma obra atrasada!</p>'
+    : '<table><thead><tr><th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Fiscal</th><th>Vencimento</th><th style="color:#EF4444">Atraso</th><th style="text-align:right">USC</th></tr></thead><tbody>'
+      + rAtr.sort((a,b)=>a.dataLimite>b.dataLimite?1:-1).map(o=>{
+          const da=diff(o.dataLimite,hoje_s);
+          return '<tr style="background:#fef2f2"><td><strong style="color:#EF4444">'+o.numero+'</strong></td><td>'+o.tipo+'</td><td>'+o.cidade+'</td><td>'+o.fiscal+'</td><td>'+fmtTxt(o.dataLimite)+'</td><td style="color:#EF4444;font-weight:800">'+(da!==null?da+'d':'—')+'</td><td style="text-align:right">'+(o.usc||'—')+'</td></tr>';
+        }).join('')
+      + '<tfoot><tr style="font-weight:800;background:#fee2e2"><td colspan="6">Total: '+rAtr.length+' obras</td><td style="text-align:right">'+fNr(rAtr.reduce((s,o)=>s+(parseFloat(o.usc)||0),0))+' USC</td></tr></tfoot></table>'
+  }
 </div>
 
 <div class="footer">
