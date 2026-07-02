@@ -214,19 +214,29 @@ async function iniciarApp(){
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash'){ renderDash(); setTimeout(renderChart,200); }
-    if(active?.id==='pgObras'||active?.id==='pgObrasODI') window.renderObras();
+    if(active?.id==='pgObras') window.renderObras();
     if(active?.id==='pgCarteira') renderCarteira();
   });
 
   showPage('pgDash');
 }
 window.showPage=function(id){
+  // Fix #4: ODI tab reuses pgObras content (avoids duplicate obrasBody issues)
+  if(id==='pgObrasODI'){
+    _obrasTipoTab='ODI';
+    // Show pgObras page but highlight pgObrasODI tab
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page==='pgObrasODI'));
+    document.getElementById('pgObras').classList.add('active');
+    window.renderObras();
+    return;
+  }
+  if(id==='pgObras') _obrasTipoTab='RD';
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.page===id));
   document.getElementById(id).classList.add('active');
   if(id==='pgDash') renderDash();
-  if(id==='pgObras'){ _obrasTipoTab='RD'; window.renderObras(); }
-  if(id==='pgObrasODI'){ _obrasTipoTab='ODI'; window.renderObras(); }
+  if(id==='pgObras') window.renderObras();
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
@@ -1090,27 +1100,77 @@ function renderMonitorPrazos(list){
 
 // ── TABELA HEADERS ────────────────────────────────────
 function buildTableHeader(){
-  const cols=[
-    'Status','Nº','Tipo','Cidade','Empreiteira','Fiscal',
-    'Abertura','Prazo','Data Limite','Dias Exec.',
-    'Deslig.','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV',
-    {label:'Medição Tipo',tip:'Parcial ou Final — indica o tipo de medição registrado'},
-    {label:'Med. 70',tip:'Prazo = Data Limite da obra'},
-    {label:'⏱ Dias p/ Med.70',tip:'Dias restantes até prazo limite da Med. 70'},
-    {label:'Med. 230',tip:'Prazo = Data Limite da obra · Define se execução foi no prazo'},
-    {label:'⏱ Dias p/ Med.230',tip:'Dias restantes até prazo limite da Med. 230'},
-    {label:'Med. 280',tip:'Prazo = último dia mês seguinte à Med. 230'},
-    {label:'⏱ Dias p/ Med.280',tip:'Dias restantes para encerramento'},
-    'Armazenado','Ações'
-  ];
-  document.getElementById('thRow').innerHTML=cols.map(c=>{
-    if(typeof c === 'object') return `<th title="${c.tip}" style="cursor:help;color:#06B6D4">${c.label} ℹ</th>`;
-    return `<th>${c}</th>`;
-  }).join('');
-}
+  const hdr = document.getElementById('obrasHead');
+  if(!hdr) return;
 
-// ── TABELA OBRAS ──────────────────────────────────────
-// ── renderObras ÚNICA — sempre usa aplicarFiltros ────────────────────
+  const sortIcon = col => _sortCol===col ? (_sortDir>0?'▲':'▼') : '↕';
+  const sth = (lbl, col, tip='') =>
+    `<th onclick="window.sortObras('${col}')"
+        style="cursor:pointer;user-select:none;white-space:nowrap"
+        title="${tip||'Clique para ordenar'}">${lbl} <span style="font-size:8px;opacity:.6">${sortIcon(col)}</span></th>`;
+  const th  = (lbl, tip='') =>
+    `<th title="${tip}">${lbl}</th>`;
+
+  const isGer = me?.perfil==='gerente';
+  const isFis = me?.perfil==='fiscal';
+  const isEmp = me?.perfil==='empreiteira';
+
+  // Colunas fixas (frozen)
+  const stickyStyle = 'position:sticky;z-index:2;background:var(--surface)';
+  const frozen1 = `<th style="${stickyStyle};left:0;min-width:120px">Status</th>`;
+  const frozen2 = `<th style="${stickyStyle};left:120px;min-width:100px" onclick="window.sortObras('numero')" title="Clique para ordenar">Nº <span style="font-size:8px;opacity:.6">${sortIcon('numero')}</span></th>`;
+
+  let cols = `<tr>
+    ${frozen1}
+    ${frozen2}
+    ${sth('Tipo','tipo')}
+    ${sth('Cidade','cidade')}
+    ${th('Empreiteira')}
+    ${th('Fiscal')}
+    ${sth('Abertura','dataAbertura')}
+    ${th('Prazo')}
+    ${sth('Data Limite','dataLimite','Ordenar por data de vencimento')}
+    ${th('Dias Exec.')}
+    ${th('Deslig.')}
+    ${sth('Conclusão','conclusao')}
+    ${th('Fiscalização')}
+    ${th('Pendência')}
+    ${th('Kaffa')}
+    ${th('Cadastro')}
+    ${th('Medição')}
+    ${th('USC')}
+    ${th('ULV')}
+    ${th('Medição Tipo','Tipo da última medição (Parcial/Final)')}`;
+
+  if(!isEmp){
+    const tipMed70  = 'Prazo = Data Limite da obra';
+    const tipMed230 = 'Prazo = Data Limite da obra';
+    const tipMed280 = 'Aguardar medição de campo';
+    const tipDias70 = 'Dias restantes para Med.70';
+    const tipDias230= 'Dias restantes para Med.230';
+    cols += `
+    ${sth('Med. 70','medida70', tipMed70)}
+    ${th('D. 70',tipDias70)}
+    ${sth('Med. 230','medida230',tipMed230)}
+    ${th('D. 230',tipDias230)}
+    ${sth('Med. 280','medida280',tipMed280)}
+    ${th('280 Motivo')}`;
+  }
+
+  if(isGer || isFis){
+    cols += `
+    ${th('Arr.','Armazenamento')}`;
+  }
+
+  if(isGer){
+    cols += `
+    ${th('USC Med.','USC medido pelo gerente')}
+    ${th('ULV Med.','ULV medido pelo gerente')}`;
+  }
+
+  cols += `<th>Ação</th></tr>`;
+  hdr.innerHTML = cols;
+}
 
 // Fix #6: sort obras by column
 window.sortObras = function(col){
@@ -1183,13 +1243,14 @@ function renderObras(){
     const procCancBadge = o.processoCancelamento && !o.cancelado
       ? '<span style="font-size:8px;background:rgba(168,85,247,.2);color:#A855F7;border:1px solid rgba(168,85,247,.4);padding:1px 5px;border-radius:4px;margin-left:4px">⏸ CANC.</span>'
       : '';
+    const stk = 'position:sticky;z-index:1;background:' + (rowBg.includes('EF4444')?'rgba(20,5,5,1)':rowBg.includes('A855F7')?'rgba(15,5,20,1)':rowBg.includes('F97316')?'rgba(20,10,0,1)':'var(--surface)');
     return `<tr style="${rowBg}">
       <td class="col-chk" style="display:none;width:32px;padding:4px 8px">
         <input type="checkbox" class="chk-obra" data-id="${o.id}"
           onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkMedidasCount'); if(el) el.textContent=n+' obras selecionadas'; })()">
       </td>
-      <td>${statusHtml(o)}${procCancBadge}</td>
-      <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+      <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
+      <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
       <td>${o.cidade||'—'}</td>
       <td style="font-size:10px">${o.empreiteira||'—'}</td>
@@ -1398,8 +1459,8 @@ window.openObraModal=function(obraId){
       if(secUscEl) secUscEl.style.display=hasMedicoes?'grid':'none';
     }
     if(p !== 'fiscal')      showSec('secExec');
-    // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante)
-    if((p === 'fiscal' || p === 'gerente') && isEdit && (obra?.conclusao||obra?.placas||obra?.sap)) showSec('secTransfView');
+    // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante) sempre em modo edição
+    if((p === 'fiscal' || p === 'gerente') && isEdit) showSec('secTransfView');
     if(p === 'empreiteira') showSec('secImpedimento');
 
     // Fiscalização: só fiscal e gerente
@@ -2362,6 +2423,7 @@ window.exportCSVFiltrado = function() {
 
 // ══ FIX #2: ATUALIZAÇÃO DE MEDIDAS EM LOTE ═══════════════════════════
 window.abrirBulkMedidas = function(){
+  window._bulkMedidasMode = true; // Fix #3: fiscal vê todas as obras
   // Reset selection
   document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
   document.getElementById('bulkMedidasBar').style.display='flex';
@@ -2370,6 +2432,7 @@ window.abrirBulkMedidas = function(){
   document.getElementById('btnBulkMedidas').onclick = window.fecharBulkMedidas;
 };
 window.fecharBulkMedidas = function(){
+  window._bulkMedidasMode = false; // Fix #3
   document.getElementById('bulkMedidasBar').style.display='none';
   document.querySelectorAll('.col-chk').forEach(el => el.style.display='none');
   document.querySelectorAll('.chk-obra').forEach(el => el.checked=false);
