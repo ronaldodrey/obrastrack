@@ -223,3 +223,11 @@ input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.6);}
 /* ── MONITOR DE PRAZOS ── */
 .sect-title svg { vertical-align: middle; }
 th[title] { text-decoration: underline dotted; cursor: help; }
+
+/* Frozen/sticky columns in obras table */
+.tbl-wrap { position: relative; }
+.tbl-wrap table { border-collapse: separate; border-spacing: 0; }
+.tbl-wrap th[style*="position:sticky"],
+.tbl-wrap td[style*="position:sticky"] {
+  box-shadow: 2px 0 4px rgba(0,0,0,0.3);
+}
