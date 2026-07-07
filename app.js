@@ -1180,23 +1180,19 @@ function renderObras(){
   if(!document.getElementById('obrasBody')) return;
   try{
   buildTableHeader(); // Fix #6: rebuild headers so sort icons are always current
-  // Inject RD/ODI sub-tabs
+
+  // Declarar _tabAtual ANTES de usar nos botões
+  const _tabAtual = document.getElementById('obrasBody')?.getAttribute('data-tab') || _obrasTipoTab || 'RD';
+
+  // Renderizar botões de sub-aba RD / ODI
   const subTabEl = document.getElementById('subTabObras');
   if(subTabEl){
-    // Use _tabAtual (read from DOM above) for consistent styling
     const rdAct = _tabAtual !== 'ODI';
     const s = (active, cor) => `padding:7px 18px;border-radius:6px 6px 0 0;border:1px solid var(--border);border-bottom:${active?'2px solid '+cor:'none'};margin-bottom:${active?'-1px':'0'};background:${active?'var(--surface2)':'var(--surface)'};color:${active?cor:'var(--muted)'};font-weight:${active?700:400};font-size:12px;cursor:pointer`;
     subTabEl.innerHTML =
-      `<button onclick="window.switchObrasSubTab('RD')" style="${s(rdAct,'var(--accent)')}">
-        🏗️ Obras RD <span style="font-size:9px;opacity:.7">(R1+R2)</span>
-       </button>
-       <button onclick="window.switchObrasSubTab('ODI')" style="${s(!rdAct,'#ff6b35')}">
-        🔧 Obras ODI <span style="font-size:9px;opacity:.7">(execução cliente)</span>
-       </button>`;
+      `<button onclick="window.switchObrasSubTab('RD')" style="${s(rdAct,'var(--accent)')}">\n        🏗️ Obras RD <span style="font-size:9px;opacity:.7">(R1+R2)</span>\n       </button>\n       <button onclick="window.switchObrasSubTab('ODI')" style="${s(!rdAct,'#ff6b35')}">\n        🔧 Obras ODI <span style="font-size:9px;opacity:.7">(execução cliente)</span>\n       </button>`;
   }
   // Apply module-level quick filter first, then form filters
-  // Read tab state from DOM (most reliable — no JS scope issues)
-  const _tabAtual = document.getElementById('obrasBody')?.getAttribute('data-tab') || _obrasTipoTab || 'RD';
   let baseList = (() => {
     let b = obras;
     if(me.perfil==='empreiteira') b = b.filter(o => o.empreiteira===me.vinculo);
