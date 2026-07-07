@@ -233,10 +233,10 @@ window.showPage=function(id){
 };
 // Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
 window.switchObrasSubTab = function(tipo){
-  _obrasTipoTab = tipo;
-  document.querySelectorAll('.subtab-obras').forEach(el=>{
-    el.classList.toggle('active-subtab', el.dataset.tipo===tipo);
-  });
+  // Store in DOM — no JS scope issues possible
+  const obrasEl = document.getElementById('obrasBody');
+  if(obrasEl) obrasEl.setAttribute('data-tab', tipo);
+  _obrasTipoTab = tipo; // also keep JS var in sync
   window.renderObras();
 };
 
@@ -1098,7 +1098,7 @@ function renderMonitorPrazos(list){
 
 // ── TABELA HEADERS ────────────────────────────────────
 function buildTableHeader(){
-  const hdr = document.getElementById('obrasHead');
+  const hdr = document.getElementById('obrasHead') || document.getElementById('thRow');
   if(!hdr) return;
 
   const sortIcon = col => _sortCol===col ? (_sortDir>0?'▲':'▼') : '↕';
@@ -1183,25 +1183,29 @@ function renderObras(){
   // Inject RD/ODI sub-tabs
   const subTabEl = document.getElementById('subTabObras');
   if(subTabEl){
-    const rdAct = _obrasTipoTab!=='ODI';
+    // Use _tabAtual (read from DOM above) for consistent styling
+    const rdAct = _tabAtual !== 'ODI';
+    const s = (active, cor) => `padding:7px 18px;border-radius:6px 6px 0 0;border:1px solid var(--border);border-bottom:${active?'2px solid '+cor:'none'};margin-bottom:${active?'-1px':'0'};background:${active?'var(--surface2)':'var(--surface)'};color:${active?cor:'var(--muted)'};font-weight:${active?700:400};font-size:12px;cursor:pointer`;
     subTabEl.innerHTML =
-      `<button onclick="window.switchObrasSubTab('RD')"
-        style="padding:6px 16px;border-radius:6px 6px 0 0;border:1px solid var(--border);
-          border-bottom:${rdAct?'2px solid var(--accent)':'none'};margin-bottom:${rdAct?'-1px':'0'};
-          background:${rdAct?'var(--surface2)':'var(--surface)'};color:${rdAct?'var(--accent)':'var(--muted)'};
-          font-weight:${rdAct?700:400};font-size:11px;cursor:pointer">
+      `<button onclick="window.switchObrasSubTab('RD')" style="${s(rdAct,'var(--accent)')}">
         🏗️ Obras RD <span style="font-size:9px;opacity:.7">(R1+R2)</span>
-      </button>
-      <button onclick="window.switchObrasSubTab('ODI')"
-        style="padding:6px 16px;border-radius:6px 6px 0 0;border:1px solid var(--border);
-          border-bottom:${!rdAct?'2px solid #ff6b35':'none'};margin-bottom:${!rdAct?'-1px':'0'};
-          background:${!rdAct?'var(--surface2)':'var(--surface)'};color:${!rdAct?'#ff6b35':'var(--muted)'};
-          font-weight:${!rdAct?700:400};font-size:11px;cursor:pointer">
+       </button>
+       <button onclick="window.switchObrasSubTab('ODI')" style="${s(!rdAct,'#ff6b35')}">
         🔧 Obras ODI <span style="font-size:9px;opacity:.7">(execução cliente)</span>
-      </button>`;
+       </button>`;
   }
   // Apply module-level quick filter first, then form filters
-  let baseList = visibleObras();
+  // Read tab state from DOM (most reliable — no JS scope issues)
+  const _tabAtual = document.getElementById('obrasBody')?.getAttribute('data-tab') || _obrasTipoTab || 'RD';
+  let baseList = (() => {
+    let b = obras;
+    if(me.perfil==='empreiteira') b = b.filter(o => o.empreiteira===me.vinculo);
+    else if(me.perfil==='fiscal' && !window._bulkMedidasMode) b = b.filter(o => o.fiscal===me.vinculo);
+    // Tab filter — read from DOM attribute for reliability
+    if(_tabAtual === 'RD')  b = b.filter(o => o.tipo !== 'ODI');
+    if(_tabAtual === 'ODI') b = b.filter(o => o.tipo === 'ODI');
+    return b;
+  })();
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
