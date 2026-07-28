@@ -2021,6 +2021,13 @@ window.saveObra=async function(){
       if(patch.cadastroConfirmado && !obraAntiga?.cadastroConfirmado){
         patch.dataCadastroConfirmado = hojeStr();
       }
+      // Email: kaffa registrado pela empreiteira → avisa fiscal
+      if(me.perfil==='empreiteira' && _kaffasPendentes && patch.kaffaEntries){
+        const novosKaffas = patch.kaffaEntries.slice(-(patch.kaffaEntries.length-(obraAntiga?.kaffaEntries||[]).length));
+        for(const k of novosKaffas)
+          await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
+      }
+      // Email: obra concluída pela empreiteira → avisa fiscal
       if(me.perfil==='empreiteira'&&!obraAntiga?.conclusao&&patch.conclusao)
         await enviarEmailConclusao({...obraAntiga,...patch});
       if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia){
@@ -2149,61 +2156,141 @@ window.delUser=async function(uid){
 };
 
 // ── EMAILS ────────────────────────────────────────────
-function emailJSAtivo(){ return EMAILJS_CONFIG.publicKey&&!EMAILJS_CONFIG.publicKey.startsWith('COLE'); }
-
+function emailJSAtivo(){
+  if(typeof emailjs === 'undefined'){
+    console.warn('[SPPC Email] EmailJS library não carregada');
+    return false;
+  }
+  const cfg = EMAILJS_CONFIG;
+  if(!cfg?.publicKey || cfg.publicKey.startsWith('COLE_AQUI')){
+    return false; // não configurado ainda
+  }
+  if(!cfg?.tplGeral || cfg.tplGeral.startsWith('COLE_AQUI')){
+    console.warn('[SPPC Email] tplGeral não configurado em emailjs-config.js');
+    return false;
+  }
+  return true;
+}
 async function jaEnviou(chave){
   try{
     const s=await getDocs(query(collection(db,'notificacoes'),where('chave','==',chave)));
     return !s.empty;
-  }catch(e){ return false; }
+  }catch(e){
+    console.warn('[SPPC Email] jaEnviou:', e.message);
+    return false;
+  }
 }
+
 async function marcarEnviado(chave){
   try{ await addDoc(collection(db,'notificacoes'),{chave,ts:serverTimestamp()}); }catch(e){}
 }
-async function enviarEmail(tplId,params){
+// ── FUNÇÃO GENÉRICA: 1 único template para todos os tipos ──────────
+// O template no EmailJS usa apenas: {{to_email}}, {{cc_email}}, {{assunto}}, {{mensagem}}
+async function enviarEmail(assunto, mensagem, toEmail, ccEmail){
   if(!emailJSAtivo()) return;
-  try{ await emailjs.send(EMAILJS_CONFIG.serviceId,tplId,params); }catch(e){ console.warn('Email falhou:',e.message); }
+  const tpl = EMAILJS_CONFIG.tplGeral;
+  if(!tpl || tpl.startsWith('COLE_AQUI')) return;
+  try{
+    const resp = await emailjs.send(EMAILJS_CONFIG.serviceId, tpl, {
+      to_email: toEmail,
+      cc_email: ccEmail || EMAILJS_CONFIG.emailGerente || '',
+      assunto, mensagem,
+    });
+    console.log('[SPPC Email] Enviado OK:', resp.status, assunto);
+  }catch(e){
+    // EmailJS retorna {status, text} — não é um Error padrão
+    console.error('[SPPC Email] Falhou:', e?.text || e?.message || JSON.stringify(e));
+    console.error('[SPPC Email] Params: serviceId=', EMAILJS_CONFIG.serviceId, 'tpl=', tpl, 'to=', toEmail);
+  }
+}
+
+async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
+  if(!obra.fiscal) return;
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
+  if(!fiscal?.email) return;
+  const chave = `kaffa_${obra.id}_${tipoKaffa}_${dataKaffa}`;
+  if(await jaEnviou(chave)) return;
+  const tipoLabel = tipoKaffa==='final' ? 'KAFFA FINAL ✅' : 'Kaffa Parcial';
+  await enviarEmail(
+    `SPPC ARLAG – ${tipoLabel} registrado | Obra ${obra.numero} – ${obra.cidade}`,
+    `Olá, Fiscal!
+
+A empreiteira ${obra.empreiteira} registrou o seguinte:
+
+• Tipo: ${tipoLabel}
+• Data: ${fmtTxt(dataKaffa)}
+• Obra: ${obra.numero}
+• Cidade: ${obra.cidade}
+
+Aguarda medição correspondente.`,
+    fiscal.email, EMAILJS_CONFIG.emailGerente
+  );
+  await marcarEnviado(chave);
 }
 
 async function enviarEmailConclusao(obra){
   if(!obra.fiscal) return;
-  const fiscal=users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
   if(!fiscal?.email) return;
-  const chave=`conclusao_${obra.id}`;
+  const chave = `conclusao_${obra.id}`;
   if(await jaEnviou(chave)) return;
-  await enviarEmail(EMAILJS_CONFIG.tplObraConcluida,{
-    to_email:fiscal.email, cc_email:EMAILJS_CONFIG.emailGerente,
-    obra_numero:obra.numero, obra_cidade:obra.cidade, empreiteira:obra.empreiteira,
-    data_conclusao:fmtTxt(obra.conclusao),
-  });
+  await enviarEmail(
+    `SPPC ARLAG – Obra concluída | ${obra.numero} – ${obra.cidade}`,
+    `Olá, Fiscal!
+
+A empreiteira ${obra.empreiteira} informou conclusão da obra.
+
+• Obra: ${obra.numero}
+• Cidade: ${obra.cidade}
+• Data de Conclusão: ${fmtTxt(obra.conclusao)}
+
+Aguarda fiscalização.`,
+    fiscal.email, EMAILJS_CONFIG.emailGerente
+  );
   await marcarEnviado(chave);
 }
 
 async function enviarEmailPendencia(obra){
-  const emp=empreiteiras.find(e=>e.nome===obra.empreiteira);
+  const emp = empreiteiras.find(e=>e.nome===obra.empreiteira);
   if(!emp?.email) return;
-  const chave=`pendencia_${obra.id}`;
+  const chave = `pendencia_${obra.id}`;
   if(await jaEnviou(chave)) return;
-  await enviarEmail(EMAILJS_CONFIG.tplPendencia,{
-    to_email:emp.email, cc_email:EMAILJS_CONFIG.emailGerente,
-    obra_numero:obra.numero, obra_cidade:obra.cidade,
-    tipo_pendencia:(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', '),
-    prazo_resolucao:fmtTxt(obra.prazoPendencia),
-  });
+  const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
+  await enviarEmail(
+    `SPPC ARLAG – Pendência registrada | Obra ${obra.numero} – ${obra.cidade}`,
+    `Atenção, Empreiteira!
+
+Foi registrada uma pendência na sua obra.
+
+• Obra: ${obra.numero} – ${obra.cidade}
+• Tipo: ${tipos}
+• Prazo para regularização: ${fmtTxt(obra.prazoPendencia)}
+
+Acesse o sistema SPPC ARLAG para regularizar.`,
+    emp.email, EMAILJS_CONFIG.emailGerente
+  );
   await marcarEnviado(chave);
 }
 
 async function enviarEmailRegularizacao(obra){
-  const fiscal=users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
   if(!fiscal?.email) return;
-  const chave=`regularizacao_${obra.id}`;
+  const chave = `regularizacao_${obra.id}`;
   if(await jaEnviou(chave)) return;
-  await enviarEmail(EMAILJS_CONFIG.tplPendencia,{
-    to_email:fiscal.email, cc_email:EMAILJS_CONFIG.emailGerente,
-    obra_numero:obra.numero, obra_cidade:obra.cidade,
-    tipo_pendencia:'REGULARIZAÇÃO — '+(obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', '),
-    prazo_resolucao:`Regularizada em ${fmtTxt(obra.regularizacaoData)}`,
-  });
+  const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
+  await enviarEmail(
+    `SPPC ARLAG – Pendência regularizada | Obra ${obra.numero} – ${obra.cidade}`,
+    `Olá, Fiscal!
+
+A empreiteira regularizou a pendência da obra.
+
+• Obra: ${obra.numero} – ${obra.cidade}
+• Pendência: ${tipos}
+• Regularizada em: ${fmtTxt(obra.regularizacaoData)}
+
+Verifique no sistema SPPC ARLAG.`,
+    fiscal.email, EMAILJS_CONFIG.emailGerente
+  );
   await marcarEnviado(chave);
 }
 
@@ -2222,11 +2309,20 @@ async function verificarNotificacoes(){
         const tipo=dias<=0?'vencida':dias<=EMAILJS_CONFIG.diasCritico?'critica':'aviso';
         const chave=`prazo_${o.id}_${tipo}_${o.dataLimite}`;
         if(!await jaEnviou(chave)){
-          await enviarEmail(tipo==='critica'?EMAILJS_CONFIG.tplPrazoCritico:EMAILJS_CONFIG.tplPrazoPerto,{
-            to_email:emp.email, cc_email:EMAILJS_CONFIG.emailGerente,
-            obra_numero:o.numero, obra_cidade:o.cidade, data_limite:fmtTxt(o.dataLimite),
-            dias_restantes:dias<=0?`Vencida há ${Math.abs(dias)} dias`:`${dias} dias restantes`,
-          });
+          const emoji = tipo==='critica'?'⚠️ URGENTE:':'🔔';
+          await enviarEmail(
+            `${emoji} SPPC ARLAG – Prazo da obra | ${o.numero} – ${o.cidade}`,
+            `Atenção, Empreiteira!
+
+A obra abaixo está com prazo${dias<=0?' VENCIDO':' próximo do vencimento'}:
+
+• Obra: ${o.numero} – ${o.cidade}
+• Vencimento: ${fmtTxt(o.dataLimite)}
+• Situação: ${dias<=0?'Vencida há '+Math.abs(dias)+' dias':dias+' dias restantes'}
+
+Acesse o sistema SPPC ARLAG para verificar.`,
+            emp.email, EMAILJS_CONFIG.emailGerente
+          );
           await marcarEnviado(chave);
         }
       }
@@ -2240,11 +2336,19 @@ async function verificarNotificacoes(){
           const tipo=diasM<=0?'vencida':diasM<=EMAILJS_CONFIG.diasCritico?'critica':'aviso';
           const chave=`medida70_${o.id}_${tipo}_${o.dataLimite}`;
           if(!await jaEnviou(chave)){
-            await enviarEmail(EMAILJS_CONFIG.tplMedidaPrazo,{
-              to_email:fiscal.email, cc_email:EMAILJS_CONFIG.emailGerente,
-              obra_numero:o.numero, obra_cidade:o.cidade, tipo_medida:'Medida 70',
-              data_limite:fmtTxt(o.dataLimite), dias_restantes:diasM<=0?'Vencida':diasM+'d',
-            });
+            await enviarEmail(
+              `SPPC ARLAG – Medida 70 próxima | Obra ${o.numero} – ${o.cidade}`,
+              `Olá, Fiscal!
+
+A Medida 70 da obra abaixo está próxima do vencimento:
+
+• Obra: ${o.numero} – ${o.cidade}
+• Vencimento: ${fmtTxt(o.dataLimite)}
+• Situação: ${diasM<=0?'Vencida':diasM+'d restantes'}
+
+Atualize no sistema SPPC ARLAG.`,
+              fiscal.email, EMAILJS_CONFIG.emailGerente
+            );
             await marcarEnviado(chave);
           }
         }
@@ -2258,12 +2362,18 @@ async function verificarNotificacoes(){
         if(fiscal?.email){
           const chave=`cad_urgente_${o.id}_${o.fiscalizacao}`;
           if(!await jaEnviou(chave)){
-            await enviarEmail(EMAILJS_CONFIG.tplPrazoCritico,{
-              to_email:fiscal.email, cc_email:EMAILJS_CONFIG.emailGerente,
-              obra_numero:o.numero, obra_cidade:o.cidade,
-              data_limite:fmtTxt(o.fiscalizacao),
-              dias_restantes:`Fiscalizada há ${diasSemCad} dias sem enviar para cadastro`,
-            });
+            await enviarEmail(
+              `⚠️ SPPC ARLAG – Cadastro urgente | Obra ${o.numero} – ${o.cidade}`,
+              `Olá, Fiscal!
+
+A obra abaixo foi fiscalizada há ${diasSemCad} dias e ainda não foi enviada para cadastro:
+
+• Obra: ${o.numero} – ${o.cidade}
+• Data fiscalização: ${fmtTxt(o.fiscalizacao)}
+
+Envie para cadastro com urgência.`,
+              fiscal.email, EMAILJS_CONFIG.emailGerente
+            );
             await marcarEnviado(chave);
           }
         }
@@ -2277,11 +2387,19 @@ async function verificarNotificacoes(){
           const tipo=diasM<=0?'vencida':diasM<=EMAILJS_CONFIG.diasCritico?'critica':'aviso';
           const chave=`medida230_${o.id}_${tipo}_${o.dataLimite}`;
           if(!await jaEnviou(chave)){
-            await enviarEmail(EMAILJS_CONFIG.tplMedidaPrazo,{
-              to_email:fiscal.email, cc_email:EMAILJS_CONFIG.emailGerente,
-              obra_numero:o.numero, obra_cidade:o.cidade, tipo_medida:'Medida 230',
-              data_limite:fmtTxt(o.dataLimite), dias_restantes:diasM<=0?'Vencida':diasM+'d',
-            });
+            await enviarEmail(
+              `SPPC ARLAG – Medida 230 próxima | Obra ${o.numero} – ${o.cidade}`,
+              `Olá, Fiscal!
+
+A Medida 230 da obra abaixo está próxima do vencimento:
+
+• Obra: ${o.numero} – ${o.cidade}
+• Vencimento: ${fmtTxt(o.dataLimite)}
+• Situação: ${diasM<=0?'Vencida':diasM+'d restantes'}
+
+Atualize no sistema SPPC ARLAG.`,
+              fiscal.email, EMAILJS_CONFIG.emailGerente
+            );
             await marcarEnviado(chave);
           }
         }
