@@ -2,7 +2,7 @@
 //  SPPC_ARLAG — app.js
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged }
+import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
                             from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc,
          onSnapshot, serverTimestamp, query, orderBy, where }
@@ -2078,7 +2078,8 @@ async function renderUsers(){
           <div class="ut-role"><span class="role-badge ${rc}">${u.perfil}</span></div>
           <div class="ut-vinc">${u.vinculo||'—'}</div>
           <div class="ut-acts">
-            <button class="btn btn-secondary btn-sm" onclick="openUserModal('${u.uid}')">✏️</button>
+            <button class="btn btn-secondary btn-sm" onclick="openUserModal('${u.uid}')" title="Editar">✏️</button>
+            <button class="btn btn-secondary btn-sm" onclick="resetSenhaUsuario('${u.email||''}')" title="Enviar redefinição de senha" style="font-size:10px">🔑</button>
             ${u.uid!==me.uid?`<button class="btn btn-danger btn-sm" onclick="delUser('${u.uid}')">🗑️</button>`:''}
           </div>
         </div>`;
@@ -2133,21 +2134,74 @@ window.saveUser=async function(){
     const vinculo=perfil==='empreiteira'?document.getElementById('uVincEmp').value
       :perfil==='fiscal'?document.getElementById('uVincFis').value.trim():'';
     if(!nome||!email||!perfil){ toast('Preencha todos os campos.','err'); return; }
+
     if(isEdit){
+      // Atualiza Firestore (nome, perfil, vínculo)
       await setDoc(doc(db,'usuarios',uid),{nome,email,perfil,vinculo},{merge:true});
-      toast('Usuário atualizado!');
+
+      // Se senha foi preenchida: envia e-mail de redefinição
+      if(senha && senha.length>=6){
+        await sendPasswordResetEmail(auth, email);
+        toast(`Dados atualizados! E-mail de redefinição de senha enviado para ${email}.`);
+      } else {
+        // Verifica se o e-mail mudou comparando com o que estava no Firestore
+        const snap=await getDoc(doc(db,'usuarios',uid));
+        const emailAntigo=snap.data()?.email||'';
+        if(emailAntigo && emailAntigo!==email){
+          // E-mail mudou: precisa recriar a conta no Firebase Auth
+          // 1. Cria nova conta Auth com novo e-mail
+          if(!senha||senha.length<6){
+            toast('Para alterar o e-mail, preencha também uma nova senha (mín. 6 caracteres).','err');
+            return;
+          }
+        }
+        toast('Usuário atualizado!');
+      }
     } else {
-      if(senha.length<6){ toast('Senha: mínimo 6 caracteres.','err'); return; }
+      // Novo usuário: cria no Firebase Auth + Firestore
+      if(!senha||senha.length<6){ toast('Senha: mínimo 6 caracteres.','err'); return; }
       const cred=await createUserWithEmailAndPassword(auth2,email,senha);
       await signOut(auth2);
       await setDoc(doc(db,'usuarios',cred.user.uid),{nome,email,perfil,vinculo,criadoEm:serverTimestamp()});
-      toast(`Usuário ${nome} criado!`);
+      toast(`✓ Usuário ${nome} criado! Login: ${email}`);
     }
     closeUserModal(); await renderUsers();
   }catch(e){
-    const msgs={'auth/email-already-in-use':'E-mail já cadastrado.','auth/weak-password':'Senha fraca.'};
+    const msgs={
+      'auth/email-already-in-use':'E-mail já cadastrado no sistema.',
+      'auth/weak-password':'Senha fraca (mínimo 6 caracteres).',
+      'auth/invalid-email':'E-mail inválido.',
+    };
     toast('Erro: '+(msgs[e.code]||e.message),'err');
   }finally{ btn.disabled=false; btn.textContent=document.getElementById('userId').value?'Salvar':'Criar Usuário'; }
+};
+
+// Envia e-mail de redefinição de senha para um usuário
+window.resetSenhaUsuario=async function(email){
+  if(!email){ toast('Usuário sem e-mail cadastrado.','err'); return; }
+  if(!confirm(`Enviar e-mail de redefinição de senha para:\n${email}?`)) return;
+  try{
+    await sendPasswordResetEmail(auth, email);
+    toast(`E-mail de redefinição enviado para ${email}!`);
+  }catch(e){
+    const msgs={'auth/user-not-found':'Usuário não encontrado no sistema de autenticação.'};
+    toast('Erro: '+(msgs[e.code]||e.message),'err');
+  }
+};
+
+// Recria conta Auth com novo e-mail (mantém dados do Firestore)
+window.recriarContaUsuario=async function(uid, novoEmail, novaSenha, nome, perfil, vinculo){
+  try{
+    const cred=await createUserWithEmailAndPassword(auth2, novoEmail, novaSenha);
+    await signOut(auth2);
+    // Atualiza Firestore com novo UID e novo e-mail
+    await deleteDoc(doc(db,'usuarios',uid));
+    await setDoc(doc(db,'usuarios',cred.user.uid),{nome,email:novoEmail,perfil,vinculo,criadoEm:serverTimestamp()});
+    toast(`✓ Conta recriada com e-mail ${novoEmail}. A conta antiga foi desativada.`);
+  }catch(e){
+    const msgs={'auth/email-already-in-use':'Novo e-mail já está em uso.'};
+    toast('Erro ao recriar: '+(msgs[e.code]||e.message),'err');
+  }
 };
 window.delUser=async function(uid){
   if(uid===me.uid){ toast('Não pode remover a si mesmo.','err'); return; }
