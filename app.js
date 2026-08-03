@@ -191,6 +191,10 @@ async function iniciarApp(){
   popularSelectEmpreiteiras();
 
   const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
+  // Otimização tabs
+  const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
+  if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
+  if(['gerente','fiscal'].includes(me.perfil)) tabs.push(['pgOtimizacaoPort','🌐 Portfólio']);
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML =
@@ -218,6 +222,7 @@ async function iniciarApp(){
     if(active?.id==='pgCarteira') renderCarteira();
   });
 
+  loadEquipDBFromStorage(); // Restore equipment database from localStorage
   showPage('pgDash');
 }
 window.showPage=function(id){
@@ -230,6 +235,8 @@ window.showPage=function(id){
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
+  if(id==='pgOtimizacao') renderOtimizacao();
+  if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
 // Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
 window.switchObrasSubTab = function(tipo){
@@ -601,6 +608,51 @@ function renderDashEmpreiteira(minhas){
   html += pendenciaRanking(minhas);
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartEmp"></div>';
+
+  // Análise mensal somente para CS Eletricidade e Eletelsul
+  const isEmpPrincipal = EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
+  if(isEmpPrincipal){
+    html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📅 Análise Mensal — Obras em Mãos</div>';
+    // Build mini bar chart for this empreiteira (same logic as Carteira)
+    const ativas_emp = minhas.filter(o=>!o.conclusao&&!o.cancelado&&(o.tipo==='R1'||o.tipo==='R2'));
+    const hojeD2=new Date(), hsEmp=hojeStr();
+    const mV=m=>{const[mm,yy]=m.split('/');return +yy*100+ +mm;};
+    const mS=s=>{if(!s)return null;const[y,m]=s.split('-');return `${m}/${y}`;};
+    const meses12e=[];
+    for(let i=0;i<=12;i++){const d=new Date(hojeD2.getFullYear(),hojeD2.getMonth()+i,1);meses12e.push(`${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`);}
+    const atrE=ativas_emp.filter(o=>o.dataLimite&&o.dataLimite<hsEmp);
+    const colsE=[
+      {lbl:'⚠️ Atras.',q:atrE.length,usc:atrE.reduce((s,o)=>s+(parseFloat(o.usc)||0),0),cor:'#EF4444'},
+      ...meses12e.map((m,i)=>({
+        lbl:m,
+        q:i===0?ativas_emp.filter(o=>mS(o.dataLimite)===m&&o.dataLimite>=hsEmp).length:ativas_emp.filter(o=>mS(o.dataLimite)===m).length,
+        usc:(i===0?ativas_emp.filter(o=>mS(o.dataLimite)===m&&o.dataLimite>=hsEmp):ativas_emp.filter(o=>mS(o.dataLimite)===m)).reduce((s,o)=>s+(parseFloat(o.usc)||0),0),
+        cor:i===0?'#22C55E':'#7c6af7'
+      }))
+    ];
+    const maxQe=Math.max(...colsE.map(c=>c.q),1);
+    const cwE=58,bHe=90,tPe=48,bPe=28,plE=6;
+    let svgE=`<svg xmlns="http://www.w3.org/2000/svg" width="${plE+colsE.length*cwE+plE}" height="${tPe+bHe+bPe}" style="font-family:'DM Mono',monospace;display:block">`;
+    svgE+=`<line x1="${plE}" y1="${tPe+bHe}" x2="${plE+colsE.length*cwE}" y2="${tPe+bHe}" stroke="#374151" stroke-width="1"/>`;
+    colsE.forEach((c,i)=>{
+      const x=plE+i*cwE,cx=x+cwE/2,bh=c.q>0?Math.max(6,Math.round((c.q/maxQe)*bHe)):0,by=tPe+bHe-bh;
+      if(bh>0){svgE+=`<rect x="${x+3}" y="${by}" width="${cwE-6}" height="${bh}" rx="4" fill="${c.cor}" opacity="0.85"/>`;} 
+      if(c.q>0){
+        const u=c.usc>=1000?(c.usc/1000).toFixed(1).replace('.0','')+'k USC':c.usc.toFixed(0)+' USC';
+        svgE+=`<text x="${cx}" y="${by-26}" text-anchor="middle" font-size="8" fill="${c.cor}bb">${u}</text>`;
+        svgE+=`<text x="${cx}" y="${by-12}" text-anchor="middle" font-size="11" font-weight="800" fill="${c.cor}">${c.q}</text>`;
+      }
+      svgE+=`<text x="${cx}" y="${tPe+bHe+16}" text-anchor="middle" font-size="8" font-weight="${i<=1?700:400}" fill="${c.cor==='#EF4444'?'#EF4444':i===1?'#22C55E':'#9ca3af'}">${c.lbl}</text>`;
+    });
+    svgE+='</svg>';
+    html+=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto">${svgE}
+      <div style="display:flex;gap:20px;margin-top:8px;font-size:10px;color:var(--muted)">
+        <span><span style="color:#EF4444">⚠️</span> Atrasadas: ${atrE.length}</span>
+        <span>Total em mãos: ${ativas_emp.length}</span>
+        <span>USC em mãos: ${ativas_emp.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(1)}</span>
+      </div>
+    </div>`;
+  }
 
   // Fix #1: Lista de obras atrasadas no dashboard da empreiteira
   const empAtrasadas = minhas.filter(o=>!o.conclusao&&o.dataLimite&&o.dataLimite<hojeStr());
@@ -1357,7 +1409,7 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oDesligamento',obra.dataDesligamento);
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     // kaffaEntries rendered via renderListaKaffas above
@@ -1929,6 +1981,7 @@ window.saveObra=async function(){
         armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
+        equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
         processoCancelamento:gChk('oProcessoCancelamento'),
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
@@ -2464,12 +2517,12 @@ Atualize no sistema SPPC ARLAG.`,
 
 // ── CSV ───────────────────────────────────────────────
 window.exportCSV=function(){
-  const rows=[['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV','Medida 70','Medida 230','Medida 280','Armazenado','Cancelado']];
+  const rows=[['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Equip.Ref.','Abertura','Prazo','Data Limite','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV','Medida 70','Medida 230','Medida 280','Armazenado','Cancelado']];
   visibleObras().forEach(o=>rows.push([
     statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,
     o.dataAbertura,o.prazoExecucao,o.dataLimite,o.conclusao,o.fiscalizacao,
     o.pendencia?(o.tipoPendencia||'Sim'):'Não',o.kaffa,o.dataCadastro,o.medicao,
-    o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não',o.cancelado?'Sim':'Não'
+    o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não',o.cancelado?'Sim':'Não'
   ]));
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent('\uFEFF'+rows.map(r=>r.map(v=>v??'').join(';')).join('\n'));
@@ -2601,7 +2654,7 @@ window.exportCSVFiltrado = function() {
     statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,
     o.dataAbertura,o.prazoExecucao,o.dataLimite,o.conclusao,o.fiscalizacao,
     o.pendencia?(o.tipoPendencia||'Sim'):'Não',o.kaffa,o.dataCadastro,o.medicao,
-    o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não'
+    o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não'
   ]));
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF'+rows.map(r=>r.map(v=>v??'').join(';')).join('\n'));
@@ -2650,6 +2703,126 @@ window.confirmarBulkMedidas = async function(){
   btn.disabled=false; btn.textContent='✓ Atualizar';
   toast(erros?`${count} atualizadas, ${erros} com erro.`:`✓ ${count} obras atualizadas!`,(erros?'err':''));
   window.fecharBulkMedidas();
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+//  BASE DE EQUIPAMENTOS — carrega do Excel, persiste em localStorage
+// ══════════════════════════════════════════════════════════════════════
+window._equipDB = new Map(); // Map<NR_EQUIPAMENTO, {ant,feed,lat,lon,mun,sg,sub,ch}>
+
+// Tipos que podem ser manobrados (abertura = desligamento)
+const SWITCH_SG = new Set(['RE','SE','CE','BC','BR','CP','AL','CD']);
+
+function parseCoord(s){
+  if(!s) return null;
+  const n = parseFloat(String(s).replace(/^'/,'').replace(',','.'));
+  return isNaN(n)?null:n;
+}
+
+function haversineKm(lat1,lon1,lat2,lon2){
+  const R=6371,toR=Math.PI/180;
+  const dLat=(lat2-lat1)*toR, dLon=(lon2-lon1)*toR;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Constrói o caminho do equipamento até a raiz da árvore
+function buildPath(nrEquip, maxDepth=40){
+  const path=[];
+  let curr=parseInt(nrEquip), depth=0;
+  const visited=new Set();
+  while(curr && depth<maxDepth && !visited.has(curr)){
+    path.push(curr);
+    visited.add(curr);
+    const eq=window._equipDB.get(curr);
+    if(!eq||!eq.ant) break;
+    curr=eq.ant;
+    depth++;
+  }
+  return path; // [equipRef, pai, avô, bisavô, ...]
+}
+
+// Encontra o Ancestral Comum Mais Próximo (LCA) entre dois caminhos
+// Retorna o nó mais próximo (mais específico = menor impacto em consumidores)
+function findLCA(path1, path2){
+  const set1=new Set(path1);
+  for(const node of path2){
+    if(set1.has(node)) return node;
+  }
+  return null;
+}
+
+// Mantido por compatibilidade
+function findChave(nrEquip, maxDepth=40){
+  const path=buildPath(nrEquip, maxDepth);
+  return path.length>1 ? path[1] : (window._equipDB.get(parseInt(nrEquip))?.feed||null);
+}
+
+// Carrega localStorage ao iniciar
+function loadEquipDBFromStorage(){
+  try{
+    const raw=localStorage.getItem('sppc_equipdb');
+    if(!raw) return;
+    const data=JSON.parse(raw);
+    window._equipDB=new Map(Object.entries(data).map(([k,v])=>[parseInt(k),v]));
+    const meta=JSON.parse(localStorage.getItem('sppc_equipdb_meta')||'{}');
+    console.log('[EquipDB] Loaded from localStorage:',window._equipDB.size,'rows. Updated:',meta.date||'?');
+    updateEquipDBStatus();
+  }catch(e){ console.warn('[EquipDB] localStorage load failed:',e.message); }
+}
+
+function updateEquipDBStatus(){
+  const meta=JSON.parse(localStorage.getItem('sppc_equipdb_meta')||'{}');
+  const el=document.getElementById('equipDBStatus');
+  if(el) el.textContent=window._equipDB.size>0
+    ?`Base carregada: ${window._equipDB.size.toLocaleString('pt-BR')} equipamentos (ref: ${meta.date||'?'})`
+    :'⚠️ Base não carregada — faça upload do arquivo de equipamentos';
+}
+
+window.uploadEquipDB=function(){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept='.xlsx,.xls';
+  inp.onchange=async e=>{
+    const file=e.target.files[0]; if(!file) return;
+    const btn=document.getElementById('btnEquipDB');
+    if(btn){ btn.disabled=true; btn.textContent='Carregando…'; }
+    try{
+      const XLSX=window.XLSX; if(!XLSX){ toast('Biblioteca Excel não disponível','err'); return; }
+      const ab=await file.arrayBuffer();
+      const wb=XLSX.read(ab,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1});
+      const hdr=rows[0];
+      const ci=name=>hdr.findIndex(h=>String(h||'').toUpperCase().includes(name.toUpperCase()));
+      const iEq=ci('NR_EQUIPAMENTO'), iAnt=ci('NR_EQPTO_ANTERIOR'), iFeed=ci('NR_ALIMENTADOR');
+      const iLat=ci('VL_LAT'), iLon=ci('VL_LON'), iMun=ci('NM_MUNICIPIO');
+      const iSg=ci('SG_EQUIPAMENTO'), iSub=ci('SG_SUBESTACAO'), iCh=ci('TP_CHAVE');
+      const db={};
+      for(let r=1;r<rows.length;r++){
+        const row=rows[r];
+        const nr=parseInt(row[iEq]); if(!nr) continue;
+        db[nr]={
+          ant:parseInt(row[iAnt])||null,
+          feed:parseInt(row[iFeed])||null,
+          lat:parseCoord(row[iLat]),
+          lon:parseCoord(row[iLon]),
+          mun:row[iMun]||null,
+          sg:row[iSg]||null,
+          sub:row[iSub]||null,
+          ch:row[iCh]||null,
+        };
+      }
+      window._equipDB=new Map(Object.entries(db).map(([k,v])=>[parseInt(k),v]));
+      localStorage.setItem('sppc_equipdb',JSON.stringify(db));
+      const meta={date:new Date().toLocaleDateString('pt-BR'),size:window._equipDB.size};
+      localStorage.setItem('sppc_equipdb_meta',JSON.stringify(meta));
+      toast(`✓ Base carregada: ${window._equipDB.size.toLocaleString('pt-BR')} equipamentos!`);
+      updateEquipDBStatus();
+    }catch(err){ toast('Erro ao processar: '+err.message,'err'); console.error(err); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='📡 Base Equipamentos'; } }
+  };
+  inp.click();
 };
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
@@ -4041,3 +4214,310 @@ window.gerarRelatorio = function(){
     alert('Erro ao gerar relatório: ' + err.message);
   }
 };
+
+// ══════════════════════════════════════════════════════════════════════
+//  OTIMIZAÇÃO DE OBRAS — Empreiteira (CS Eletricidade e Eletelsul)
+// ══════════════════════════════════════════════════════════════════════
+const EMP_COM_OTIMIZACAO = ['CS ELETRICIDADE','ELETELSUL'];
+
+function renderOtimizacao(){
+  const cont=document.getElementById('pgOtimizacaoContent'); if(!cont) return;
+  if(me.perfil!=='empreiteira'||!EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]))){
+    cont.innerHTML='<div class="empty"><p>Acesso restrito.</p></div>'; return;
+  }
+  const minhas=obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado&&o.equipamentoRef);
+  const dbReady=window._equipDB.size>0;
+  cont.innerHTML=`
+    <div style="margin-bottom:16px">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">⚡ Otimização de Obras</div>
+      <div id="equipDBStatus" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+      ${!dbReady?`<div style="padding:12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;color:#EF4444;font-size:11px;margin-bottom:12px">
+        ⚠️ Base de equipamentos não carregada. Solicite ao gerente que faça o upload do arquivo de equipamentos.
+      </div>`:''}
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button onclick="showOtimTab('prox')" id="tabOtimProx"
+        style="padding:8px 18px;border-radius:6px;border:2px solid var(--accent);background:var(--accent);color:#000;font-weight:700;font-size:12px;cursor:pointer">
+        📍 Proximidade Geográfica
+      </button>
+      <button onclick="showOtimTab('deslig')" id="tabOtimDeslig"
+        style="padding:8px 18px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:12px;cursor:pointer">
+        🔌 Otimização de Desligamento
+      </button>
+    </div>
+    <div id="otimTabContent">
+      ${renderOtimProx(minhas)}
+    </div>
+  `;
+  updateEquipDBStatus();
+}
+
+window.showOtimTab=function(tab){
+  const minhas=obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado&&o.equipamentoRef);
+  document.getElementById('otimTabContent').innerHTML=
+    tab==='prox'?renderOtimProx(minhas):renderOtimDeslig(minhas);
+  document.getElementById('tabOtimProx').style.background=tab==='prox'?'var(--accent)':'var(--surface)';
+  document.getElementById('tabOtimProx').style.color=tab==='prox'?'#000':'var(--muted)';
+  document.getElementById('tabOtimDeslig').style.background=tab==='deslig'?'#ff6b35':'var(--surface)';
+  document.getElementById('tabOtimDeslig').style.color=tab==='deslig'?'#000':'var(--muted)';
+};
+
+function renderOtimProx(obras_list){
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">📍 Encontrar obras próximas</div>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+        <div class="fg" style="margin:0;min-width:200px">
+          <label>Equipamento de Referência (Obra)</label>
+          <select id="selEquipProx" style="width:100%">
+            <option value="">Selecione uma obra…</option>
+            ${obras_list.map(o=>`<option value="${o.equipamentoRef}">${o.numero} — Equip. ${o.equipamentoRef} (${o.cidade})</option>`).join('')}
+          </select>
+        </div>
+        <div class="fg" style="margin:0">
+          <label>Raio (km)</label>
+          <input type="number" id="inpRaio" value="2" min="0.1" max="50" step="0.1" style="width:80px">
+        </div>
+        <button onclick="buscarProximas()" class="btn btn-primary btn-sm">🔍 Buscar</button>
+      </div>
+      <div id="resultProx" style="font-size:11px;color:var(--muted)">Selecione um equipamento e defina o raio para buscar obras próximas.</div>
+    </div>`;
+}
+
+window.buscarProximas=function(nrEquipParam, raioParam, todosParam){
+  const nr=nrEquipParam||parseInt(document.getElementById('selEquipProx')?.value);
+  const raio=raioParam||parseFloat(document.getElementById('inpRaio')?.value)||2;
+  const eq=window._equipDB.get(nr);
+  if(!eq||!eq.lat||!eq.lon){
+    const el=document.getElementById('resultProx')||document.getElementById('resultProxPort');
+    if(el) el.innerHTML='<span style="color:#EF4444">Equipamento não encontrado ou sem coordenadas na base.</span>';
+    return;
+  }
+  const pool=todosParam||obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.equipamentoRef!==nr);
+  const resultados=[];
+  pool.forEach(o=>{
+    const eq2=window._equipDB.get(parseInt(o.equipamentoRef));
+    if(!eq2||!eq2.lat||!eq2.lon) return;
+    const dist=haversineKm(eq.lat,eq.lon,eq2.lat,eq2.lon);
+    if(dist<=raio) resultados.push({o,dist:dist.toFixed(2),eq2});
+  });
+  resultados.sort((a,b)=>parseFloat(a.dist)-parseFloat(b.dist));
+  const elId=todosParam?'resultProxPort':'resultProx';
+  const cont=document.getElementById(elId); if(!cont) return;
+  if(!resultados.length){
+    cont.innerHTML=`<div style="color:var(--muted)">Nenhuma obra encontrada no raio de ${raio}km do equipamento ${nr}.</div>`;
+    return;
+  }
+  cont.innerHTML=`<div style="margin-bottom:8px;font-weight:700;color:var(--accent)">${resultados.length} obra(s) no raio de ${raio}km:</div>
+    <div class="tbl-wrap"><table>
+    <thead><tr><th>Distância</th><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Empreiteira</th><th>Status</th><th>Alimentador</th></tr></thead>
+    <tbody>${resultados.map(r=>`<tr>
+      <td><strong style="color:var(--accent)">${r.dist}km</strong></td>
+      <td><strong>${r.o.numero}</strong></td>
+      <td>${r.o.equipamentoRef}</td>
+      <td>${r.o.cidade||'—'}</td>
+      <td>${r.o.empreiteira||'—'}</td>
+      <td>${statusOf(r.o)}</td>
+      <td style="color:var(--muted)">${r.eq2.feed||'—'}</td>
+    </tr>`).join('')}</tbody>
+    </table></div>`;
+};
+
+function calcGruposDesligamento(obras_list){
+  // 1. Build paths for all obras with valid equipment
+  const obrasPaths=[];
+  obras_list.forEach(o=>{
+    if(!o.equipamentoRef) return;
+    const eq=window._equipDB.get(parseInt(o.equipamentoRef));
+    if(!eq) return;
+    obrasPaths.push({o, path:buildPath(o.equipamentoRef)});
+  });
+  if(!obrasPaths.length) return [];
+
+  // 2. Find all pairs and their LCA
+  // Build union-find style grouping by LCA
+  // For each unique LCA, collect all obras that share it
+  const lcaGrupos={}; // lca -> Set of obra indices
+
+  for(let i=0;i<obrasPaths.length;i++){
+    for(let j=i+1;j<obrasPaths.length;j++){
+      const lca=findLCA(obrasPaths[i].path, obrasPaths[j].path);
+      if(!lca) continue;
+      const key=String(lca);
+      if(!lcaGrupos[key]) lcaGrupos[key]={lca:parseInt(lca), indices:new Set()};
+      lcaGrupos[key].indices.add(i);
+      lcaGrupos[key].indices.add(j);
+    }
+  }
+
+  // 3. Convert to groups, keep only groups with ≥2 obras
+  // Remove redundant groups (where a more specific LCA covers the same obras)
+  const grupos=Object.values(lcaGrupos)
+    .filter(g=>g.indices.size>=2)
+    .map(g=>({
+      lca: g.lca,
+      obras: [...g.indices].map(i=>obrasPaths[i].o),
+      profundidade: obrasPaths[[...g.indices][0]]?.path.indexOf(g.lca) ?? 99,
+      feed: window._equipDB.get(g.lca)?.feed||null,
+    }));
+
+  // 4. Remove subsets — keep the most specific (deepest) group for each set of obras
+  const final=[];
+  grupos.sort((a,b)=>b.profundidade-a.profundidade||(b.obras.length-a.obras.length)); // deepest first
+  grupos.forEach(g=>{
+    const gSet=new Set(g.obras.map(o=>o.id||o.numero));
+    const jaCobertoMaisEspecifico=final.some(f=>{
+      const fSet=new Set(f.obras.map(o=>o.id||o.numero));
+      return [...gSet].every(id=>fSet.has(id)) && f.profundidade>=g.profundidade;
+    });
+    if(!jaCobertoMaisEspecifico) final.push(g);
+  });
+
+  return final.sort((a,b)=>b.obras.length-a.obras.length||b.profundidade-a.profundidade);
+}
+
+function renderOtimDeslig(obras_list){
+  if(!window._equipDB.size)
+    return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada.</div>';
+
+  const grupos=calcGruposDesligamento(obras_list);
+  const sem_equip=obras_list.filter(o=>!o.equipamentoRef).length;
+  const sem_db=obras_list.filter(o=>o.equipamentoRef&&!window._equipDB.get(parseInt(o.equipamentoRef))).length;
+
+  if(!grupos.length){
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px">🔌 Otimização de Desligamento</div>
+      <div class="modal-note">Nenhum agrupamento encontrado. As obras estão em equipamentos de árvores distintas.</div>
+      ${sem_equip?`<div style="font-size:10px;color:var(--muted);margin-top:8px">${sem_equip} obra(s) sem equipamento de referência cadastrado.</div>`:''}
+    </div>`;
+  }
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔌 Obras que podem ser desligadas em conjunto</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:16px">
+        Agrupadas pelo <strong>Ancestral Comum Mais Próximo (LCA)</strong> na árvore de equipamentos —
+        ponto de desligamento que impacta o menor número de consumidores.
+      </div>
+      ${grupos.map((g,gi)=>{
+        const lcaEq=window._equipDB.get(g.lca)||{};
+        const lcaInfo=lcaEq.mun?`${g.lca} · ${lcaEq.mun}`:`Equip. ${g.lca}`;
+        return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid var(--accent)">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div>
+              <span style="font-weight:700;color:var(--accent)">${g.obras.length} obras</span>
+              <span style="background:rgba(124,106,247,.15);color:var(--accent);font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
+                🔌 Desligar em: <strong>${lcaInfo}</strong>
+              </span>
+              ${g.feed?`<span style="font-size:10px;color:var(--muted);margin-left:8px">Alimentador: ${g.feed}</span>`:''}
+            </div>
+            <span style="font-size:9px;color:var(--muted)">Profundidade na árvore: ${g.profundidade}</span>
+          </div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Status</th><th>USC</th><th>Caminho até LCA</th></tr></thead>
+            <tbody>${g.obras.map(o=>{
+              const p=buildPath(o.equipamentoRef);
+              const lcaIdx=p.indexOf(g.lca);
+              const caminho=p.slice(0,lcaIdx+1).join(' → ');
+              return `<tr>
+                <td><strong>${o.numero}</strong></td>
+                <td>${o.equipamentoRef}</td>
+                <td>${o.cidade||'—'}</td>
+                <td>${statusOf(o)}</td>
+                <td>${o.usc||'—'}</td>
+                <td style="font-size:9px;color:var(--muted)">${caminho}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></div>
+        </div>`;
+      }).join('')}
+      ${sem_equip?`<div style="font-size:10px;color:var(--muted);margin-top:4px">${sem_equip} obra(s) sem equipamento de referência não exibidas.</div>`:''}
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  OTIMIZAÇÃO DE PORTFÓLIO — Gerente/Fiscal
+// ══════════════════════════════════════════════════════════════════════
+function renderOtimizacaoPortfolio(){
+  const cont=document.getElementById('pgOtimPortContent'); if(!cont) return;
+  if(!['gerente','fiscal'].includes(me.perfil)){
+    cont.innerHTML='<div class="empty"><p>Acesso restrito.</p></div>'; return;
+  }
+  const ativas=obras.filter(o=>!o.cancelado);
+  cont.innerHTML=`
+    <div style="margin-bottom:16px">
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:4px">🌐 Otimização de Portfólio</div>
+      <div id="equipDBStatus" style="font-size:11px;color:var(--muted);margin-bottom:8px"></div>
+    </div>
+
+    <!-- Busca por equipamento -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">🔍 Buscar por Equipamento de Referência</div>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div class="fg" style="margin:0;min-width:160px">
+          <label>Nº Equipamento</label>
+          <input type="number" id="inpEquipBusca" placeholder="ex: 28403">
+        </div>
+        <div class="fg" style="margin:0">
+          <label>Raio (km)</label>
+          <input type="number" id="inpRaioPort" value="2" min="0.1" max="50" step="0.1" style="width:80px">
+        </div>
+        <button onclick="buscarPortfolio()" class="btn btn-primary btn-sm">🔍 Buscar</button>
+      </div>
+      <div id="resultProxPort" style="font-size:11px;color:var(--muted)">Digite um número de equipamento para encontrar obras próximas em todo o portfólio.</div>
+    </div>
+
+    <!-- Desligamento geral -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔌 Agrupamentos por Desligamento — Todo o Portfólio</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:16px">
+        Obras de diferentes empreiteiras que compartilham o mesmo alimentador
+      </div>
+      ${renderDesligamentoPortfolio(ativas)}
+    </div>
+  `;
+  updateEquipDBStatus();
+}
+
+window.buscarPortfolio=function(){
+  const nr=parseInt(document.getElementById('inpEquipBusca')?.value);
+  const raio=parseFloat(document.getElementById('inpRaioPort')?.value)||2;
+  if(!nr){ toast('Digite um número de equipamento.','err'); return; }
+  buscarProximas(nr, raio, obras.filter(o=>!o.cancelado&&o.equipamentoRef));
+};
+
+function renderDesligamentoPortfolio(obras_list){
+  const com_ref=obras_list.filter(o=>o.equipamentoRef);
+  if(!com_ref.length) return '<div class="modal-note">Nenhuma obra com equipamento de referência cadastrado.</div>';
+  if(!window._equipDB.size) return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada. Use o botão "📡 Base Equipamentos" no toolbar para carregar.</div>';
+
+  const grupos=calcGruposDesligamento(com_ref);
+  if(!grupos.length) return '<div class="modal-note">Nenhum agrupamento de desligamento encontrado no portfólio.</div>';
+
+  return grupos.map(g=>{
+    const lcaEq=window._equipDB.get(g.lca)||{};
+    const empreiteiras=[...new Set(g.obras.map(o=>o.empreiteira).filter(Boolean))];
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid #ff6b35">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <span style="font-weight:700;color:#ff6b35">${g.obras.length} obras</span>
+          <span style="background:rgba(255,107,53,.15);color:#ff6b35;font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
+            🔌 Desligar em: <strong>Equip. ${g.lca}${lcaEq.mun?' · '+lcaEq.mun:''}</strong>
+          </span>
+          <span style="font-size:10px;color:var(--muted);margin-left:8px">${empreiteiras.join(' + ')}</span>
+        </div>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Empreiteira</th><th>Status</th><th>USC</th></tr></thead>
+        <tbody>${g.obras.map(o=>`<tr>
+          <td><strong>${o.numero}</strong></td>
+          <td>${o.equipamentoRef}</td>
+          <td>${o.cidade||'—'}</td>
+          <td style="color:var(--accent)">${o.empreiteira||'—'}</td>
+          <td>${statusOf(o)}</td>
+          <td>${o.usc||'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }).join('');
+}
