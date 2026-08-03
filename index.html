@@ -55,6 +55,7 @@
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" id="btnEquipDB" onclick="uploadEquipDB()" title="Carregar base de equipamentos para otimização" style="font-size:10px">📡 Base Equipamentos</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none">📐 Medidas em Lote</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
@@ -213,6 +214,14 @@
     <div id="carteiraContent"><div class="loading">Carregando...</div></div>
   </div>
 
+  <div class="page" id="pgOtimizacao">
+    <div id="pgOtimizacaoContent"><div class="loading">Carregando...</div></div>
+  </div>
+
+  <div class="page" id="pgOtimizacaoPort">
+    <div id="pgOtimPortContent"><div class="loading">Carregando...</div></div>
+  </div>
+
   <div class="page" id="pgEmpreiteiras">
     <div class="tbl-head">
       <div class="page-title">Empreiteiras</div>
@@ -356,6 +365,9 @@
       </div>
       <div class="fg"><label>USC Previsto</label><input type="number" id="oUSC" placeholder="0" min="0" step="0.01"></div>
       <div class="fg"><label>ULV Previsto</label><input type="number" id="oULV" placeholder="0" min="0" step="0.01"></div>
+      <div class="fg"><label>Equipamento de Referência <span style="font-size:10px;color:var(--muted)">(nº)</span></label>
+        <input type="number" id="oEquipRef" placeholder="ex: 28403" min="0">
+      </div>
     </div>
     <div class="fg-grid" id="secUSCMedidoGerente" style="display:none">
       <div class="fg">
