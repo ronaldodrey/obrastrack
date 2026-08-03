@@ -406,18 +406,6 @@
   <div class="modal-section" id="secExec">
     <div class="modal-section-title">⚡ Execução — Empreiteira</div>
     <div class="fg"><label>Data de Conclusão</label><input type="date" id="oConclusao"></div>
-    <!-- Dados do transformador para visualização do fiscal -->
-    <div id="secTransfView" style="display:none">
-      <div class="modal-section-title" style="margin-top:12px">🔩 Dados do Transformador (Empreiteira)</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacasView" disabled></div>
-        <div class="fg"><label>Nº SAP</label><input type="text" id="oSAPView" disabled></div>
-      </div>
-      <div class="fg-grid">
-        <div class="fg"><label>Nº Série</label><input type="text" id="oSerieView" disabled></div>
-        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricanteView" disabled></div>
-      </div>
-    </div>
     <!-- Kaffa Entries -->
     <div>
       <div class="sect-title" style="margin-top:12px;margin-bottom:8px">Kaffa / Execução Parcial ou Final</div>
@@ -433,9 +421,9 @@
             </select>
           </div>
         </div>
-        <!-- Dados do transformador — preenchidos junto com o kaffa -->
-        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)" id="secConclusaoExtra">
-          <div class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador — preencha no momento do kaffa.</div>
+        <!-- Dados do transformador — visível SOMENTE para empreiteira, dentro do kaffa -->
+        <div style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)" id="secConclusaoExtra">
+          <div id="transDataNota" class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador — preencha uma única vez.</div>
           <div class="fg-grid">
             <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
             <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
@@ -474,6 +462,18 @@
   </div>
   <div class="modal-section" id="secFisc">
     <div class="modal-section-title">🔍 Fiscalização</div>
+    <!-- Dados do transformador — leitura para fiscal/gerente quando empreiteira já informou -->
+    <div id="secTransfView" style="display:none;margin-bottom:14px;padding:12px;background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:8px">
+      <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🔩 Dados do Transformador (informado pela empreiteira)</div>
+      <div class="fg-grid">
+        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacasView" disabled></div>
+        <div class="fg"><label>Nº SAP</label><input type="text" id="oSAPView" disabled></div>
+      </div>
+      <div class="fg-grid">
+        <div class="fg"><label>Nº Série</label><input type="text" id="oSerieView" disabled></div>
+        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricanteView" disabled></div>
+      </div>
+    </div>
     <div class="fg"><label>Data de Fiscalização</label><input type="date" id="oFiscalizacao"></div>
     <div class="toggle-row">
       <label class="toggle"><input type="checkbox" id="oTemPendencia" onchange="togglePendencia()"><span class="toggle-slider"></span></label>
