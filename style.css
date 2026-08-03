@@ -231,3 +231,23 @@ th[title] { text-decoration: underline dotted; cursor: help; }
 .tbl-wrap td[style*="position:sticky"] {
   box-shadow: 2px 0 4px rgba(0,0,0,0.3);
 }
+
+/* ══ LIGHT THEME ════════════════════════════════════════════════════ */
+.light-theme {
+  --bg:       #f0f2f5;
+  --surface:  #ffffff;
+  --surface2: #e8eaed;
+  --border:   #d1d5db;
+  --text:     #1f2328;
+  --muted:    #6b7280;
+  --accent:   #2563eb;
+  --red:      #dc2626;
+  --green:    #16a34a;
+}
+.light-theme .tab { color: #374151; }
+.light-theme .tab.active { color: var(--accent); }
+.light-theme .chip { background: #e0e7ff; color: #3730a3; }
+.light-theme .tbl-wrap table thead th { background: #f1f5f9; color: #374151; }
+.light-theme .tbl-wrap table tbody tr:nth-child(even) { background: #f8fafc; }
+.light-theme .modal-box { background: #ffffff; box-shadow: 0 20px 60px rgba(0,0,0,.15); }
+.light-theme .role-badge { filter: saturate(0.8) brightness(0.9); }
