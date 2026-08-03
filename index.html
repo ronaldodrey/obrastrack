@@ -30,6 +30,8 @@
     <div class="h-right">
       <div class="h-user">Olá, <strong id="hName"></strong></div>
       <span class="role-badge" id="hRole"></span>
+      <button id="btnTema" onclick="toggleTema()" title="Alternar tema claro/escuro"
+        style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:14px;color:var(--text);margin-right:4px">🌙</button>
       <button class="btn btn-secondary btn-sm" onclick="doLogout()">Sair</button>
     </div>
   </header>
@@ -404,17 +406,6 @@
   <div class="modal-section" id="secExec">
     <div class="modal-section-title">⚡ Execução — Empreiteira</div>
     <div class="fg"><label>Data de Conclusão</label><input type="date" id="oConclusao"></div>
-    <div id="secConclusaoExtra" style="display:none">
-      <div class="modal-note" style="margin-bottom:10px">Campos obrigatórios para registrar a conclusão.</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
-        <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
-      </div>
-      <div class="fg-grid">
-        <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
-        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
-      </div>
-    </div>
     <!-- Dados do transformador para visualização do fiscal -->
     <div id="secTransfView" style="display:none">
       <div class="modal-section-title" style="margin-top:12px">🔩 Dados do Transformador (Empreiteira)</div>
@@ -440,6 +431,18 @@
               <option value="parcial">Kaffa Parcial</option>
               <option value="final">Kaffa Final</option>
             </select>
+          </div>
+        </div>
+        <!-- Dados do transformador — preenchidos junto com o kaffa -->
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)" id="secConclusaoExtra">
+          <div class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador — preencha no momento do kaffa.</div>
+          <div class="fg-grid">
+            <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
+            <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
+          </div>
+          <div class="fg-grid">
+            <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
+            <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px">
