@@ -223,6 +223,7 @@ async function iniciarApp(){
   });
 
   loadEquipDBFromStorage(); // Restore equipment database from localStorage
+  aplicarTemaSalvo(); // Restore theme preference
   showPage('pgDash');
 }
 window.showPage=function(id){
@@ -1174,6 +1175,7 @@ function buildTableHeader(){
     ${frozen1}
     ${frozen2}
     ${sth('Tipo','tipo')}
+    ${sth('Equip.Ref.','equipamentoRef','Equipamento de Referência')}
     ${sth('Cidade','cidade')}
     ${th('Empreiteira')}
     ${th('Fiscal')}
@@ -1323,6 +1325,7 @@ function renderObras(){
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${o.equipamentoRef||'—'}</td>
       <td>${o.cidade||'—'}</td>
       <td style="font-size:10px">${o.empreiteira||'—'}</td>
       <td>${o.fiscal?`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:50%;background:${fc};display:inline-block"></span>${o.fiscal}</span>`:'—'}</td>
@@ -1927,7 +1930,7 @@ window.saveObra=async function(){
       if(med&&kaffa&&med<kaffa) erros.push('Medição não pode ser anterior ao Kaffa.');
       // Conclusão: só empreiteira precisa preencher placas/SAP
       if(me.perfil==='empreiteira'&&g('oConclusao')){
-        if(!g('oPlacas')) erros.push('Informe as Placas Instaladas.');
+        // Placas podem ser preenchidas no kaffa ou na conclusão
         if(!g('oSAP'))    erros.push('Informe o Nº SAP do Transformador.');
         if(!g('oSerie'))  erros.push('Informe o Nº Série do Transformador.');
         if(!g('oFabricante')) erros.push('Informe o Fabricante.');
@@ -2825,6 +2828,23 @@ window.uploadEquipDB=function(){
   inp.click();
 };
 
+
+// ══ TEMA CLARO / ESCURO ════════════════════════════════════════════
+window.toggleTema = function(){
+  const light = document.body.classList.toggle('light-theme');
+  localStorage.setItem('sppc_tema', light ? 'light' : 'dark');
+  document.getElementById('btnTema').textContent = light ? '☀️' : '🌙';
+};
+
+function aplicarTemaSalvo(){
+  const tema = localStorage.getItem('sppc_tema') || 'dark';
+  if(tema === 'light'){
+    document.body.classList.add('light-theme');
+    const btn = document.getElementById('btnTema');
+    if(btn) btn.textContent = '☀️';
+  }
+}
+
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -2965,6 +2985,7 @@ window.bulkDeleteEncerradas=async function(){
 const COLUNAS_SISTEMA = [
   { campo:'numero',        label:'Nº da Obra',         aliases:['numero','nº','obra','número da obra','nro','num'] },
   { campo:'tipo',          label:'Tipo',                aliases:['tipo'] },
+  { campo:'equipamentoRef',label:'Equip. Referência',   aliases:['equip','equipamento','equipamento ref','equip ref','equipamentoref','nr_equipamento'] },
   { campo:'cidade',        label:'Cidade',              aliases:['cidade','municipio','município','localidade'] },
   { campo:'empreiteira',   label:'Empreiteira',         aliases:['empreiteira','empresa','contratada'] },
   { campo:'fiscal',        label:'Fiscal',              aliases:['fiscal','responsável','responsavel','inspetor'] },
