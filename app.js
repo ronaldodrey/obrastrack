@@ -1535,7 +1535,10 @@ window.openObraModal=function(obraId){
     }
     if(p !== 'fiscal')      showSec('secExec');
     // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante) sempre em modo edição
-    if((p === 'fiscal' || p === 'gerente') && isEdit) showSec('secTransfView');
+    // Dados do transformador: mostra para fiscal/gerente apenas quando empreiteira já preencheu
+    if((p === 'fiscal' || p === 'gerente') && isEdit && (obra?.placas || obra?.sap)){
+      showSec('secTransfView');
+    }
     if(p === 'empreiteira') showSec('secImpedimento');
 
     // Fiscalização: só fiscal e gerente
@@ -1611,11 +1614,7 @@ window.openObraModal=function(obraId){
 
   // atualiza toggles
   toggleImpedimento(); togglePendencia(); toggleCancelamento(); toggleParalisada();
-  // mostra extra conclusao se já tem data
-  document.getElementById('secConclusaoExtra').style.display=obra?.conclusao?'block':'none';
-  document.getElementById('oConclusao').addEventListener('change',()=>{
-    document.getElementById('secConclusaoExtra').style.display=document.getElementById('oConclusao').value?'block':'none';
-  });
+  // secConclusaoExtra: controlado pelo botão kaffa, não pela data de conclusão
   // info data limite
   atualizarInfoLimite();
   document.getElementById('oAbertura').addEventListener('input',atualizarInfoLimite);
@@ -1728,6 +1727,28 @@ window.abrirNovoKaffa = function(){
   if(hasFinal){ toast('Esta obra já possui kaffa final registrado.','warn'); return; }
   document.getElementById('frmNovoKaffa').style.display='block';
   document.getElementById('btnNovoKaffa').style.display='none';
+  // Transformer fields: only for empreiteira; readonly if already set
+  if(me.perfil==='empreiteira'){
+    const secExtra=document.getElementById('secConclusaoExtra');
+    if(secExtra){
+      secExtra.style.display='block';
+      const obraAtual=obras.find(o=>o.id===document.getElementById('obraId')?.value);
+      const jaSet=obraAtual?.placas||obraAtual?.sap;
+      const nota=document.getElementById('transDataNota');
+      ['oPlacas','oSAP','oSerie','oFabricante'].forEach((id,i)=>{
+        const el=document.getElementById(id); if(!el) return;
+        if(jaSet){
+          el.value=[obraAtual.placas,obraAtual.sap,obraAtual.serie,obraAtual.fabricante][i]||'';
+          el.disabled=true;
+        } else {
+          el.disabled=false;
+        }
+      });
+      if(nota) nota.innerHTML=jaSet
+        ?'🔩 Dados do Transformador — <strong style="color:var(--accent)">já registrados</strong> (somente leitura).'
+        :'🔩 Dados do Transformador — preencha uma única vez.';
+    }
+  }
   document.getElementById('oKaffaData').value='';
   document.getElementById('oKaffaTipo').value='';
   const d=document.getElementById('oKaffaData'); if(d) d.max=hojeStr();
@@ -3179,6 +3200,7 @@ window.confirmarImport = async function() {
       await addDoc(collection(db, 'obras'), {
         numero,
         tipo:            get('tipo')          || '',
+        equipamentoRef:  get('equipamentoRef') ? parseInt(get('equipamentoRef')) || null : null,
         cidade:          get('cidade')        || '',
         empreiteira:     get('empreiteira')   || '',
         fiscal:          get('fiscal')        || '',
