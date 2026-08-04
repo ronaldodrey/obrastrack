@@ -2735,8 +2735,10 @@ window.confirmarBulkMedidas = async function(){
 // ══════════════════════════════════════════════════════════════════════
 window._equipDB = new Map(); // Map<NR_EQUIPAMENTO, {ant,feed,lat,lon,mun,sg,sub,ch}>
 
-// Tipos que podem ser manobrados (abertura = desligamento)
-const SWITCH_SG = new Set(['RE','SE','CE','BC','BR','CP','AL','CD']);
+// Chaves de manobra manual (podem ser abertas para desligar um trecho)
+// CE=chave c/ elo, RE=religador, SE=seccionalizador, CP=chave pedestal, BC/BR=chaves
+const MANUAL_SWITCH = new Set(['CE','RE','SE','CP','BC','BR','AL']);
+const SWITCH_SG = MANUAL_SWITCH; // compatibilidade
 
 function parseCoord(s){
   if(!s) return null;
@@ -2751,7 +2753,34 @@ function haversineKm(lat1,lon1,lat2,lon2){
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-// Constrói o caminho do equipamento até a raiz da árvore
+// Constrói a cadeia de chaves de manobra manual subindo a árvore
+// Retorna array [{nr, sg, feed}] do mais próximo ao mais distante
+// Para quando encontra RE (religador) — ele é o limite do trecho
+function findSwitchChain(nrEquip, maxSwitches=8, maxDepth=60){
+  const chain = [];
+  let curr = parseInt(nrEquip);
+  let depth = 0;
+  const visited = new Set();
+  
+  while(curr && depth < maxDepth && !visited.has(curr)){
+    visited.add(curr);
+    const eq = window._equipDB.get(curr);
+    if(!eq) break;
+    
+    if(MANUAL_SWITCH.has(eq.sg)){
+      chain.push({ nr: curr, sg: eq.sg, feed: eq.feed, mun: eq.mun });
+      if(eq.sg === 'RE') break; // Religador é o limite — não subir mais
+      if(chain.length >= maxSwitches) break;
+    }
+    
+    if(!eq.ant) break;
+    curr = eq.ant;
+    depth++;
+  }
+  return chain; // [chaveNivel1, chaveNivel2, ...] — nível 1 = mais próximo
+}
+
+// buildPath mantido para compatibilidade com busca de proximidade
 function buildPath(nrEquip, maxDepth=40){
   const path=[];
   let curr=parseInt(nrEquip), depth=0;
@@ -2764,23 +2793,18 @@ function buildPath(nrEquip, maxDepth=40){
     curr=eq.ant;
     depth++;
   }
-  return path; // [equipRef, pai, avô, bisavô, ...]
+  return path;
 }
 
-// Encontra o Ancestral Comum Mais Próximo (LCA) entre dois caminhos
-// Retorna o nó mais próximo (mais específico = menor impacto em consumidores)
 function findLCA(path1, path2){
   const set1=new Set(path1);
-  for(const node of path2){
-    if(set1.has(node)) return node;
-  }
+  for(const node of path2) if(set1.has(node)) return node;
   return null;
 }
 
-// Mantido por compatibilidade
-function findChave(nrEquip, maxDepth=40){
-  const path=buildPath(nrEquip, maxDepth);
-  return path.length>1 ? path[1] : (window._equipDB.get(parseInt(nrEquip))?.feed||null);
+function findChave(nrEquip){
+  const chain = findSwitchChain(nrEquip, 1);
+  return chain.length > 0 ? chain[0].nr : (window._equipDB.get(parseInt(nrEquip))?.feed||null);
 }
 
 // Carrega localStorage ao iniciar
@@ -4298,7 +4322,7 @@ function renderOtimizacao(){
 window.showOtimTab=function(tab){
   const minhas=obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado&&o.equipamentoRef);
   document.getElementById('otimTabContent').innerHTML=
-    tab==='prox'?renderOtimProx(minhas):renderOtimDeslig(minhas);
+    tab==='prox'?renderOtimProx(minhas):renderOtimDeslig(minhas, window._nivelDeslig);
   document.getElementById('tabOtimProx').style.background=tab==='prox'?'var(--accent)':'var(--surface)';
   document.getElementById('tabOtimProx').style.color=tab==='prox'?'#000':'var(--muted)';
   document.getElementById('tabOtimDeslig').style.background=tab==='deslig'?'#ff6b35':'var(--surface)';
@@ -4366,115 +4390,114 @@ window.buscarProximas=function(nrEquipParam, raioParam, todosParam){
     </table></div>`;
 };
 
-function calcGruposDesligamento(obras_list){
-  // 1. Build paths for all obras with valid equipment
-  const obrasPaths=[];
+// Agrupa obras pela Nth chave de manobra mais próxima ao equipamento de referência
+// nivel=1 → chave mais próxima (menor impacto); nivel=2 → próxima acima; etc.
+function calcGruposDesligamento(obras_list, nivel=1){
+  const obrasSwitches = [];
   obras_list.forEach(o=>{
     if(!o.equipamentoRef) return;
-    const eq=window._equipDB.get(parseInt(o.equipamentoRef));
-    if(!eq) return;
-    obrasPaths.push({o, path:buildPath(o.equipamentoRef)});
+    const chain = findSwitchChain(o.equipamentoRef);
+    if(!chain.length) return;
+    // Nível solicitado (1-based); se não tem esse nível, usa o último disponível
+    const sw = chain[Math.min(nivel-1, chain.length-1)];
+    obrasSwitches.push({ o, sw, chain });
   });
-  if(!obrasPaths.length) return [];
+  if(!obrasSwitches.length) return [];
 
-  // 2. Find all pairs and their LCA
-  // Build union-find style grouping by LCA
-  // For each unique LCA, collect all obras that share it
-  const lcaGrupos={}; // lca -> Set of obra indices
-
-  for(let i=0;i<obrasPaths.length;i++){
-    for(let j=i+1;j<obrasPaths.length;j++){
-      const lca=findLCA(obrasPaths[i].path, obrasPaths[j].path);
-      if(!lca) continue;
-      const key=String(lca);
-      if(!lcaGrupos[key]) lcaGrupos[key]={lca:parseInt(lca), indices:new Set()};
-      lcaGrupos[key].indices.add(i);
-      lcaGrupos[key].indices.add(j);
-    }
-  }
-
-  // 3. Convert to groups, keep only groups with ≥2 obras
-  // Remove redundant groups (where a more specific LCA covers the same obras)
-  const grupos=Object.values(lcaGrupos)
-    .filter(g=>g.indices.size>=2)
-    .map(g=>({
-      lca: g.lca,
-      obras: [...g.indices].map(i=>obrasPaths[i].o),
-      profundidade: obrasPaths[[...g.indices][0]]?.path.indexOf(g.lca) ?? 99,
-      feed: window._equipDB.get(g.lca)?.feed||null,
-    }));
-
-  // 4. Remove subsets — keep the most specific (deepest) group for each set of obras
-  const final=[];
-  grupos.sort((a,b)=>b.profundidade-a.profundidade||(b.obras.length-a.obras.length)); // deepest first
-  grupos.forEach(g=>{
-    const gSet=new Set(g.obras.map(o=>o.id||o.numero));
-    const jaCobertoMaisEspecifico=final.some(f=>{
-      const fSet=new Set(f.obras.map(o=>o.id||o.numero));
-      return [...gSet].every(id=>fSet.has(id)) && f.profundidade>=g.profundidade;
-    });
-    if(!jaCobertoMaisEspecifico) final.push(g);
+  // Agrupa pelo nr da chave no nível selecionado
+  const grupos = {};
+  obrasSwitches.forEach(({o, sw, chain})=>{
+    const key = sw.nr;
+    if(!grupos[key]) grupos[key] = { sw, obras: [], chains:[] };
+    grupos[key].obras.push(o);
+    grupos[key].chains.push(chain);
   });
 
-  return final.sort((a,b)=>b.obras.length-a.obras.length||b.profundidade-a.profundidade);
+  // Retorna grupos com ≥1 obra (incluindo solos), ordenados por qtd
+  return Object.values(grupos)
+    .sort((a,b)=>b.obras.length-a.obras.length);
 }
 
-function renderOtimDeslig(obras_list){
+window._nivelDeslig = window._nivelDeslig || 1; // level state
+
+function renderOtimDeslig(obras_list, nivel){
+  if(nivel) window._nivelDeslig = nivel;
+  const nivelAtual = window._nivelDeslig;
   if(!window._equipDB.size)
     return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada.</div>';
 
-  const grupos=calcGruposDesligamento(obras_list);
+  const grupos=calcGruposDesligamento(obras_list, nivelAtual);
   const sem_equip=obras_list.filter(o=>!o.equipamentoRef).length;
   const sem_db=obras_list.filter(o=>o.equipamentoRef&&!window._equipDB.get(parseInt(o.equipamentoRef))).length;
 
-  if(!grupos.length){
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:8px">🔌 Otimização de Desligamento</div>
-      <div class="modal-note">Nenhum agrupamento encontrado. As obras estão em equipamentos de árvores distintas.</div>
-      ${sem_equip?`<div style="font-size:10px;color:var(--muted);margin-top:8px">${sem_equip} obra(s) sem equipamento de referência cadastrado.</div>`:''}
-    </div>`;
-  }
+  const gruposMulti = grupos.filter(g=>g.obras.length>1);
+  const gruposSolo  = grupos.filter(g=>g.obras.length===1);
+
+  const btnNivel = (n) =>
+    `<button onclick="window._nivelDeslig=${n};showOtimTab('deslig')"
+      style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:${nivelAtual===n?700:400};
+        background:${nivelAtual===n?'var(--accent)':'var(--surface)'};color:${nivelAtual===n?'#000':'var(--muted)'}">
+      ${n}ª Chave
+    </button>`;
 
   return `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔌 Obras que podem ser desligadas em conjunto</div>
-      <div style="font-size:10px;color:var(--muted);margin-bottom:16px">
-        Agrupadas pelo <strong>Ancestral Comum Mais Próximo (LCA)</strong> na árvore de equipamentos —
-        ponto de desligamento que impacta o menor número de consumidores.
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔌 Otimização de Desligamento</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:12px">
+        Suba na árvore de equipamentos escolhendo a <strong>Nth chave de manobra</strong> mais próxima ao ponto de trabalho.
+        Quanto maior o nível, maior o trecho desligado — mas mais obras podem ser agrupadas.
       </div>
-      ${grupos.map((g,gi)=>{
-        const lcaEq=window._equipDB.get(g.lca)||{};
-        const lcaInfo=lcaEq.mun?`${g.lca} · ${lcaEq.mun}`:`Equip. ${g.lca}`;
-        return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid var(--accent)">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-            <div>
-              <span style="font-weight:700;color:var(--accent)">${g.obras.length} obras</span>
-              <span style="background:rgba(124,106,247,.15);color:var(--accent);font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
-                🔌 Desligar em: <strong>${lcaInfo}</strong>
-              </span>
-              ${g.feed?`<span style="font-size:10px;color:var(--muted);margin-left:8px">Alimentador: ${g.feed}</span>`:''}
-            </div>
-            <span style="font-size:9px;color:var(--muted)">Profundidade na árvore: ${g.profundidade}</span>
-          </div>
-          <div class="tbl-wrap"><table>
-            <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Status</th><th>USC</th><th>Caminho até LCA</th></tr></thead>
-            <tbody>${g.obras.map(o=>{
-              const p=buildPath(o.equipamentoRef);
-              const lcaIdx=p.indexOf(g.lca);
-              const caminho=p.slice(0,lcaIdx+1).join(' → ');
-              return `<tr>
-                <td><strong>${o.numero}</strong></td>
-                <td>${o.equipamentoRef}</td>
-                <td>${o.cidade||'—'}</td>
-                <td>${statusOf(o)}</td>
-                <td>${o.usc||'—'}</td>
-                <td style="font-size:9px;color:var(--muted)">${caminho}</td>
-              </tr>`;
-            }).join('')}</tbody>
-          </table></div>
-        </div>`;
-      }).join('')}
-      ${sem_equip?`<div style="font-size:10px;color:var(--muted);margin-top:4px">${sem_equip} obra(s) sem equipamento de referência não exibidas.</div>`:''}
+
+      <!-- Seletor de nível -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--muted);margin-right:4px">Nível de análise:</span>
+        ${[1,2,3,4,5].map(btnNivel).join('')}
+        <span style="font-size:10px;color:var(--muted);margin-left:8px">
+          ↑ Nível 1 = chave mais próxima (menor impacto) · Nível 5 = até o religador
+        </span>
+      </div>
+
+      ${!gruposMulti.length
+        ? `<div class="modal-note">Nenhum agrupamento encontrado neste nível. Tente aumentar o nível de análise.</div>`
+        : `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:12px">
+            ${gruposMulti.length} agrupamento(s) encontrado(s) — ${gruposMulti.reduce((s,g)=>s+g.obras.length,0)} obras podem ser otimizadas
+           </div>
+           ${gruposMulti.map(g=>{
+            const swEq = window._equipDB.get(g.sw.nr)||{};
+            const swInfo = `Equip. ${g.sw.nr} (${g.sw.sg})${swEq.mun?' · '+swEq.mun:''}`;
+            return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid var(--accent)">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+                <div>
+                  <span style="font-weight:700;color:var(--accent)">${g.obras.length} obras</span>
+                  <span style="background:rgba(124,106,247,.15);color:var(--accent);font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
+                    🔌 Abrir: <strong>${swInfo}</strong>
+                  </span>
+                  ${g.sw.sg==='RE'?'<span style="font-size:9px;color:#EF4444;margin-left:6px">⚠️ Religador — limite do trecho</span>':''}
+                </div>
+                <div style="font-size:10px;color:var(--muted)">Alimentador: ${g.sw.feed||'—'}</div>
+              </div>
+              <div class="tbl-wrap"><table>
+                <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Status</th><th>USC</th><th>Cadeia de chaves</th></tr></thead>
+                <tbody>${g.obras.map((o,oi)=>{
+                  const chain = g.chains[oi]||[];
+                  const chainStr = chain.map(c=>`${c.nr}(${c.sg})`).join(' → ');
+                  return `<tr>
+                    <td><strong>${o.numero}</strong></td>
+                    <td>${o.equipamentoRef}</td>
+                    <td>${o.cidade||'—'}</td>
+                    <td>${statusOf(o)}</td>
+                    <td>${o.usc||'—'}</td>
+                    <td style="font-size:9px;color:var(--muted)">${chainStr||'—'}</td>
+                  </tr>`;
+                }).join('')}</tbody>
+              </table></div>
+            </div>`;
+          }).join('')}`
+      }
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">
+        ${gruposSolo.length} obra(s) sem agrupamento neste nível.
+        ${sem_equip?` | ${sem_equip} obra(s) sem equipamento de referência.`:''}
+      </div>
     </div>`;
 }
 
@@ -4529,38 +4552,60 @@ window.buscarPortfolio=function(){
   buscarProximas(nr, raio, obras.filter(o=>!o.cancelado&&o.equipamentoRef));
 };
 
-function renderDesligamentoPortfolio(obras_list){
+window._nivelPort = window._nivelPort || 1;
+
+function renderDesligamentoPortfolio(obras_list, nivel){
+  if(nivel) window._nivelPort = nivel;
+  const nivelAtual = window._nivelPort;
   const com_ref=obras_list.filter(o=>o.equipamentoRef);
   if(!com_ref.length) return '<div class="modal-note">Nenhuma obra com equipamento de referência cadastrado.</div>';
-  if(!window._equipDB.size) return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada. Use o botão "📡 Base Equipamentos" no toolbar para carregar.</div>';
+  if(!window._equipDB.size) return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada.</div>';
 
-  const grupos=calcGruposDesligamento(com_ref);
-  if(!grupos.length) return '<div class="modal-note">Nenhum agrupamento de desligamento encontrado no portfólio.</div>';
+  const grupos=calcGruposDesligamento(com_ref, nivelAtual);
+  const multi=grupos.filter(g=>g.obras.length>1);
 
-  return grupos.map(g=>{
-    const lcaEq=window._equipDB.get(g.lca)||{};
-    const empreiteiras=[...new Set(g.obras.map(o=>o.empreiteira).filter(Boolean))];
-    return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid #ff6b35">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <div>
-          <span style="font-weight:700;color:#ff6b35">${g.obras.length} obras</span>
-          <span style="background:rgba(255,107,53,.15);color:#ff6b35;font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
-            🔌 Desligar em: <strong>Equip. ${g.lca}${lcaEq.mun?' · '+lcaEq.mun:''}</strong>
-          </span>
-          <span style="font-size:10px;color:var(--muted);margin-left:8px">${empreiteiras.join(' + ')}</span>
-        </div>
-      </div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Empreiteira</th><th>Status</th><th>USC</th></tr></thead>
-        <tbody>${g.obras.map(o=>`<tr>
-          <td><strong>${o.numero}</strong></td>
-          <td>${o.equipamentoRef}</td>
-          <td>${o.cidade||'—'}</td>
-          <td style="color:var(--accent)">${o.empreiteira||'—'}</td>
-          <td>${statusOf(o)}</td>
-          <td>${o.usc||'—'}</td>
-        </tr>`).join('')}</tbody>
-      </table></div>
-    </div>`;
-  }).join('');
+  const btnN=(n)=>`<button onclick="window._nivelPort=${n};renderOtimizacaoPortfolio()"
+    style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:${nivelAtual===n?700:400};
+      background:${nivelAtual===n?'#ff6b35':'var(--surface)'};color:${nivelAtual===n?'#000':'var(--muted)'}">
+    ${n}ª Chave</button>`;
+
+  return `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--muted)">Nível de análise:</span>
+      ${[1,2,3,4,5].map(btnN).join('')}
+    </div>
+    ${!multi.length
+      ? '<div class="modal-note">Nenhum agrupamento encontrado neste nível.</div>'
+      : multi.map(g=>{
+          const emps=[...new Set(g.obras.map(o=>o.empreiteira).filter(Boolean))];
+          const swEq=window._equipDB.get(g.sw.nr)||{};
+          return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid #ff6b35">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+              <div>
+                <span style="font-weight:700;color:#ff6b35">${g.obras.length} obras</span>
+                <span style="background:rgba(255,107,53,.15);color:#ff6b35;font-size:10px;padding:2px 8px;border-radius:4px;margin-left:8px">
+                  🔌 Abrir: Equip. ${g.sw.nr} (${g.sw.sg})${swEq.mun?' · '+swEq.mun:''}
+                </span>
+                <span style="font-size:10px;color:var(--muted);margin-left:8px">${emps.join(' + ')}</span>
+                ${g.sw.sg==='RE'?'<span style="font-size:9px;color:#EF4444;margin-left:6px">⚠️ Religador</span>':''}
+              </div>
+            </div>
+            <div class="tbl-wrap"><table>
+              <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Empreiteira</th><th>Status</th><th>USC</th><th>Cadeia</th></tr></thead>
+              <tbody>${g.obras.map((o,oi)=>{
+                const chain=g.chains[oi]||[];
+                return `<tr>
+                  <td><strong>${o.numero}</strong></td>
+                  <td>${o.equipamentoRef}</td>
+                  <td>${o.cidade||'—'}</td>
+                  <td style="color:var(--accent)">${o.empreiteira||'—'}</td>
+                  <td>${statusOf(o)}</td>
+                  <td>${o.usc||'—'}</td>
+                  <td style="font-size:9px;color:var(--muted)">${chain.map(c=>c.nr+'('+c.sg+')').join(' → ')||'—'}</td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table></div>
+          </div>`;
+        }).join('')
+    }`;
 }
