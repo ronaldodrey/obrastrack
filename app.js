@@ -2737,7 +2737,7 @@ window._equipDB = new Map(); // Map<NR_EQUIPAMENTO, {ant,feed,lat,lon,mun,sg,sub
 
 // Chaves de manobra manual (podem ser abertas para desligar um trecho)
 // CE=chave c/ elo, RE=religador, SE=seccionalizador, CP=chave pedestal, BC/BR=chaves
-const MANUAL_SWITCH = new Set(['CE','RE','SE','CP','BC','BR','AL']);
+const MANUAL_SWITCH = new Set(['CE','RE','SE','CP','BC','BR']); // AL removido: alimentador não é chave de manobra de campo
 const SWITCH_SG = MANUAL_SWITCH; // compatibilidade
 
 function parseCoord(s){
@@ -2769,7 +2769,7 @@ function findSwitchChain(nrEquip, maxSwitches=8, maxDepth=60){
     
     if(MANUAL_SWITCH.has(eq.sg)){
       chain.push({ nr: curr, sg: eq.sg, feed: eq.feed, mun: eq.mun });
-      if(eq.sg === 'RE') break; // Religador é o limite — não subir mais
+      if(eq.sg === 'RE') break; // Religador = limite do trecho, não subir além
       if(chain.length >= maxSwitches) break;
     }
     
@@ -2777,7 +2777,8 @@ function findSwitchChain(nrEquip, maxSwitches=8, maxDepth=60){
     curr = eq.ant;
     depth++;
   }
-  return chain; // [chaveNivel1, chaveNivel2, ...] — nível 1 = mais próximo
+  // chain = [1ª chave mais próxima, 2ª chave, ..., Religador]
+  return chain;
 }
 
 // buildPath mantido para compatibilidade com busca de proximidade
@@ -4292,7 +4293,10 @@ function renderOtimizacao(){
   if(me.perfil!=='empreiteira'||!EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]))){
     cont.innerHTML='<div class="empty"><p>Acesso restrito.</p></div>'; return;
   }
-  const minhas=obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado&&o.equipamentoRef);
+  window._minhasObras = obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado); // reset pool
+  window._nivelDeslig = 1;
+  window._tabAtiva = 'prox';
+  const minhas=window._minhasObras.filter(o=>o.equipamentoRef);
   const dbReady=window._equipDB.size>0;
   cont.innerHTML=`
     <div style="margin-bottom:16px">
@@ -4319,14 +4323,26 @@ function renderOtimizacao(){
   updateEquipDBStatus();
 }
 
-window.showOtimTab=function(tab){
-  const minhas=obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado&&o.equipamentoRef);
-  document.getElementById('otimTabContent').innerHTML=
-    tab==='prox'?renderOtimProx(minhas):renderOtimDeslig(minhas, window._nivelDeslig);
-  document.getElementById('tabOtimProx').style.background=tab==='prox'?'var(--accent)':'var(--surface)';
-  document.getElementById('tabOtimProx').style.color=tab==='prox'?'#000':'var(--muted)';
-  document.getElementById('tabOtimDeslig').style.background=tab==='deslig'?'#ff6b35':'var(--surface)';
-  document.getElementById('tabOtimDeslig').style.color=tab==='deslig'?'#000':'var(--muted)';
+window.showOtimTab=function(tab, nivel){
+  if(nivel != null) window._nivelDeslig = nivel;
+  window._tabAtiva = tab || window._tabAtiva || 'prox';
+  // Store obras pool in window so level buttons can access it
+  window._minhasObras = window._minhasObras ||
+    obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado);
+  const minhas = window._minhasObras;
+  const cont = document.getElementById('otimTabContent');
+  if(!cont) return;
+  cont.innerHTML = window._tabAtiva==='prox'
+    ? renderOtimProx(minhas)
+    : renderOtimDeslig(minhas.filter(o=>o.equipamentoRef), window._nivelDeslig);
+  const tabBtn = (id, active, cor) => {
+    const el = document.getElementById(id); if(!el) return;
+    el.style.background = active ? cor : 'var(--surface)';
+    el.style.color = active ? '#000' : 'var(--muted)';
+    el.style.borderBottom = active ? '2px solid '+cor : 'none';
+  };
+  tabBtn('tabOtimProx',   window._tabAtiva==='prox',   'var(--accent)');
+  tabBtn('tabOtimDeslig', window._tabAtiva==='deslig',  '#ff6b35');
 };
 
 function renderOtimProx(obras_list){
@@ -4434,7 +4450,7 @@ function renderOtimDeslig(obras_list, nivel){
   const gruposSolo  = grupos.filter(g=>g.obras.length===1);
 
   const btnNivel = (n) =>
-    `<button onclick="window._nivelDeslig=${n};showOtimTab('deslig')"
+    `<button onclick="showOtimTab('deslig',${n})"
       style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:${nivelAtual===n?700:400};
         background:${nivelAtual===n?'var(--accent)':'var(--surface)'};color:${nivelAtual===n?'#000':'var(--muted)'}">
       ${n}ª Chave
@@ -4458,7 +4474,13 @@ function renderOtimDeslig(obras_list, nivel){
       </div>
 
       ${!gruposMulti.length
-        ? `<div class="modal-note">Nenhum agrupamento encontrado neste nível. Tente aumentar o nível de análise.</div>`
+        ? `<div style="padding:14px;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid var(--border)">
+            <div style="font-weight:700;margin-bottom:6px">Nenhuma oportunidade de otimização neste nível</div>
+            <div style="font-size:11px;color:var(--muted)">
+              As obras estão em trechos distintos — não foi encontrada chave de manobra comum.
+              ${nivelAtual<5?'Tente aumentar o nível de análise para ampliar o trecho analisado.':'Atingido o limite do religador.'}
+            </div>
+           </div>`
         : `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:12px">
             ${gruposMulti.length} agrupamento(s) encontrado(s) — ${gruposMulti.reduce((s,g)=>s+g.obras.length,0)} obras podem ser otimizadas
            </div>
@@ -4539,7 +4561,7 @@ function renderOtimizacaoPortfolio(){
       <div style="font-size:10px;color:var(--muted);margin-bottom:16px">
         Obras de diferentes empreiteiras que compartilham o mesmo alimentador
       </div>
-      ${renderDesligamentoPortfolio(ativas)}
+      ${renderDesligamentoPortfolio(ativas, window._nivelPort||1)}
     </div>
   `;
   updateEquipDBStatus();
