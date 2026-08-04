@@ -2737,7 +2737,8 @@ window._equipDB = new Map(); // Map<NR_EQUIPAMENTO, {ant,feed,lat,lon,mun,sg,sub
 
 // Chaves de manobra manual (podem ser abertas para desligar um trecho)
 // CE=chave c/ elo, RE=religador, SE=seccionalizador, CP=chave pedestal, BC/BR=chaves
-const MANUAL_SWITCH = new Set(['CE','RE','SE','CP','BC','BR']); // AL removido: alimentador não é chave de manobra de campo
+const MANUAL_SWITCH = new Set(['CE','SE','CP','BC','BR']); // apenas chaves de campo operáveis manualmente
+// RE (religador) é SOMENTE o limite do trecho — nunca usado como ponto de agrupamento
 const SWITCH_SG = MANUAL_SWITCH; // compatibilidade
 
 function parseCoord(s){
@@ -2757,28 +2758,31 @@ function haversineKm(lat1,lon1,lat2,lon2){
 // Retorna array [{nr, sg, feed}] do mais próximo ao mais distante
 // Para quando encontra RE (religador) — ele é o limite do trecho
 function findSwitchChain(nrEquip, maxSwitches=8, maxDepth=60){
+  // Sobe a árvore do equipamento de referência encontrando chaves de manobra manual de campo.
+  // RE (religador) é LIMITE — interrompe a busca mas NÃO é adicionado à cadeia.
+  // Obras sem nenhuma CE/SE/CP antes do RE não têm oportunidade de otimização.
   const chain = [];
   let curr = parseInt(nrEquip);
   let depth = 0;
   const visited = new Set();
-  
+
   while(curr && depth < maxDepth && !visited.has(curr)){
     visited.add(curr);
     const eq = window._equipDB.get(curr);
     if(!eq) break;
-    
+
+    if(eq.sg === 'RE') break; // RE = limite — para aqui, não adiciona
+
     if(MANUAL_SWITCH.has(eq.sg)){
       chain.push({ nr: curr, sg: eq.sg, feed: eq.feed, mun: eq.mun });
-      if(eq.sg === 'RE') break; // Religador = limite do trecho, não subir além
       if(chain.length >= maxSwitches) break;
     }
-    
+
     if(!eq.ant) break;
     curr = eq.ant;
     depth++;
   }
-  // chain = [1ª chave mais próxima, 2ª chave, ..., Religador]
-  return chain;
+  return chain; // vazio = sem chave manual antes do religador (sem oportunidade)
 }
 
 // buildPath mantido para compatibilidade com busca de proximidade
@@ -4409,13 +4413,16 @@ window.buscarProximas=function(nrEquipParam, raioParam, todosParam){
 // Agrupa obras pela Nth chave de manobra mais próxima ao equipamento de referência
 // nivel=1 → chave mais próxima (menor impacto); nivel=2 → próxima acima; etc.
 function calcGruposDesligamento(obras_list, nivel=1){
+  // Apenas obras SEM conclusão — não faz sentido otimizar obras já executadas
+  const ativas = obras_list.filter(o => !o.conclusao && !o.cancelado);
   const obrasSwitches = [];
-  obras_list.forEach(o=>{
+  ativas.forEach(o=>{
     if(!o.equipamentoRef) return;
     const chain = findSwitchChain(o.equipamentoRef);
-    if(!chain.length) return;
-    // Nível solicitado (1-based); se não tem esse nível, usa o último disponível
-    const sw = chain[Math.min(nivel-1, chain.length-1)];
+    if(!chain.length) return; // sem chave manual antes do RE → sem oportunidade
+    const idx = nivel - 1;
+    if(idx >= chain.length) return; // nível solicitado não existe nesta cadeia → ignora
+    const sw = chain[idx]; // chave exata no nível (não usa fallback)
     obrasSwitches.push({ o, sw, chain });
   });
   if(!obrasSwitches.length) return [];
@@ -4448,6 +4455,9 @@ function renderOtimDeslig(obras_list, nivel){
 
   const gruposMulti = grupos.filter(g=>g.obras.length>1);
   const gruposSolo  = grupos.filter(g=>g.obras.length===1);
+  // obras sem cadeia de chaves (conectadas diretamente ao RE)
+  const semChave = obras_list.filter(o=>!o.conclusao&&!o.cancelado&&o.equipamentoRef&&!findSwitchChain(o.equipamentoRef).length).length;
+  const semEquipRef = obras_list.filter(o=>!o.conclusao&&!o.cancelado&&!o.equipamentoRef).length;
 
   const btnNivel = (n) =>
     `<button onclick="showOtimTab('deslig',${n})"
@@ -4475,10 +4485,14 @@ function renderOtimDeslig(obras_list, nivel){
 
       ${!gruposMulti.length
         ? `<div style="padding:14px;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid var(--border)">
-            <div style="font-weight:700;margin-bottom:6px">Nenhuma oportunidade de otimização neste nível</div>
+            <div style="font-weight:700;margin-bottom:6px">Nenhuma oportunidade de otimização no ${nivelAtual}° nível</div>
             <div style="font-size:11px;color:var(--muted)">
-              As obras estão em trechos distintos — não foi encontrada chave de manobra comum.
-              ${nivelAtual<5?'Tente aumentar o nível de análise para ampliar o trecho analisado.':'Atingido o limite do religador.'}
+              Não há duas obras com a mesma ${nivelAtual}ª chave de manobra no caminho até o religador.
+              ${nivelAtual<5?'Tente aumentar o nível de análise para ampliar o trecho analisado.':'Você atingiu o limite máximo de análise.'}
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:8px">
+              ${semChave>0?semChave+' obra(s) conectadas diretamente ao religador (sem chave de campo no caminho).':''}
+              ${semEquipRef>0?' | '+semEquipRef+' obra(s) sem equipamento de referência.':''}
             </div>
            </div>`
         : `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:12px">
@@ -4516,9 +4530,11 @@ function renderOtimDeslig(obras_list, nivel){
             </div>`;
           }).join('')}`
       }
-      <div style="font-size:10px;color:var(--muted);margin-top:8px">
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
         ${gruposSolo.length} obra(s) sem agrupamento neste nível.
-        ${sem_equip?` | ${sem_equip} obra(s) sem equipamento de referência.`:''}
+        ${semChave>0?' | '+semChave+' conectadas diretamente ao religador.':''}
+        ${semEquipRef>0?' | '+semEquipRef+' sem equipamento de referência.':''}
+        ${obras_list.filter(o=>o.conclusao).length>0?' | '+obras_list.filter(o=>o.conclusao).length+' obra(s) com conclusão (excluídas da análise).':''}
       </div>
     </div>`;
 }
