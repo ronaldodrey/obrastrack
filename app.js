@@ -2757,32 +2757,29 @@ function haversineKm(lat1,lon1,lat2,lon2){
 // Constrói a cadeia de chaves de manobra manual subindo a árvore
 // Retorna array [{nr, sg, feed}] do mais próximo ao mais distante
 // Para quando encontra RE (religador) — ele é o limite do trecho
-function findSwitchChain(nrEquip, maxSwitches=8, maxDepth=60){
-  // Sobe a árvore do equipamento de referência encontrando chaves de manobra manual de campo.
-  // RE (religador) é LIMITE — interrompe a busca mas NÃO é adicionado à cadeia.
-  // Obras sem nenhuma CE/SE/CP antes do RE não têm oportunidade de otimização.
+function findSwitchChain(nrEquip, maxDepth=40){
+  // Cadeia de TODOS os ancestrais do equipamento de referência, em ordem de proximidade.
+  // Nível 1 = pai direto (NR_EQPTO_ANTERIOR), Nível 2 = avô, Nível 3 = bisavô...
+  // Para ao encontrar um RE (religador) — ele NÃO entra na cadeia.
+  // Não filtra por tipo: qualquer ponto upstream é um potencial ponto de desligamento.
   const chain = [];
-  let curr = parseInt(nrEquip);
-  let depth = 0;
+  const start = window._equipDB.get(parseInt(nrEquip));
+  if(!start || !start.ant) return chain;
+
+  let curr = start.ant; // começa pelo pai direto
   const visited = new Set();
 
-  while(curr && depth < maxDepth && !visited.has(curr)){
+  while(curr && chain.length < maxDepth && !visited.has(curr)){
     visited.add(curr);
     const eq = window._equipDB.get(curr);
     if(!eq) break;
-
-    if(eq.sg === 'RE') break; // RE = limite — para aqui, não adiciona
-
-    if(MANUAL_SWITCH.has(eq.sg)){
-      chain.push({ nr: curr, sg: eq.sg, feed: eq.feed, mun: eq.mun });
-      if(chain.length >= maxSwitches) break;
-    }
-
+    if(eq.sg === 'RE') break; // limite do trecho — para antes de incluir o RE
+    chain.push({ nr: curr, sg: eq.sg, feed: eq.feed, mun: eq.mun });
     if(!eq.ant) break;
     curr = eq.ant;
-    depth++;
   }
-  return chain; // vazio = sem chave manual antes do religador (sem oportunidade)
+  return chain;
+  // Exemplo para 10533: [{81094,FR}, {1922,CD}, {1921,CD}, {41002,AL}, {41000,SE}]
 }
 
 // buildPath mantido para compatibilidade com busca de proximidade
@@ -4328,25 +4325,32 @@ function renderOtimizacao(){
 }
 
 window.showOtimTab=function(tab, nivel){
-  if(nivel != null) window._nivelDeslig = nivel;
-  window._tabAtiva = tab || window._tabAtiva || 'prox';
-  // Store obras pool in window so level buttons can access it
-  window._minhasObras = window._minhasObras ||
-    obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado);
-  const minhas = window._minhasObras;
+  // Always set both state variables from parameters
+  if(tab)   window._tabAtiva    = tab;
+  if(nivel) window._nivelDeslig = parseInt(nivel);
+  const tabAtiva   = window._tabAtiva    || 'prox';
+  const nivelAtual = window._nivelDeslig || 1;
+  // Always use fresh obras data (don't use stale cache)
+  const minhas = obras.filter(o=>o.empreiteira===me.vinculo&&!o.cancelado);
+  window._minhasObras = minhas;
   const cont = document.getElementById('otimTabContent');
-  if(!cont) return;
-  cont.innerHTML = window._tabAtiva==='prox'
-    ? renderOtimProx(minhas)
-    : renderOtimDeslig(minhas.filter(o=>o.equipamentoRef), window._nivelDeslig);
-  const tabBtn = (id, active, cor) => {
-    const el = document.getElementById(id); if(!el) return;
-    el.style.background = active ? cor : 'var(--surface)';
+  if(!cont){ console.warn('[Otim] otimTabContent não encontrado'); return; }
+  try{
+    cont.innerHTML = tabAtiva==='prox'
+      ? renderOtimProx(minhas)
+      : renderOtimDeslig(minhas.filter(o=>o.equipamentoRef), nivelAtual);
+  }catch(err){
+    console.error('[Otim] Erro ao renderizar:', err.message);
+    cont.innerHTML = '<div class="modal-note" style="color:#EF4444">Erro: '+err.message+'</div>';
+  }
+  // Update tab button styles
+  ['tabOtimProx','tabOtimDeslig'].forEach(id=>{
+    const el=document.getElementById(id); if(!el) return;
+    const isProx = id==='tabOtimProx';
+    const active = (tabAtiva==='prox')===isProx;
+    el.style.background = active ? (isProx?'var(--accent)':'#ff6b35') : 'var(--surface)';
     el.style.color = active ? '#000' : 'var(--muted)';
-    el.style.borderBottom = active ? '2px solid '+cor : 'none';
-  };
-  tabBtn('tabOtimProx',   window._tabAtiva==='prox',   'var(--accent)');
-  tabBtn('tabOtimDeslig', window._tabAtiva==='deslig',  '#ff6b35');
+  });
 };
 
 function renderOtimProx(obras_list){
@@ -4419,10 +4423,10 @@ function calcGruposDesligamento(obras_list, nivel=1){
   ativas.forEach(o=>{
     if(!o.equipamentoRef) return;
     const chain = findSwitchChain(o.equipamentoRef);
-    if(!chain.length) return; // sem chave manual antes do RE → sem oportunidade
+    if(!chain.length) return; // sem ancestrais antes do RE (conectado diretamente)
     const idx = nivel - 1;
-    if(idx >= chain.length) return; // nível solicitado não existe nesta cadeia → ignora
-    const sw = chain[idx]; // chave exata no nível (não usa fallback)
+    if(idx >= chain.length) return; // nível solicitado além da profundidade disponível
+    const sw = chain[idx]; // ponto de desligamento exato para este nível
     obrasSwitches.push({ o, sw, chain });
   });
   if(!obrasSwitches.length) return [];
@@ -4455,9 +4459,13 @@ function renderOtimDeslig(obras_list, nivel){
 
   const gruposMulti = grupos.filter(g=>g.obras.length>1);
   const gruposSolo  = grupos.filter(g=>g.obras.length===1);
-  // obras sem cadeia de chaves (conectadas diretamente ao RE)
-  const semChave = obras_list.filter(o=>!o.conclusao&&!o.cancelado&&o.equipamentoRef&&!findSwitchChain(o.equipamentoRef).length).length;
+  const semChave    = obras_list.filter(o=>!o.conclusao&&!o.cancelado&&o.equipamentoRef&&!findSwitchChain(o.equipamentoRef).length).length;
   const semEquipRef = obras_list.filter(o=>!o.conclusao&&!o.cancelado&&!o.equipamentoRef).length;
+  const semNivel    = obras_list.filter(o=>{
+    if(o.conclusao||o.cancelado||!o.equipamentoRef) return false;
+    const chain=findSwitchChain(o.equipamentoRef);
+    return chain.length>0 && (nivelAtual-1)>=chain.length;
+  }).length;
 
   const btnNivel = (n) =>
     `<button onclick="showOtimTab('deslig',${n})"
@@ -4470,8 +4478,9 @@ function renderOtimDeslig(obras_list, nivel){
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
       <div style="font-size:13px;font-weight:700;margin-bottom:4px">🔌 Otimização de Desligamento</div>
       <div style="font-size:10px;color:var(--muted);margin-bottom:12px">
-        Suba na árvore de equipamentos escolhendo a <strong>Nth chave de manobra</strong> mais próxima ao ponto de trabalho.
-        Quanto maior o nível, maior o trecho desligado — mas mais obras podem ser agrupadas.
+        Nível 1 = pai direto do equipamento de referência (menor impacto).
+        Subindo de nível, o trecho desligado aumenta — e mais obras podem ser agrupadas.
+        Limite: primeiro Religador (RE) acima na hierarquia.
       </div>
 
       <!-- Seletor de nível -->
@@ -4531,10 +4540,11 @@ function renderOtimDeslig(obras_list, nivel){
           }).join('')}`
       }
       <div style="font-size:10px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-        ${gruposSolo.length} obra(s) sem agrupamento neste nível.
-        ${semChave>0?' | '+semChave+' conectadas diretamente ao religador.':''}
-        ${semEquipRef>0?' | '+semEquipRef+' sem equipamento de referência.':''}
-        ${obras_list.filter(o=>o.conclusao).length>0?' | '+obras_list.filter(o=>o.conclusao).length+' obra(s) com conclusão (excluídas da análise).':''}
+        ${gruposSolo.length>0?gruposSolo.length+' obra(s) sem par de agrupamento neste nível. ':''}
+        ${semNivel>0?semNivel+' obra(s) com cadeia mais curta que o nível '+nivelAtual+' (tente nível menor). ':''}
+        ${semChave>0?semChave+' obra(s) conectadas diretamente ao RE (sem ancestral). ':''}
+        ${semEquipRef>0?semEquipRef+' obra(s) sem equipamento de referência. ':''}
+        ${obras_list.filter(o=>o.conclusao).length>0?obras_list.filter(o=>o.conclusao).length+' obra(s) concluídas (excluídas). ':''}
       </div>
     </div>`;
 }
