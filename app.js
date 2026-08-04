@@ -1160,64 +1160,60 @@ function buildTableHeader(){
         style="cursor:pointer;user-select:none;white-space:nowrap"
         title="${tip||'Clique para ordenar'}">${lbl} <span style="font-size:8px;opacity:.6">${sortIcon(col)}</span></th>`;
   const th  = (lbl, tip='') =>
-    `<th title="${tip}">${lbl}</th>`;
+    `<th title="${tip||lbl}" style="white-space:nowrap">${lbl}</th>`;
 
   const isGer = me?.perfil==='gerente';
   const isFis = me?.perfil==='fiscal';
   const isEmp = me?.perfil==='empreiteira';
 
-  // Colunas fixas (frozen)
+  // Colunas fixas (frozen/congeladas)
   const stickyStyle = 'position:sticky;z-index:2;background:var(--surface)';
-  const frozen1 = `<th style="${stickyStyle};left:0;min-width:120px">Status</th>`;
-  const frozen2 = `<th style="${stickyStyle};left:120px;min-width:100px" onclick="window.sortObras('numero')" title="Clique para ordenar">Nº <span style="font-size:8px;opacity:.6">${sortIcon('numero')}</span></th>`;
+  const frozen1 = `<th style="${stickyStyle};left:0;min-width:120px" title="Status atual da obra">Status</th>`;
+  const frozen2 = `<th style="${stickyStyle};left:120px;min-width:100px;cursor:pointer" onclick="window.sortObras('numero')" title="Número da obra — clique para ordenar">Nº <span style="font-size:8px;opacity:.6">${sortIcon('numero')}</span></th>`;
 
   let cols = `<tr>
     ${frozen1}
     ${frozen2}
-    ${sth('Tipo','tipo')}
-    ${sth('Equip.Ref.','equipamentoRef','Equipamento de Referência')}
-    ${sth('Cidade','cidade')}
-    ${th('Empreiteira')}
-    ${th('Fiscal')}
-    ${sth('Abertura','dataAbertura')}
-    ${th('Prazo')}
-    ${sth('Data Limite','dataLimite','Ordenar por data de vencimento')}
-    ${th('Dias Exec.')}
-    ${th('Deslig.')}
-    ${sth('Conclusão','conclusao')}
-    ${th('Fiscalização')}
-    ${th('Pendência')}
-    ${th('Kaffa')}
-    ${th('Cadastro')}
-    ${th('Medição')}
-    ${th('USC')}
-    ${th('ULV')}
-    ${th('Medição Tipo','Tipo da última medição (Parcial/Final)')}`;
+    ${sth('Tipo','tipo','Tipo da obra: R1, R2 ou ODI')}
+    ${sth('Descrição','descricao','Descrição resumida da obra')}
+    ${sth('Equip. Ref.','equipamentoRef','Número do Equipamento de Referência (transformador/ponto de trabalho)')}
+    ${sth('Cidade','cidade','Município onde a obra será executada')}
+    ${th('Empreiteira','Empresa responsável pela execução')}
+    ${th('Fiscal','Fiscal responsável pela obra')}
+    ${sth('Dt. Abertura','dataAbertura','Data de abertura/criação da obra')}
+    ${th('Prazo (dias)','Prazo contratual de execução em dias')}
+    ${sth('Dt. Limite','dataLimite','Data limite para conclusão — clique para ordenar')}
+    ${th('Dias Exec.','Dias decorridos desde a abertura')}
+    ${th('Dt. Desligamento','Data programada para o desligamento de energia')}
+    ${sth('Dt. Conclusão','conclusao','Data em que a empreiteira informou a conclusão')}
+    ${th('Dt. Fiscalização','Data em que o fiscal realizou a vistoria')}
+    ${th('Pendência','Indica se existe pendência registrada e seu status')}
+    ${th('Dt. Kaffa','Data do kaffa (parcial ou final) registrado pela empreiteira')}
+    ${th('Dt. Cadastro','Data de envio ao cadastro CELESC')}
+    ${th('Dt. Medição','Data da medição realizada pelo fiscal')}
+    ${th('USC','Unidades de Serviço Celesc previstas na obra')}
+    ${th('ULV','Unidades de Ligação e Variação previstas')}
+    ${th('Tipo Medição','Tipo da última medição registrada: Parcial ou Final')}`;
 
   if(!isEmp){
-    const tipMed70  = 'Prazo = Data Limite da obra';
-    const tipMed230 = 'Prazo = Data Limite da obra';
-    const tipMed280 = 'Aguardar medição de campo';
-    const tipDias70 = 'Dias restantes para Med.70';
-    const tipDias230= 'Dias restantes para Med.230';
     cols += `
-    ${sth('Med. 70','medida70', tipMed70)}
-    ${th('D. 70',tipDias70)}
-    ${sth('Med. 230','medida230',tipMed230)}
-    ${th('D. 230',tipDias230)}
-    ${sth('Med. 280','medida280',tipMed280)}
-    ${th('280 Motivo')}`;
+    ${sth('Dt. Med. 70','medida70','Data da Medida 70 — prazo igual à data limite da obra')}
+    ${th('Prazo Med.70','Dias restantes (ou vencimento) para a Medida 70')}
+    ${sth('Dt. Med. 230','medida230','Data da Medida 230 — prazo igual à data limite da obra')}
+    ${th('Prazo Med.230','Dias restantes (ou vencimento) para a Medida 230')}
+    ${sth('Dt. Med. 280','medida280','Data da Medida 280 — aguarda medição de campo')}
+    ${th('Motivo Med.280','Motivo registrado para a Medida 280')}`;
   }
 
   if(isGer || isFis){
     cols += `
-    ${th('Arr.','Armazenamento')}`;
+    ${th('Armazenado','Indica se a obra foi armazenada/encerrada')}`;
   }
 
   if(isGer){
     cols += `
-    ${th('USC Med.','USC medido pelo gerente')}
-    ${th('ULV Med.','ULV medido pelo gerente')}`;
+    ${th('USC Medido','USC efetivamente medido pelo gerente')}
+    ${th('ULV Medido','ULV efetivamente medido pelo gerente')}`;
   }
 
   cols += `<th>Ação</th></tr>`;
@@ -1325,6 +1321,7 @@ function renderObras(){
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.descricao||''}"><span>${o.descricao||'—'}</span></td>
       <td style="font-size:11px;color:var(--muted)">${o.equipamentoRef||'—'}</td>
       <td>${o.cidade||'—'}</td>
       <td style="font-size:10px">${o.empreiteira||'—'}</td>
@@ -1412,7 +1409,7 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDesligamento',obra.dataDesligamento);
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     // kaffaEntries rendered via renderListaKaffas above
@@ -2005,6 +2002,7 @@ window.saveObra=async function(){
         armazenado:gChk('oArmazenado'), contratosAssinado:gChk('oContratosAssinado'),
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
+        descricao:g('oDescricao')||null,
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
         processoCancelamento:gChk('oProcessoCancelamento'),
@@ -2105,7 +2103,9 @@ window.saveObra=async function(){
           await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
       }
       // Email: obra concluída pela empreiteira → avisa fiscal
-      if(me.perfil==='empreiteira'&&!obraAntiga?.conclusao&&patch.conclusao)
+      // Email imediato: conclusão informada por empreiteira OU gerente
+      if(!obraAntiga?.conclusao && patch.conclusao &&
+         (me.perfil==='empreiteira'||me.perfil==='gerente'))
         await enviarEmailConclusao({...obraAntiga,...patch});
       if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia){
         patch.dataPendencia = hojeStr(); // registra a data em que a pendência foi cadastrada
@@ -2339,8 +2339,7 @@ async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
   if(!obra.fiscal) return;
   const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
   if(!fiscal?.email) return;
-  const chave = `kaffa_${obra.id}_${tipoKaffa}_${dataKaffa}`;
-  if(await jaEnviou(chave)) return;
+  // E-mail imediato (kaffa é um evento — a combinação tipo+data é única)
   const tipoLabel = tipoKaffa==='final' ? 'KAFFA FINAL ✅' : 'Kaffa Parcial';
   await enviarEmail(
     `SPPC ARLAG – ${tipoLabel} registrado | Obra ${obra.numero} – ${obra.cidade}`,
@@ -2363,8 +2362,7 @@ async function enviarEmailConclusao(obra){
   if(!obra.fiscal) return;
   const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
   if(!fiscal?.email) return;
-  const chave = `conclusao_${obra.id}`;
-  if(await jaEnviou(chave)) return;
+  // E-mail imediato — sem verificação de duplicata (disparado por mudança de estado)
   await enviarEmail(
     `SPPC ARLAG – Obra concluída | ${obra.numero} – ${obra.cidade}`,
     `Olá, Fiscal!
@@ -2438,7 +2436,8 @@ async function verificarNotificacoes(){
       const emp=empreiteiras.find(e=>e.nome===o.empreiteira);
       if(emp?.email){
         const tipo=dias<=0?'vencida':dias<=EMAILJS_CONFIG.diasCritico?'critica':'aviso';
-        const chave=`prazo_${o.id}_${tipo}_${o.dataLimite}`;
+        const hoje_key = hojeStr().replace(/-/g,''); // chave diária — envia 1x/dia por obra
+        const chave=`prazo_${o.id}_${tipo}_${hoje_key}`;
         if(!await jaEnviou(chave)){
           const emoji = tipo==='critica'?'⚠️ URGENTE:':'🔔';
           await enviarEmail(
@@ -2541,12 +2540,12 @@ Atualize no sistema SPPC ARLAG.`,
 
 // ── CSV ───────────────────────────────────────────────
 window.exportCSV=function(){
-  const rows=[['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Equip.Ref.','Abertura','Prazo','Data Limite','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV','Medida 70','Medida 230','Medida 280','Armazenado','Cancelado']];
+  const rows=[['Status','Nº','Tipo','Descrição','Cidade','Empreiteira','Fiscal','Equip.Ref.','Abertura','Prazo','Data Limite','Conclusão','Fiscalização','Pendência','Kaffa','Cadastro','Medição','USC','ULV','Medida 70','Medida 230','Medida 280','Armazenado','Cancelado']];
   visibleObras().forEach(o=>rows.push([
     statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,
     o.dataAbertura,o.prazoExecucao,o.dataLimite,o.conclusao,o.fiscalizacao,
     o.pendencia?(o.tipoPendencia||'Sim'):'Não',o.kaffa,o.dataCadastro,o.medicao,
-    o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não',o.cancelado?'Sim':'Não'
+    o.descricao||'',o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não',o.cancelado?'Sim':'Não'
   ]));
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent('\uFEFF'+rows.map(r=>r.map(v=>v??'').join(';')).join('\n'));
@@ -2678,7 +2677,7 @@ window.exportCSVFiltrado = function() {
     statusOf(o),o.numero,o.tipo,o.cidade,o.empreiteira,o.fiscal,
     o.dataAbertura,o.prazoExecucao,o.dataLimite,o.conclusao,o.fiscalizacao,
     o.pendencia?(o.tipoPendencia||'Sim'):'Não',o.kaffa,o.dataCadastro,o.medicao,
-    o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não'
+    o.descricao||'',o.equipamentoRef||'',o.usc,o.ulv,o.medida70,o.medida230,o.medida280,o.armazenado?'Sim':'Não'
   ]));
   const a = document.createElement('a');
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF'+rows.map(r=>r.map(v=>v??'').join(';')).join('\n'));
@@ -3032,6 +3031,7 @@ window.bulkDeleteEncerradas=async function(){
 const COLUNAS_SISTEMA = [
   { campo:'numero',        label:'Nº da Obra',         aliases:['numero','nº','obra','número da obra','nro','num'] },
   { campo:'tipo',          label:'Tipo',                aliases:['tipo'] },
+  { campo:'descricao',       label:'Descrição',           aliases:['descricao','descrição','desc','description'] },
   { campo:'equipamentoRef',label:'Equip. Referência',   aliases:['equip','equipamento','equipamento ref','equip ref','equipamentoref','nr_equipamento'] },
   { campo:'cidade',        label:'Cidade',              aliases:['cidade','municipio','município','localidade'] },
   { campo:'empreiteira',   label:'Empreiteira',         aliases:['empreiteira','empresa','contratada'] },
@@ -3226,6 +3226,7 @@ window.confirmarImport = async function() {
       await addDoc(collection(db, 'obras'), {
         numero,
         tipo:            get('tipo')          || '',
+        descricao:       get('descricao') || null,
         equipamentoRef:  get('equipamentoRef') ? parseInt(get('equipamentoRef')) || null : null,
         cidade:          get('cidade')        || '',
         empreiteira:     get('empreiteira')   || '',
@@ -4384,7 +4385,12 @@ window.buscarProximas=function(nrEquipParam, raioParam, todosParam){
     if(el) el.innerHTML='<span style="color:#EF4444">Equipamento não encontrado ou sem coordenadas na base.</span>';
     return;
   }
-  const pool=todosParam||obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.equipamentoRef!==nr);
+  const pool = todosParam
+    || (me.perfil==='empreiteira'
+        // Empreiteira: busca somente dentro das suas próprias obras
+        ? obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.equipamentoRef!==nr&&o.empreiteira===me.vinculo)
+        // Gerente/Fiscal: busca em todo o portfólio
+        : obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.equipamentoRef!==nr));
   const resultados=[];
   pool.forEach(o=>{
     const eq2=window._equipDB.get(parseInt(o.equipamentoRef));
@@ -4450,8 +4456,24 @@ window._nivelDeslig = window._nivelDeslig || 1; // level state
 function renderOtimDeslig(obras_list, nivel){
   if(nivel) window._nivelDeslig = nivel;
   const nivelAtual = window._nivelDeslig;
+  // Seletor de nível sempre visível (não depende do DB)
+  const btnNivelEarly = (n) =>
+    `<button onclick="showOtimTab('deslig',${n})"
+      style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:${nivelAtual===n?700:400};
+        background:${nivelAtual===n?'var(--accent)':'var(--surface)'};color:${nivelAtual===n?'#000':'var(--muted)'}">
+      ${n}ª Chave
+    </button>`;
+  const nivelSelectorHtml = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--muted);margin-right:4px">Nível de análise:</span>
+    ${[1,2,3,4,5].map(btnNivelEarly).join('')}
+    <span style="font-size:10px;color:var(--muted);margin-left:4px">↑ 1=mais próximo · 5=mais distante do ponto de trabalho</span>
+  </div>`;
+
   if(!window._equipDB.size)
-    return '<div class="modal-note" style="color:#EF4444">Base de equipamentos não carregada.</div>';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
+      ${nivelSelectorHtml}
+      <div class="modal-note" style="color:#EF4444">⚠️ Base de equipamentos não carregada. Clique em "📡 Base Equipamentos" na barra de ferramentas.</div>
+    </div>`;
 
   const grupos=calcGruposDesligamento(obras_list, nivelAtual);
   const sem_equip=obras_list.filter(o=>!o.equipamentoRef).length;
@@ -4467,12 +4489,7 @@ function renderOtimDeslig(obras_list, nivel){
     return chain.length>0 && (nivelAtual-1)>=chain.length;
   }).length;
 
-  const btnNivel = (n) =>
-    `<button onclick="showOtimTab('deslig',${n})"
-      style="padding:6px 14px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:${nivelAtual===n?700:400};
-        background:${nivelAtual===n?'var(--accent)':'var(--surface)'};color:${nivelAtual===n?'#000':'var(--muted)'}">
-      ${n}ª Chave
-    </button>`;
+  const btnNivel = btnNivelEarly; // reusa o seletor já definido acima
 
   return `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px">
@@ -4483,14 +4500,8 @@ function renderOtimDeslig(obras_list, nivel){
         Limite: primeiro Religador (RE) acima na hierarquia.
       </div>
 
-      <!-- Seletor de nível -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
-        <span style="font-size:11px;color:var(--muted);margin-right:4px">Nível de análise:</span>
-        ${[1,2,3,4,5].map(btnNivel).join('')}
-        <span style="font-size:10px;color:var(--muted);margin-left:8px">
-          ↑ Nível 1 = chave mais próxima (menor impacto) · Nível 5 = até o religador
-        </span>
-      </div>
+      <!-- Seletor de nível (gerado acima e reutilizado) -->
+      ${nivelSelectorHtml}
 
       ${!gruposMulti.length
         ? `<div style="padding:14px;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid var(--border)">
