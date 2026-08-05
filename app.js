@@ -2107,10 +2107,15 @@ window.saveObra=async function(){
         patch.dataCadastroConfirmado = hojeStr();
       }
       // Email: kaffa registrado pela empreiteira → avisa fiscal
-      if(me.perfil==='empreiteira' && _kaffasPendentes && patch.kaffaEntries){
-        const novosKaffas = patch.kaffaEntries.slice(-(patch.kaffaEntries.length-(obraAntiga?.kaffaEntries||[]).length));
-        for(const k of novosKaffas)
-          await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
+      if(me.perfil==='empreiteira' && _kaffasPendentes.length > 0 && patch.kaffaEntries){
+        // Apenas os kaffas realmente novos (proteção contra slice(-0) que retorna array completo)
+        const qtdAntigos = (obraAntiga?.kaffaEntries||[]).length;
+        const qtdNovos   = patch.kaffaEntries.length - qtdAntigos;
+        if(qtdNovos > 0){
+          const novosKaffas = patch.kaffaEntries.slice(-qtdNovos);
+          for(const k of novosKaffas)
+            await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
+        }
       }
       // Email: obra concluída pela empreiteira → avisa fiscal
       // Email: conclusão informada ou atualizada por empreiteira OU gerente
@@ -2330,20 +2335,27 @@ async function marcarEnviado(chave){
 // ── FUNÇÃO GENÉRICA: 1 único template para todos os tipos ──────────
 // O template no EmailJS usa apenas: {{to_email}}, {{cc_email}}, {{assunto}}, {{mensagem}}
 async function enviarEmail(assunto, mensagem, toEmail, ccEmail){
-  if(!emailJSAtivo()) return;
+  if(!emailJSAtivo()) { console.warn('[SPPC Email] EmailJS inativo — e-mail não enviado.'); return; }
   const tpl = EMAILJS_CONFIG.tplGeral;
-  if(!tpl || tpl.startsWith('COLE_AQUI')) return;
+  if(!tpl || tpl.startsWith('COLE_AQUI')) { console.warn('[SPPC Email] Template não configurado.'); return; }
+  if(!toEmail) { console.warn('[SPPC Email] Sem destinatário — e-mail ignorado.'); return; }
+  console.log('[SPPC Email] Enviando para:', toEmail, '| Assunto:', assunto);
   try{
     const resp = await emailjs.send(EMAILJS_CONFIG.serviceId, tpl, {
       to_email: toEmail,
       cc_email: ccEmail || EMAILJS_CONFIG.emailGerente || '',
       assunto, mensagem,
     });
-    console.log('[SPPC Email] Enviado OK:', resp.status, assunto);
+    console.log('[SPPC Email] ✅ Enviado! Status:', resp.status);
   }catch(e){
     // EmailJS retorna {status, text} — não é um Error padrão
-    console.error('[SPPC Email] Falhou:', e?.text || e?.message || JSON.stringify(e));
-    console.error('[SPPC Email] Params: serviceId=', EMAILJS_CONFIG.serviceId, 'tpl=', tpl, 'to=', toEmail);
+    const msg = e?.text || e?.message || JSON.stringify(e);
+    console.error('[SPPC Email] ❌ Falhou:', msg);
+    console.error('[SPPC Email] → serviceId:', EMAILJS_CONFIG.serviceId, '| tpl:', tpl, '| para:', toEmail);
+    // Detecta limite de cota
+    if(msg?.includes('quota') || msg?.includes('limit') || e?.status===429){
+      toast('⚠️ Limite de e-mails atingido (200/mês). Upgrade necessário no EmailJS.','warn');
+    }
   }
 }
 
