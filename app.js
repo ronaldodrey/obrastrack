@@ -194,7 +194,7 @@ async function iniciarApp(){
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
-  if(['gerente','fiscal'].includes(me.perfil)) tabs.push(['pgOtimizacaoPort','🌐 Portfólio']);
+  if(['gerente','fiscal','fiscal_adm'].includes(me.perfil)) tabs.push(['pgOtimizacaoPort','🌐 Portfólio']);
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML =
@@ -208,7 +208,7 @@ async function iniciarApp(){
   // Fix #2: bulk medidas button
   const btnBulkMed=document.getElementById('btnBulkMedidas');
   if(btnBulkMed){
-    btnBulkMed.style.display=['gerente','fiscal'].includes(me.perfil)?'inline-flex':'none';
+    btnBulkMed.style.display=['gerente','fiscal','fiscal_adm'].includes(me.perfil)?'inline-flex':'none';
     btnBulkMed.onclick=window.abrirBulkMedidas;
   }
   buildTableHeader();
@@ -546,7 +546,8 @@ function renderDashFiscal(list, meuNome){
   html += '<div class="kpi-strip">' + emprKpis(minhas) + '</div>';
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartFiscal"></div>';
-  return html;
+  html += '<div style="margin-top:16px">' + renderDashSummaryFiscal(minhas) + '</div>';
+    return html;
 }
 
 function renderDashEmpreiteira(minhas){
@@ -677,7 +678,8 @@ function renderDashEmpreiteira(minhas){
   } else {
     html += '<div class="modal-note" style="margin-top:16px;color:#22C55E">✅ Nenhuma obra atrasada!</div>';
   }
-  return html;
+  html += '<div style="margin-top:16px">' + renderDashSummaryEmpreiteira(minhas) + '</div>';
+    return html;
 }
 
 
@@ -1413,7 +1415,11 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oDesligamento',obra.dataDesligamento);
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||'');
+    // Transformer fields
+    set('oPotencia',obra.potencia||''); set('oPotenciaRet',obra.potenciaRet||'');
+    set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
+    const retChk=document.getElementById('oTemRetirado'); if(retChk){ retChk.checked=!!obra.temRetirado; toggleRetirado(); } set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     // kaffaEntries rendered via renderListaKaffas above
@@ -1483,12 +1489,20 @@ window.openObraModal=function(obraId){
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Preenche view-only do transformador para fiscal e gerente
-    // Preenche campos de visualização do transformador (são <input disabled>, usar .value)
-    ['oPlacasView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
-      const val=[obra.placas,obra.sap,obra.serie,obra.fabricante][i];
-      const el=document.getElementById(id);
-      if(el){ el.value = val||''; }
+    // Preenche campos de visualização do transformador
+    const transf_vals=[obra.placas,obra.potencia,obra.sap,obra.serie,obra.fabricante];
+    ['oPlacasView','oPotenciaView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
+      const el=document.getElementById(id); if(el) el.value=transf_vals[i]||'';
     });
+    // Retirado
+    if(obra.temRetirado&&(obra.sapRet||obra.potenciaRet)){
+      const retView=document.getElementById('secRetiradoView');
+      if(retView) retView.style.display='block';
+      ['oPotenciaRetView','oSAPRetView','oSerieRetView','oFabricanteRetView'].forEach((id,i)=>{
+        const el=document.getElementById(id);
+        if(el) el.value=[obra.potenciaRet,obra.sapRet,obra.serieRet,obra.fabricanteRet][i]||'';
+      });
+    }
     // Mostra data de regularização na confirmação fiscal
     const infoReg=document.getElementById('infoRegularizacao');
     if(infoReg){
@@ -1538,13 +1552,20 @@ window.openObraModal=function(obraId){
     if(p !== 'fiscal')      showSec('secExec');
     // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante) sempre em modo edição
     // Dados do transformador: mostra para fiscal/gerente apenas quando empreiteira já preencheu
-    if((p === 'fiscal' || p === 'gerente') && isEdit && (obra?.placas || obra?.sap)){
+    if((p === 'fiscal' || p === 'fiscal_adm' || p === 'gerente') && isEdit && (obra?.placas || obra?.sap || obra?.potencia)){
       showSec('secTransfView');
     }
     if(p === 'empreiteira') showSec('secImpedimento');
 
     // Fiscalização: só fiscal e gerente
-    if(p === 'fiscal' || p === 'gerente') showSec('secFisc');
+    if(p === 'fiscal'||p === 'fiscal_adm'||p === 'gerente'){
+      showSec('secFisc');
+      if(isEdit){
+        showSec('secLocaisTrabalho');
+        _locaisPendentes = [];
+        renderLocais();
+      }
+    }
 
     // Desligamento: fiscal, empreiteira e gerente preenchem a data
     if(p !== 'gerente' || true) showSec('secDesligData'); // todos veem
@@ -1998,10 +2019,15 @@ window.saveObra=async function(){
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
+        potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
+        temRetirado:document.getElementById('oTemRetirado')?.checked||false,
+        potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
+        sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
         kaffaEntries: allKaffasG,
         kaffa: lastKaffaG,
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
+        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
@@ -2013,7 +2039,14 @@ window.saveObra=async function(){
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
         descricao:g('oDescricao')||null,
+        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
+        potencia: g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
+        temRetirado: document.getElementById('oTemRetirado')?.checked||false,
+        potenciaRet: g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
+        sapRet: g('oSAPRet')||null,
+        serieRet: g('oSerieRet')||null,
+        fabricanteRet: g('oFabricanteRet')||null,
         paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
         processoCancelamento:gChk('oProcessoCancelamento'),
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
@@ -2028,6 +2061,10 @@ window.saveObra=async function(){
       const lastKaffaDate = allKaffasEmp.map(k=>k.data).filter(Boolean).sort().slice(-1)[0]||'';
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
+        potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
+        temRetirado:document.getElementById('oTemRetirado')?.checked||false,
+        potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
+        sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
         dataDesligamento:g('oDesligamento'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
@@ -2046,6 +2083,7 @@ window.saveObra=async function(){
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
+        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'),
@@ -2132,7 +2170,7 @@ window.saveObra=async function(){
         patch.dataPendencia = hojeStr(); // gerente também pode registrar pendência
       }
       // Registrar se pendência foi resolvida dentro do prazo
-      if((me.perfil==='fiscal'||me.perfil==='gerente')&&patch.pendenciaResolvida&&!obraAntiga?.pendenciaResolvida){
+      if((me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='gerente')&&patch.pendenciaResolvida&&!obraAntiga?.pendenciaResolvida){
         const prazoLim=obraAntiga?.prazoPendencia;
         const dataReg=obraAntiga?.regularizacaoData;
         if(prazoLim&&dataReg) patch.pendenciaDentroPrazo=(dataReg<=prazoLim);
@@ -2360,9 +2398,14 @@ async function enviarEmail(assunto, mensagem, toEmail, ccEmail){
 }
 
 async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
-  if(!obra.fiscal) return;
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
-  if(!fiscal?.email) return;
+  if(!obra.fiscal){ console.warn('[Email Kaffa] Obra sem fiscal.'); return; }
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  if(!fiscal?.email){
+    console.warn('[Email Kaffa] Fiscal não encontrado ou sem email. fiscal vinculo=',obra.fiscal,'users=',users.map(u=>u.vinculo+'('+u.perfil+')'));
+    toast('⚠️ Email não enviado: fiscal sem email cadastrado.','warn');
+    return;
+  }
+  console.log('[Email Kaffa] Enviando para fiscal:', fiscal.email);
   // E-mail imediato (kaffa é um evento — a combinação tipo+data é única)
   const tipoLabel = tipoKaffa==='final' ? 'KAFFA FINAL ✅' : 'Kaffa Parcial';
   await enviarEmail(
@@ -2915,6 +2958,11 @@ function aplicarTemaSalvo(){
   }
 }
 
+
+window.toggleRetirado = function(){
+  const chk = document.getElementById('oTemRetirado');
+  document.getElementById('secRetirado').style.display = chk?.checked ? 'block' : 'none';
+};
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -4505,6 +4553,15 @@ function renderOtimDeslig(obras_list, nivel){
 
       <!-- Seletor de nível (gerado acima e reutilizado) -->
       ${nivelSelectorHtml}
+      <!-- Busca por chave de abertura -->
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+        <div class="fg" style="margin:0;min-width:160px">
+          <label style="font-size:10px">🔎 Buscar por Chave de Abertura (Nº Equipamento)</label>
+          <input type="number" id="inpChaveBusca" placeholder="ex: 81094">
+        </div>
+        <button onclick="buscarPorChave()" class="btn btn-secondary btn-sm">Buscar</button>
+      </div>
+      <div id="resultChave" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
 
       ${!gruposMulti.length
         ? `<div style="padding:14px;background:rgba(124,106,247,.07);border-radius:8px;border:1px solid var(--border)">
@@ -4568,7 +4625,7 @@ function renderOtimDeslig(obras_list, nivel){
 // ══════════════════════════════════════════════════════════════════════
 function renderOtimizacaoPortfolio(){
   const cont=document.getElementById('pgOtimPortContent'); if(!cont) return;
-  if(!['gerente','fiscal'].includes(me.perfil)){
+  if(!['gerente','fiscal','fiscal_adm'].includes(me.perfil)){
     cont.innerHTML='<div class="empty"><p>Acesso restrito.</p></div>'; return;
   }
   const ativas=obras.filter(o=>!o.cancelado);
@@ -4670,4 +4727,170 @@ function renderDesligamentoPortfolio(obras_list, nivel){
           </div>`;
         }).join('')
     }`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  LOCAL DE TRABALHO — registrado pelo fiscal
+// ══════════════════════════════════════════════════════════════════════
+let _locaisPendentes = [];
+
+window.adicionarLocal = function(){
+  const desc = document.getElementById('oLocalDesc')?.value?.trim();
+  if(!desc){ toast('Descreva o local de trabalho.','err'); return; }
+  const id = `loc_${Date.now()}`;
+  _locaisPendentes.push({ id, data: hojeStr(), descricao: desc });
+  document.getElementById('oLocalDesc').value = '';
+  document.getElementById('frmNovoLocal').style.display = 'none';
+  document.getElementById('btnNovoLocal').style.display = 'inline-flex';
+  renderLocais();
+};
+
+function renderLocais(){
+  const container = document.getElementById('listaLocais'); if(!container) return;
+  const obraId = document.getElementById('obraId')?.value;
+  const obra = obras.find(o=>o.id===obraId);
+  const todos = [...(obra?.locaisTrabalho||[]), ..._locaisPendentes];
+  if(!todos.length){ container.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Nenhum local registrado.</div>'; return; }
+  container.innerHTML = todos.map(l=>`
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;margin-bottom:4px">
+      <span style="font-size:10px;color:var(--muted);white-space:nowrap">${fmtTxt(l.data)}</span>
+      <span style="font-size:11px;flex:1">${l.descricao}</span>
+      ${_locaisPendentes.some(p=>p.id===l.id)?`<button onclick="removerLocal('${l.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px">✕</button>`:''}
+    </div>`).join('');
+}
+
+window.removerLocal = function(id){
+  _locaisPendentes = _locaisPendentes.filter(l=>l.id!==id);
+  renderLocais();
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  BUSCA POR CHAVE DE ABERTURA no Portfólio e Otimização
+// ══════════════════════════════════════════════════════════════════════
+window.buscarPorChave = function(poolParam){
+  const nr = parseInt(document.getElementById('inpChaveBusca')?.value || document.getElementById('inpChaveBuscaPort')?.value);
+  if(!nr || isNaN(nr)){ toast('Digite o número do equipamento de abertura.','err'); return; }
+  if(!window._equipDB.size){ toast('Base de equipamentos não carregada.','warn'); return; }
+  const pool = poolParam || obras.filter(o=>!o.cancelado&&o.equipamentoRef);
+  const resultado = [];
+  pool.forEach(o=>{
+    if(!o.equipamentoRef) return;
+    const chain = findSwitchChain(o.equipamentoRef);
+    if(chain.some(c=>c.nr===nr)) resultado.push({o, chain, nivel: chain.findIndex(c=>c.nr===nr)+1});
+  });
+  const elId = poolParam ? 'resultChavePort' : 'resultChave';
+  const cont = document.getElementById(elId); if(!cont) return;
+  if(!resultado.length){
+    cont.innerHTML = `<div style="color:var(--muted);font-size:11px">Nenhuma obra encontrada na cadeia de desligamento do equipamento ${nr}.</div>`;
+    return;
+  }
+  cont.innerHTML = `
+    <div style="font-weight:700;color:var(--accent);margin-bottom:8px">${resultado.length} obra(s) desligadas pela chave <strong>${nr}</strong>:</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Nº Obra</th><th>Equip. Ref.</th><th>Cidade</th><th>Empreiteira</th><th>Status</th><th>Nível</th></tr></thead>
+      <tbody>${resultado.map(r=>`<tr>
+        <td><strong>${r.o.numero}</strong></td>
+        <td>${r.o.equipamentoRef}</td>
+        <td>${r.o.cidade||'—'}</td>
+        <td style="color:var(--accent)">${r.o.empreiteira||'—'}</td>
+        <td>${statusOf(r.o)}</td>
+        <td><span style="background:var(--accent);color:#000;padding:1px 8px;border-radius:10px;font-size:9px">${r.nivel}° nível</span></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  DASHBOARD SUMMARIES — Fiscal e Empreiteira
+// ══════════════════════════════════════════════════════════════════════
+function renderDashSummaryFiscal(minhas){
+  const hoje = hojeStr();
+  const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
+  const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado);
+
+  // Aguardando fiscalização: concluída, sem fiscalização
+  const agFisc = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
+  // Aguardando medição: fiscalizada, sem medição
+  const agMed = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
+  // Med.280 urgente: tem Med.230, sem Med.280, prazo de Med.280 vence este mês
+  const med280urgente = ativas.filter(o=>{
+    if(!o.medida230||o.medida280) return false;
+    const prazo280 = prazoMedida280(o);
+    return prazo280 && prazo280 <= fimMes;
+  });
+
+  const cardStyle = "background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px";
+  const listaObras = (list, cor) => list.length===0
+    ? `<div style="font-size:11px;color:var(--muted)">Nenhuma obra nesta situação. ✓</div>`
+    : `<div style="display:flex;flex-direction:column;gap:4px">${list.slice(0,8).map(o=>
+        `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:var(--bg);border-radius:4px;cursor:pointer" onclick="showPage('pgObras')">
+          <strong style="color:var(--accent)">${o.numero}</strong>
+          <span style="color:var(--muted)">${o.cidade||'—'}</span>
+          <span style="color:var(--muted)">${o.empreiteira||'—'}</span>
+        </div>`).join('')}
+      ${list.length>8?`<div style="font-size:10px;color:var(--muted);text-align:center">... e mais ${list.length-8}</div>`:''}
+    </div>`;
+
+  return `
+    <div style="${cardStyle};border-left:3px solid #3B82F6">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:12px">🔍 Aguardando Fiscalização</div>
+        <span style="background:#3B82F6;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agFisc.length}</span>
+      </div>
+      ${listaObras(agFisc,'#3B82F6')}
+    </div>
+    <div style="${cardStyle};border-left:3px solid #F59E0B">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:12px">📐 Aguardando Medição</div>
+        <span style="background:#F59E0B;color:#000;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agMed.length}</span>
+      </div>
+      ${listaObras(agMed,'#F59E0B')}
+    </div>
+    <div style="${cardStyle};border-left:3px solid #EF4444">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês</div>
+        <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${med280urgente.length}</span>
+      </div>
+      ${listaObras(med280urgente,'#EF4444')}
+    </div>`;
+}
+
+function renderDashSummaryEmpreiteira(minhas){
+  const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
+  const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
+  // Aguardando kaffa: obra aberta, sem kaffa registrado
+  const agKaffa = ativas.filter(o=>!o.kaffa);
+  // Kaffa urgente: obra com medida 230, sem medida 280, prazo 280 vence este mês
+  const kaffaUrgente = minhas.filter(o=>{
+    if(!o.medida230||o.medida280||o.armazenado) return false;
+    const prazo280 = prazoMedida280(o);
+    return prazo280 && prazo280 <= fimMes;
+  });
+
+  const cardStyle = "background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px";
+  const listaObras = list => list.length===0
+    ? `<div style="font-size:11px;color:var(--muted)">Nenhuma obra nesta situação. ✓</div>`
+    : `<div style="display:flex;flex-direction:column;gap:4px">${list.slice(0,8).map(o=>
+        `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:var(--bg);border-radius:4px;cursor:pointer" onclick="showPage('pgObras')">
+          <strong style="color:var(--accent)">${o.numero}</strong>
+          <span style="color:var(--muted)">${o.cidade||'—'}</span>
+          <span style="color:var(--muted)">${statusOf(o)}</span>
+        </div>`).join('')}
+      ${list.length>8?`<div style="font-size:10px;color:var(--muted);text-align:center">... e mais ${list.length-8}</div>`:''}
+    </div>`;
+
+  return `
+    <div style="${cardStyle};border-left:3px solid #7c6af7">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:12px">⚡ Aguardando Registro de Kaffa</div>
+        <span style="background:#7c6af7;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agKaffa.length}</span>
+      </div>
+      ${listaObras(agKaffa)}
+    </div>
+    <div style="${cardStyle};border-left:3px solid #EF4444">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês</div>
+        <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${kaffaUrgente.length}</span>
+      </div>
+      ${listaObras(kaffaUrgente)}
+    </div>`;
 }
