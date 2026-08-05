@@ -425,14 +425,31 @@
         </div>
         <!-- Dados do transformador — visível SOMENTE para empreiteira, dentro do kaffa -->
         <div style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)" id="secConclusaoExtra">
-          <div id="transDataNota" class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador — preencha uma única vez.</div>
+          <div id="transDataNota" class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador Instalado — preencha uma única vez.</div>
           <div class="fg-grid">
             <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
-            <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
+            <div class="fg"><label>Potência (kVA)</label><input type="number" id="oPotencia" placeholder="Ex: 30" min="0" step="0.1"></div>
           </div>
           <div class="fg-grid">
+            <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
             <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
-            <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
+          </div>
+          <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
+          <!-- Equipamento Retirado -->
+          <div class="toggle-row" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+            <label class="toggle"><input type="checkbox" id="oTemRetirado" onchange="toggleRetirado()"><span class="toggle-slider"></span></label>
+            <span class="toggle-lbl">🔄 Existe equipamento retirado da rede</span>
+          </div>
+          <div id="secRetirado" style="display:none;margin-top:10px;padding:12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px">
+            <div class="modal-note" style="margin-bottom:8px;color:#EF4444">⬇️ Dados do Transformador Retirado</div>
+            <div class="fg-grid">
+              <div class="fg"><label>Potência Retirada (kVA)</label><input type="number" id="oPotenciaRet" placeholder="Ex: 15" min="0" step="0.1"></div>
+              <div class="fg"><label>Nº SAP Retirado</label><input type="text" id="oSAPRet" placeholder="Nº SAP"></div>
+            </div>
+            <div class="fg-grid">
+              <div class="fg"><label>Nº Série Retirado</label><input type="text" id="oSerieRet" placeholder="Nº Série"></div>
+              <div class="fg"><label>Fabricante Retirado</label><input type="text" id="oFabricanteRet" placeholder="Fabricante"></div>
+            </div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px">
@@ -467,16 +484,40 @@
     <!-- Dados do transformador — leitura para fiscal/gerente quando empreiteira já informou -->
     <div id="secTransfView" style="display:none;margin-bottom:14px;padding:12px;background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:8px">
       <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🔩 Dados do Transformador (informado pela empreiteira)</div>
+      <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px">INSTALADO</div>
       <div class="fg-grid">
-        <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacasView" disabled></div>
+        <div class="fg"><label>Placas</label><input type="text" id="oPlacasView" disabled></div>
+        <div class="fg"><label>Potência (kVA)</label><input type="text" id="oPotenciaView" disabled></div>
         <div class="fg"><label>Nº SAP</label><input type="text" id="oSAPView" disabled></div>
-      </div>
-      <div class="fg-grid">
         <div class="fg"><label>Nº Série</label><input type="text" id="oSerieView" disabled></div>
         <div class="fg"><label>Fabricante</label><input type="text" id="oFabricanteView" disabled></div>
       </div>
+      <div id="secRetiradoView" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(239,68,68,.3)">
+        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">⬇️ RETIRADO</div>
+        <div class="fg-grid">
+          <div class="fg"><label>Potência Ret. (kVA)</label><input type="text" id="oPotenciaRetView" disabled></div>
+          <div class="fg"><label>Nº SAP Ret.</label><input type="text" id="oSAPRetView" disabled></div>
+          <div class="fg"><label>Nº Série Ret.</label><input type="text" id="oSerieRetView" disabled></div>
+          <div class="fg"><label>Fabricante Ret.</label><input type="text" id="oFabricanteRetView" disabled></div>
+        </div>
+      </div>
     </div>
     <div class="fg"><label>Data de Fiscalização</label><input type="date" id="oFiscalizacao"></div>
+    <!-- Locais de Trabalho — cadastrados pelo fiscal -->
+    <div id="secLocaisTrabalho" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📍 Locais de Trabalho</div>
+      <div id="listaLocais" style="margin-bottom:8px"></div>
+      <div id="frmNovoLocal" style="display:none;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
+        <div class="fg"><label>Descrição do Local</label>
+          <input type="text" id="oLocalDesc" placeholder="Ex: Placa 28126 - RD.123456" maxlength="120">
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-primary btn-sm" onclick="adicionarLocal()">✓ Adicionar Local</button>
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('frmNovoLocal').style.display='none'">Cancelar</button>
+        </div>
+      </div>
+      <button id="btnNovoLocal" class="btn btn-secondary btn-sm" onclick="document.getElementById('frmNovoLocal').style.display='block';document.getElementById('btnNovoLocal').style.display='none'">+ Registrar Local de Trabalho</button>
+    </div>
     <div class="toggle-row">
       <label class="toggle"><input type="checkbox" id="oTemPendencia" onchange="togglePendencia()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Existe pendência na obra</span>
@@ -664,6 +705,7 @@
       <option value="">— selecione —</option>
       <option value="gerente">Gerente</option>
       <option value="fiscal">Fiscal</option>
+            <option value="fiscal_adm">Fiscal Administrativo</option>
       <option value="empreiteira">Empreiteira</option>
       <option value="genesis">Genesis</option>
       <option value="estagiario">Estagiário</option>
