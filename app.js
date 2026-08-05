@@ -1483,10 +1483,11 @@ window.openObraModal=function(obraId){
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Preenche view-only do transformador para fiscal e gerente
+    // Preenche campos de visualização do transformador (são <input disabled>, usar .value)
     ['oPlacasView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
       const val=[obra.placas,obra.sap,obra.serie,obra.fabricante][i];
       const el=document.getElementById(id);
-      if(el){ el.textContent=val||'—'; } // use textContent (são <div>, não <input>)
+      if(el){ el.value = val||''; }
     });
     // Mostra data de regularização na confirmação fiscal
     const infoReg=document.getElementById('infoRegularizacao');
@@ -1728,26 +1729,31 @@ window.abrirNovoKaffa = function(){
   if(hasFinal){ toast('Esta obra já possui kaffa final registrado.','warn'); return; }
   document.getElementById('frmNovoKaffa').style.display='block';
   document.getElementById('btnNovoKaffa').style.display='none';
-  // Transformer fields: only for empreiteira; readonly if already set
+  // Campos do transformador: só para empreiteira, só no 1° kaffa
   if(me.perfil==='empreiteira'){
     const secExtra=document.getElementById('secConclusaoExtra');
     if(secExtra){
-      secExtra.style.display='block';
       const obraAtual=obras.find(o=>o.id===document.getElementById('obraId')?.value);
       const jaSet=obraAtual?.placas||obraAtual?.sap;
-      const nota=document.getElementById('transDataNota');
-      ['oPlacas','oSAP','oSerie','oFabricante'].forEach((id,i)=>{
-        const el=document.getElementById(id); if(!el) return;
-        if(jaSet){
-          el.value=[obraAtual.placas,obraAtual.sap,obraAtual.serie,obraAtual.fabricante][i]||'';
-          el.disabled=true;
-        } else {
+      const jaTemKaffa=(obraAtual?.kaffaEntries?.length||0)+(_kaffasPendentes?.length||0);
+      // Mostrar somente se: (dados ainda não preenchidos) OU (dados preenchidos mas 1° kaffa)
+      // Para kaffas subsequentes (já existe kaffa parcial), não mostrar
+      if(!jaSet || jaTemKaffa===0){
+        // Primeiro kaffa ou dados ainda não preenchidos → mostrar para preencher
+        secExtra.style.display='block';
+        const nota=document.getElementById('transDataNota');
+        ['oPlacas','oSAP','oSerie','oFabricante'].forEach((id,i)=>{
+          const el=document.getElementById(id); if(!el) return;
+          el.value=[obraAtual?.placas,obraAtual?.sap,obraAtual?.serie,obraAtual?.fabricante][i]||'';
           el.disabled=false;
-        }
-      });
-      if(nota) nota.innerHTML=jaSet
-        ?'🔩 Dados do Transformador — <strong style="color:var(--accent)">já registrados</strong> (somente leitura).'
-        :'🔩 Dados do Transformador — preencha uma única vez.';
+        });
+        if(nota) nota.innerHTML=jaSet
+          ?'🔩 Dados do Transformador — confirme ou corrija os dados.'
+          :'🔩 Dados do Transformador — preencha uma única vez.';
+      } else {
+        // Kaffa subsequente e dados já preenchidos → ocultar (não solicitar novamente)
+        secExtra.style.display='none';
+      }
     }
   }
   document.getElementById('oKaffaData').value='';
@@ -2107,8 +2113,10 @@ window.saveObra=async function(){
           await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
       }
       // Email: obra concluída pela empreiteira → avisa fiscal
-      // Email imediato: conclusão informada por empreiteira OU gerente
-      if(!obraAntiga?.conclusao && patch.conclusao &&
+      // Email: conclusão informada ou atualizada por empreiteira OU gerente
+      // Dispara sempre que a data de conclusão MUDAR (primeira vez ou atualização)
+      if(patch.conclusao &&
+         patch.conclusao !== (obraAntiga?.conclusao||'') &&
          (me.perfil==='empreiteira'||me.perfil==='gerente'))
         await enviarEmailConclusao({...obraAntiga,...patch});
       if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia){
