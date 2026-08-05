@@ -382,8 +382,13 @@ function renderDash(){
   }
   else if(me.perfil === 'fiscal_adm'){
     // fiscal_adm dashboard: mostra SUAS obras (vinculo), igual ao fiscal normal
-    const minhasFiscalAdm = obras.filter(o=>o.fiscal===me.vinculo&&!o.cancelado);
-    html += renderDashFiscal(minhasFiscalAdm, me.vinculo);
+    // Protege contra vinculo vazio — sem vinculo, não mostra obras de outros
+    const vincAdm = me.vinculo?.trim();
+    const minhasFiscalAdm = vincAdm
+      ? obras.filter(o=>o.fiscal===vincAdm&&!o.cancelado)
+      : [];
+    if(!vincAdm) toast('⚠️ Fiscal Administrativo sem vínculo cadastrado. Configure o vínculo no perfil do usuário.','warn');
+    html += renderDashFiscal(minhasFiscalAdm, vincAdm||'(sem vínculo)');
   }
   else if(me.perfil === 'empreiteira'){
     html += renderDashEmpreiteira(list);
@@ -2032,7 +2037,7 @@ window.saveObra=async function(){
         kaffa: lastKaffaG,
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
+        locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
@@ -2044,7 +2049,7 @@ window.saveObra=async function(){
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
         descricao:g('oDescricao')||null,
-        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
+        locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         potencia: g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado: document.getElementById('oTemRetirado')?.checked||false,
@@ -2088,7 +2093,7 @@ window.saveObra=async function(){
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
-        locaisTrabalho:(obra?.locaisTrabalho||[]).concat(_locaisPendentes),
+        locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'),
@@ -4788,7 +4793,15 @@ window.removerLocal = function(id){
 window.buscarPorChave = function(poolParam){
   const nr = parseInt(document.getElementById('inpChaveBusca')?.value || document.getElementById('inpChaveBuscaPort')?.value);
   if(!nr || isNaN(nr)){ toast('Digite o número do equipamento de abertura.','err'); return; }
-  if(!window._equipDB.size){ toast('Base de equipamentos não carregada.','warn'); return; }
+  if(!window._equipDB.size){
+    toast('⚠️ Base de equipamentos não carregada. Clique em "📡 Base Equipamentos" para carregar.','warn');
+    return;
+  }
+  // Verifica se o equipamento digitado existe na base
+  if(!window._equipDB.get(nr)){
+    toast(`Equipamento ${nr} não encontrado na base de equipamentos.`,'warn');
+    return;
+  }
   // Empreiteira: somente suas obras. Fiscal/Gerente/FiscalAdm: todo o portfólio
   const pool = poolParam || (
     me.perfil==='empreiteira'
@@ -4796,11 +4809,15 @@ window.buscarPorChave = function(poolParam){
       : obras.filter(o=>!o.cancelado&&o.equipamentoRef)
   );
   const resultado = [];
+  let semEquipRef=0, semChain=0, comChain=0;
   pool.forEach(o=>{
-    if(!o.equipamentoRef) return;
+    if(!o.equipamentoRef){ semEquipRef++; return; }
     const chain = findSwitchChain(o.equipamentoRef);
+    if(!chain.length){ semChain++; return; }
+    comChain++;
     if(chain.some(c=>c.nr===nr)) resultado.push({o, chain, nivel: chain.findIndex(c=>c.nr===nr)+1});
   });
+  console.log(`[BuscaChave] Equip ${nr}: pool=${pool.length} semEquipRef=${semEquipRef} semChain=${semChain} comChain=${comChain} resultado=${resultado.length}`);
   const elId = poolParam ? 'resultChavePort' : 'resultChave';
   const cont = document.getElementById(elId); if(!cont) return;
   if(!resultado.length){
