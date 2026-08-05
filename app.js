@@ -380,6 +380,11 @@ function renderDash(){
   else if(me.perfil === 'fiscal'){
     html += renderDashFiscal(list, me.vinculo);
   }
+  else if(me.perfil === 'fiscal_adm'){
+    // fiscal_adm dashboard: mostra SUAS obras (vinculo), igual ao fiscal normal
+    const minhasFiscalAdm = obras.filter(o=>o.fiscal===me.vinculo&&!o.cancelado);
+    html += renderDashFiscal(minhasFiscalAdm, me.vinculo);
+  }
   else if(me.perfil === 'empreiteira'){
     html += renderDashEmpreiteira(list);
   }
@@ -396,7 +401,7 @@ function renderDash(){
   setTimeout(() => {
     if(me.perfil === 'gerente' && dashPerspectiva === 'gerente')
       renderChartPendencias(visibleObras(), 'pendenciasChartGerente');
-    else if(me.perfil === 'fiscal')
+    else if(me.perfil === 'fiscal' || me.perfil === 'fiscal_adm')
       renderChartPendencias(obras.filter(o=>o.fiscal===me.vinculo), 'pendenciasChartFiscal');
     else if(me.perfil === 'gerente' && dashPerspectiva.startsWith('fiscal:'))
       renderChartPendencias(obras.filter(o=>o.fiscal===dashPerspectiva.replace('fiscal:','')), 'pendenciasChartFiscal');
@@ -4559,7 +4564,7 @@ function renderOtimDeslig(obras_list, nivel){
           <label style="font-size:10px">🔎 Buscar por Chave de Abertura (Nº Equipamento)</label>
           <input type="number" id="inpChaveBusca" placeholder="ex: 81094">
         </div>
-        <button onclick="buscarPorChave()" class="btn btn-secondary btn-sm">Buscar</button>
+        <button onclick="buscarPorChave(me.perfil==='empreiteira'?obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.empreiteira===me.vinculo):null)" class="btn btn-secondary btn-sm">Buscar</button>
       </div>
       <div id="resultChave" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
 
@@ -4650,6 +4655,19 @@ function renderOtimizacaoPortfolio(){
         <button onclick="buscarPortfolio()" class="btn btn-primary btn-sm">🔍 Buscar</button>
       </div>
       <div id="resultProxPort" style="font-size:11px;color:var(--muted)">Digite um número de equipamento para encontrar obras próximas em todo o portfólio.</div>
+    </div>
+
+    <!-- Busca por chave de abertura -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">🔎 Buscar por Chave de Abertura</div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+        <div class="fg" style="margin:0;min-width:180px">
+          <label>Nº do Equipamento de Abertura</label>
+          <input type="number" id="inpChaveBuscaPort" placeholder="ex: 81094">
+        </div>
+        <button onclick="buscarPorChave()" class="btn btn-primary btn-sm">🔍 Buscar no Portfólio</button>
+      </div>
+      <div id="resultChavePort" style="font-size:11px;color:var(--muted)">Digite o número do equipamento (chave, seccionalizador, etc.) para encontrar obras que dependem dele.</div>
     </div>
 
     <!-- Desligamento geral -->
@@ -4771,7 +4789,12 @@ window.buscarPorChave = function(poolParam){
   const nr = parseInt(document.getElementById('inpChaveBusca')?.value || document.getElementById('inpChaveBuscaPort')?.value);
   if(!nr || isNaN(nr)){ toast('Digite o número do equipamento de abertura.','err'); return; }
   if(!window._equipDB.size){ toast('Base de equipamentos não carregada.','warn'); return; }
-  const pool = poolParam || obras.filter(o=>!o.cancelado&&o.equipamentoRef);
+  // Empreiteira: somente suas obras. Fiscal/Gerente/FiscalAdm: todo o portfólio
+  const pool = poolParam || (
+    me.perfil==='empreiteira'
+      ? obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.empreiteira===me.vinculo)
+      : obras.filter(o=>!o.cancelado&&o.equipamentoRef)
+  );
   const resultado = [];
   pool.forEach(o=>{
     if(!o.equipamentoRef) return;
@@ -4811,9 +4834,13 @@ function renderDashSummaryFiscal(minhas){
   const agFisc = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
   // Aguardando medição: fiscalizada, sem medição
   const agMed = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
-  // Med.280 urgente: tem Med.230, sem Med.280, prazo de Med.280 vence este mês
+  // Med.280 urgente PENDENTE MEDIÇÃO:
+  // medida230 ✓ + kaffa ✓ (empreiteira fez) + medicao ✗ (fiscal ainda não fez) + medida280 ✗ + prazo vence este mês
   const med280urgente = ativas.filter(o=>{
-    if(!o.medida230||o.medida280) return false;
+    if(!o.medida230) return false;   // sem Med.230 → ainda não chegou nessa etapa
+    if(!o.kaffa) return false;       // empreiteira ainda não registrou kaffa → pendência prévia
+    if(o.medicao) return false;      // fiscal já fez medição → não é pendência do fiscal
+    if(o.medida280) return false;    // já tem Med.280 → concluído
     const prazo280 = prazoMedida280(o);
     return prazo280 && prazo280 <= fimMes;
   });
@@ -4847,7 +4874,7 @@ function renderDashSummaryFiscal(minhas){
     </div>
     <div style="${cardStyle};border-left:3px solid #EF4444">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês</div>
+        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês — Pendente Medição</div>
         <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${med280urgente.length}</span>
       </div>
       ${listaObras(med280urgente,'#EF4444')}
@@ -4859,9 +4886,10 @@ function renderDashSummaryEmpreiteira(minhas){
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
   // Aguardando kaffa: obra aberta, sem kaffa registrado
   const agKaffa = ativas.filter(o=>!o.kaffa);
-  // Kaffa urgente: obra com medida 230, sem medida 280, prazo 280 vence este mês
+  // Kaffa urgente PENDENTE KAFFA: obra com medida 230, sem kaffa registrado, sem med.280, prazo vence este mês
   const kaffaUrgente = minhas.filter(o=>{
-    if(!o.medida230||o.medida280||o.armazenado) return false;
+    if(!o.medida230 || o.medida280 || o.armazenado) return false;
+    if(o.kaffa) return false; // kaffa já registrado → não incluir
     const prazo280 = prazoMedida280(o);
     return prazo280 && prazo280 <= fimMes;
   });
@@ -4888,7 +4916,7 @@ function renderDashSummaryEmpreiteira(minhas){
     </div>
     <div style="${cardStyle};border-left:3px solid #EF4444">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês</div>
+        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês — Pendente Kaffa</div>
         <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${kaffaUrgente.length}</span>
       </div>
       ${listaObras(kaffaUrgente)}
