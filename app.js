@@ -1004,14 +1004,28 @@ function celulaPrazo(dias){
 
 // ── MONITOR DE PRAZOS ─────────────────────────────────────────────────
 function renderMonitorPrazos(list){
-  // Apenas obras que ainda precisam de medidas (não canceladas/paralisadas/encerradas)
+  const ativas    = list.filter(o => !o.cancelado && !o.armazenado);
+  const ativasRD  = ativas.filter(o => o.tipo !== 'ODI');
+  const ativasODI = ativas.filter(o => o.tipo === 'ODI');
+  if(ativasRD.length && ativasODI.length){
+    return renderMonitorPrazosTipo(ativasRD,  '🏗️ Obras RD (R1 + R2)', '#7c6af7') +
+           renderMonitorPrazosTipo(ativasODI, '🔧 Obras ODI',           '#ff6b35');
+  }
+  return renderMonitorPrazosTipo_inner(ativas);
+}
+
+function renderMonitorPrazosTipo(list, titulo, cor){
+  return `<div style="margin-bottom:8px;padding:10px 14px;background:${cor}18;border-left:3px solid ${cor};border-radius:6px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:${cor}">${titulo}</div>` +
+    renderMonitorPrazosTipo_inner(list);
+}
+
+function renderMonitorPrazosTipo_inner(list){
   const ativas = list.filter(o => !o.cancelado && !o.armazenado);
 
-  // Calcula dias para cada medida em cada obra
   function listaOrdenada(obrasArr, tipo){
     return obrasArr
       .map(o => ({ o, dias: diasParaMedida(o, tipo) }))
-      .filter(x => x.dias !== null) // null = já preenchida
+      .filter(x => x.dias !== null)
       .sort((a,b) => {
         if(a.dias < 0 && b.dias >= 0) return -1;
         if(a.dias >= 0 && b.dias < 0) return 1;
@@ -1019,99 +1033,77 @@ function renderMonitorPrazos(list){
       });
   }
 
-  // Obras que precisam de Med.70: tem conclusão, sem med70 (prazo = dataLimite)
-  const sem70  = ativas.filter(o => o.conclusao && !o.medida70 && o.tipo !== 'R2'); // R2 não exige Med.70
-  // Obras que precisam de Med.230: tem conclusão, sem med230 (prazo = dataLimite)
+  const sem70  = ativas.filter(o => o.conclusao && !o.medida70 && o.tipo !== 'R2');
   const sem230 = ativas.filter(o => o.conclusao && !o.medida230);
-  // Obras que precisam de Med.280: tem med230, sem med280
   const sem280 = ativas.filter(o => o.medida230 && !o.medida280);
 
   const ord70  = listaOrdenada(sem70,  'med70');
   const ord230 = listaOrdenada(sem230, 'med230');
   const ord280 = listaOrdenada(sem280, 'med280');
 
-  // Separar em "este mês + atrasadas" vs "próximos meses"
   const mesAtualFim = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
-  function splitMes(lista){ return { atual: lista.filter(x=>x.dias<=0||(diasRestantes(mesAtualFim)>=0&&x.dias<=diasRestantes(mesAtualFim))), proximo: lista.filter(x=>x.dias>0&&x.dias>diasRestantes(mesAtualFim)) }; }
-  const sp70=splitMes(ord70), sp230=splitMes(ord230), sp280=splitMes(ord280);
+  function splitMes(lista){
+    return {
+      atual:   lista.filter(x => x.dias <= 0 || (diasRestantes(mesAtualFim) >= 0 && x.dias <= diasRestantes(mesAtualFim))),
+      proximo: lista.filter(x => x.dias > 0 && x.dias > diasRestantes(mesAtualFim))
+    };
+  }
+  const sp70 = splitMes(ord70), sp230 = splitMes(ord230), sp280 = splitMes(ord280);
 
-  // Contadores por urgência para cada painel
   function contadores(lista){
     const venc  = lista.filter(x => x.dias < 0).length;
     const hoje  = lista.filter(x => x.dias === 0).length;
-    const urg   = lista.filter(x => x.dias >= 1 && x.dias <= 5).length;
-    const alrt  = lista.filter(x => x.dias >= 6 && x.dias <= 15).length;
-    const ok    = lista.filter(x => x.dias > 15).length;
-    return { venc, hoje, urg, alrt, ok };
+    const breve = lista.filter(x => x.dias > 0 && x.dias <= 5).length;
+    return { venc, hoje, breve, total: lista.length };
   }
 
-  function renderPainelMonitor(titulo, subtitulo, lista, tipo, corTopo, prazoFn){
+  function renderPainelMonitor(titulo, subtitulo, lista, tipo, cor, fnPrazo){
+    if(!lista.length) return '';
     const cnt = contadores(lista);
-    const totalPend = lista.length;
-    // Mini KPIs
-    const resumo = [
-      cnt.venc  > 0 ? `<span style="color:#6B7280;font-weight:700">${cnt.venc} vencidas</span>` : null,
-      cnt.hoje  > 0 ? `<span style="color:#EF4444;font-weight:700">${cnt.hoje} vencem hoje</span>` : null,
-      cnt.urg   > 0 ? `<span style="color:#EF4444;font-weight:600">${cnt.urg} críticas (≤5d)</span>` : null,
-      cnt.alrt  > 0 ? `<span style="color:#F59E0B;font-weight:600">${cnt.alrt} atenção (6–15d)</span>` : null,
-      cnt.ok    > 0 ? `<span style="color:#22C55E">${cnt.ok} ok (>15d)</span>` : null,
-    ].filter(Boolean).join(' · ');
-
-    // Tabela de obras (máx 10 linhas, ordenadas por urgência)
-    const linhas = lista.slice(0, 10).map(({o, dias}) => {
-      const c = corPrazo(dias);
-      const prazoLim = prazoFn(o);
-      const fc = o.fiscal ? gc(o.fiscal) : 'var(--muted)';
-      // Color obra number: red=vencida, orange=≤5d, green=>5d
-      const numCor = dias < 0 ? '#EF4444' : dias <= 5 ? '#F97316' : '#22C55E';
-      return `<tr>
-        <td><strong style="color:${numCor}">${o.numero||'—'}</strong></td>
-        <td style="font-size:10px">${o.cidade||'—'}</td>
-        <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
-          <span style="width:5px;height:5px;border-radius:50%;background:${fc};display:inline-block"></span>${o.fiscal||'—'}</span></td>
-        <td style="font-size:10px">${o.empreiteira||'—'}</td>
-        <td style="font-size:10px;color:var(--muted)">${fmt(o.dataLimite)}</td>
-        <td>
-          <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:${c.bg};color:${c.cor};border:1px solid ${c.cor}33;white-space:nowrap">
-            <span style="width:6px;height:6px;border-radius:50%;background:${c.cor};flex-shrink:0"></span>
-            ${c.label}
-          </span>
-        </td>
+    const badges = [
+      cnt.venc  ? `<span style="background:#EF4444;color:#fff;padding:1px 7px;border-radius:10px;font-size:9px">⏰ ${cnt.venc} vencidas</span>` : '',
+      cnt.hoje  ? `<span style="background:#F97316;color:#fff;padding:1px 7px;border-radius:10px;font-size:9px">❗ ${cnt.hoje} hoje</span>` : '',
+      cnt.breve ? `<span style="background:#FBBF24;color:#000;padding:1px 7px;border-radius:10px;font-size:9px">⚡ ${cnt.breve} ≤5d</span>` : '',
+    ].filter(Boolean).join(' ');
+    const linhas = lista.slice(0,12).map(x => {
+      const d = x.dias;
+      const cor2 = d < 0 ? '#EF4444' : d === 0 ? '#F97316' : d <= 5 ? '#FBBF24' : '#6b7280';
+      const txt  = d < 0 ? `Vencida há ${Math.abs(d)}d` : d === 0 ? 'Vence hoje!' : `${d}d restantes`;
+      const prazoData = fnPrazo(x.o);
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent)">${x.o.numero}</td>
+        <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.cidade||'—'}</td>
+        <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
+        <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
+        <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${prazoData?fmtTxt(prazoData):'—'}</td>
+        <td style="padding:5px 10px;font-size:10px;font-weight:700;color:${cor2}">${txt}</td>
       </tr>`;
     }).join('');
-
-    const maisTxt = lista.length > 10 ? `<tr><td colspan="6" style="text-align:center;font-size:10px;color:var(--muted);padding:8px">… e mais ${lista.length - 10} obras</td></tr>` : '';
-
+    const maisTxt = lista.length > 12 ? `<tr><td colspan="6" style="padding:5px 10px;font-size:10px;color:var(--muted)">... e mais ${lista.length-12} obra(s)</td></tr>` : '';
     return `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;border-top:3px solid ${corTopo}">
-      <div style="padding:14px 18px 10px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:10px 14px;background:${cor}12;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <div>
-            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:${corTopo}">${titulo}</div>
-            <div style="font-size:10px;color:var(--muted);margin-top:2px">${subtitulo}</div>
+            <span style="font-weight:700;font-size:12px">${titulo}</span>
+            ${subtitulo ? `<span style="font-size:9px;color:var(--muted);margin-left:6px">${subtitulo}</span>` : ''}
           </div>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-family:'Syne',sans-serif;font-size:24px;font-weight:800;color:${corTopo}">${totalPend}</span>
-            <span style="font-size:10px;color:var(--muted)">obras<br>pendentes</span>
-          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">${badges}</div>
         </div>
-        ${resumo ? `<div style="font-size:10px;margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">${resumo}</div>` : ''}
-      </div>
-      ${totalPend === 0
-        ? `<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">✅ Todas as obras com ${titulo} em dia!</div>`
-        : `<table style="width:100%;border-collapse:collapse">
-            <thead><tr style="background:var(--surface2)">
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Nº Obra</th>
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Cidade</th>
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Fiscal</th>
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Empreiteira</th>
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Prazo Limite</th>
-              <th style="padding:7px 12px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Situação</th>
-            </tr></thead>
-            <tbody>${linhas}${maisTxt}</tbody>
-          </table>`
-      }
-    </div>`;
+        ${!linhas
+          ? `<div style="padding:10px 14px;font-size:11px;color:var(--muted)">Nenhuma obra pendente.</div>`
+          : `<table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:var(--surface2)">
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Nº Obra</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Cidade</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Fiscal</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Empreiteira</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Prazo Limite</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Situação</th>
+              </tr></thead>
+              <tbody>${linhas}${maisTxt}</tbody>
+            </table>`
+        }
+      </div>`;
   }
 
   return `
@@ -1122,19 +1114,17 @@ function renderMonitorPrazos(list){
       </span>
     </div>
     <div style="display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:28px">
-        <!-- Monitor 1: Atrasadas + Este mês -->
       <div style="grid-column:1/-1">
         <div style="font-size:11px;font-weight:700;color:#EF4444;margin-bottom:10px;display:flex;align-items:center;gap:8px">
           🚨 Atrasadas + Vencem Este Mês
           <span style="font-size:9px;color:var(--muted);font-weight:400">Ação urgente necessária</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-bottom:20px">
-          ${renderPainelMonitor('Medida 70','Prazo = Data Limite · Indica: obra liberada no prazo',sp70.atual,'med70','#14B8A6',prazoMedida70e230)}
-          ${renderPainelMonitor('Medida 230','Prazo = Data Limite · Indica: execução no prazo',sp230.atual,'med230','#10B981',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 70','Prazo = Data Limite',sp70.atual,'med70','#14B8A6',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 230','Prazo = Data Limite',sp230.atual,'med230','#10B981',prazoMedida70e230)}
           ${renderPainelMonitor('Medida 280','Prazo = último dia mês seguinte à Med.230',sp280.atual,'med280','#22C55E',prazoMedida280)}
         </div>
       </div>
-      <!-- Monitor 2: Próximos meses -->
       <div style="grid-column:1/-1">
         <div style="font-size:11px;font-weight:700;color:#06B6D4;margin-bottom:10px;display:flex;align-items:center;gap:8px">
           📅 Vencem nos Próximos Meses
@@ -1148,6 +1138,7 @@ function renderMonitorPrazos(list){
       </div>
     </div>`;
 }
+
 
 // ── TABELA HEADERS ────────────────────────────────────
 function buildTableHeader(){
@@ -1191,8 +1182,8 @@ function buildTableHeader(){
     ${th('Dt. Kaffa','Data do kaffa (parcial ou final) registrado pela empreiteira')}
     ${th('Dt. Cadastro','Data de envio ao cadastro CELESC')}
     ${th('Dt. Medição','Data da medição realizada pelo fiscal')}
-    ${th('USC','Unidades de Serviço Celesc previstas na obra')}
-    ${th('ULV','Unidades de Ligação e Variação previstas')}
+    ${sth('USC','usc','USC previsto — clique para ordenar do maior para o menor')}
+    ${sth('ULV','ulv','ULV previsto — clique para ordenar')}
     ${th('Tipo Medição','Tipo da última medição registrada: Parcial ou Final')}`;
 
   if(!isEmp){
@@ -1260,10 +1251,23 @@ function renderObras(){
   let list = aplicarFiltros(baseList);
   // Fix #6: apply column sort
   if(_sortCol){
+    const DATE_COLS = new Set(['dataLimite','conclusao','dataAbertura','fiscalizacao',
+      'medida70','medida230','medida280','kaffa','medicao','descricao']);
     list = [...list].sort((a,b)=>{
-      let va=a[_sortCol]||'', vb=b[_sortCol]||'';
+      let va=a[_sortCol]??'', vb=b[_sortCol]??'';
+      // USC/ULV: numérico
+      if(_sortCol==='usc'||_sortCol==='ulv'){ va=parseFloat(va)||0; vb=parseFloat(vb)||0; }
+      // Dias (prazo): numérico
       if(_sortCol==='dias'){ va=a.dataLimite?diff(hojeStr(),a.dataLimite):9999; vb=b.dataLimite?diff(hojeStr(),b.dataLimite):9999; va=va||0; vb=vb||0; }
+      // Numérico
       if(typeof va==='number') return _sortDir*(va-vb);
+      // Datas ISO (YYYY-MM-DD) e strings: nulos sempre vão para o final
+      if(!va && vb) return 1;   // nulo → final, independente da direção
+      if(va && !vb) return -1;  // nulo → final
+      if(!va && !vb) return 0;
+      // Datas: comparação direta de string ISO (lexicográfico = cronológico)
+      if(DATE_COLS.has(_sortCol)) return _sortDir*(va<vb?-1:va>vb?1:0);
+      // Strings genéricas
       return _sortDir*String(va).localeCompare(String(vb),'pt');
     });
   }
@@ -2355,7 +2359,7 @@ A empreiteira ${obra.empreiteira} registrou o seguinte:
 Aguarda medição correspondente.`,
     fiscal.email, EMAILJS_CONFIG.emailGerente
   );
-  await marcarEnviado(chave);
+  // (kaffa tipo+data é naturalmente único — sem marcarEnviado)
 }
 
 async function enviarEmailConclusao(obra){
@@ -2376,7 +2380,7 @@ A empreiteira ${obra.empreiteira} informou conclusão da obra.
 Aguarda fiscalização.`,
     fiscal.email, EMAILJS_CONFIG.emailGerente
   );
-  await marcarEnviado(chave);
+  // (sem marcarEnviado — condição !obraAntiga?.conclusao previne reenvio)
 }
 
 async function enviarEmailPendencia(obra){
@@ -2398,7 +2402,7 @@ Foi registrada uma pendência na sua obra.
 Acesse o sistema SPPC ARLAG para regularizar.`,
     emp.email, EMAILJS_CONFIG.emailGerente
   );
-  await marcarEnviado(chave);
+  // (sem marcarEnviado)
 }
 
 async function enviarEmailRegularizacao(obra){
@@ -3545,9 +3549,11 @@ function renderCarteira(){
 
   // ── 3. Gráficos mensais por empreiteira (vencimento + conclusão) ──
   // Detecta as duas principais empreiteiras (CS e ELETELSUL)
-  const empPrincipais = emprNames.filter(e=>
-    e.toUpperCase().includes('CS') || e.toUpperCase().includes('ELET')
-  ).slice(0,4); // máx 4
+  // Análise mensal: SOMENTE para CS ELETRICIDADE e ELETELSUL (empreiteiras de obras RD)
+  const EMP_ANALISE = ['CS ELETRICIDADE', 'ELETELSUL'];
+  const empPrincipais = emprNames.filter(e =>
+    EMP_ANALISE.some(ref => e.toUpperCase().includes(ref))
+  );
 
   if(empPrincipais.length){
     html += `<div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">Análise Mensal por Empreiteira</div>`;
