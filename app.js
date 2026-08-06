@@ -150,7 +150,7 @@ onAuthStateChanged(auth, async user=>{
     if(!snap.exists()){ await signOut(auth); return; }
     me={uid:user.uid,email:user.email,...snap.data()};
     iniciarApp();
-    verificarNotificacoes();
+    // verificarNotificacoes removido — controle de prazos via dashboard do fiscal
   } else {
     me=null;
     document.getElementById('loginScreen').style.display='flex';
@@ -2029,6 +2029,8 @@ window.saveObra=async function(){
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
+        // Reset ciente do fiscal quando empreiteira informa kaffa/conclusão
+        cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
@@ -2038,6 +2040,8 @@ window.saveObra=async function(){
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
+        // Reset cienMed quando fiscal confirma fiscalização
+        cienMed: g('oFiscalizacao') && g('oFiscalizacao')!==(obraAntiga?.fiscalizacao||'') ? false : undefined,
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
@@ -2071,6 +2075,8 @@ window.saveObra=async function(){
       const lastKaffaDate = allKaffasEmp.map(k=>k.data).filter(Boolean).sort().slice(-1)[0]||'';
       patch={
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
+        // Reset ciente do fiscal quando empreiteira informa kaffa/conclusão
+        cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
@@ -2094,6 +2100,8 @@ window.saveObra=async function(){
         desligamentoCanceladoMotivo:g('oDesligMotivo'),
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
+        // Reset cienMed quando fiscal confirma fiscalização
+        cienMed: g('oFiscalizacao') && g('oFiscalizacao')!==(obraAntiga?.fiscalizacao||'') ? false : undefined,
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         dataCadastro:g('oCadastro'),
@@ -2974,6 +2982,22 @@ window.toggleRetirado = function(){
   const chk = document.getElementById('oTemRetirado');
   document.getElementById('secRetirado').style.display = chk?.checked ? 'block' : 'none';
 };
+
+// ══ CIENTE — Fiscal marca como "visto" em cada fila do dashboard ════
+// tipos: 'fisc' (aguardando fiscalização), 'med' (aguardando medição), 'med280'
+window.marcarCiente = async function(obraId, tipo){
+  try{
+    const campo = {fisc:'cienFisc', med:'cienMed', med280:'cienMed280'}[tipo];
+    if(!campo) return;
+    await updateDoc(doc(db,'obras',obraId), {[campo]: true, atualizadaEm: serverTimestamp()});
+    toast('✓ Ciente registrado.','ok');
+    renderDash(); // atualiza dashboard
+  }catch(e){
+    console.error('[Ciente]', e.message);
+    toast('Erro ao registrar ciente.','err');
+  }
+};
+
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -4845,58 +4869,64 @@ window.buscarPorChave = function(poolParam){
 //  DASHBOARD SUMMARIES — Fiscal e Empreiteira
 // ══════════════════════════════════════════════════════════════════════
 function renderDashSummaryFiscal(minhas){
-  const hoje = hojeStr();
   const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado);
-
-  // Aguardando fiscalização: concluída, sem fiscalização
-  const agFisc = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  // Aguardando medição: fiscalizada, sem medição
-  const agMed = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
-  // Med.280 urgente PENDENTE MEDIÇÃO:
-  // medida230 ✓ + kaffa ✓ (empreiteira fez) + medicao ✗ (fiscal ainda não fez) + medida280 ✗ + prazo vence este mês
-  const med280urgente = ativas.filter(o=>{
-    if(!o.medida230) return false;   // sem Med.230 → ainda não chegou nessa etapa
-    if(!o.kaffa) return false;       // empreiteira ainda não registrou kaffa → pendência prévia
-    if(o.medicao) return false;      // fiscal já fez medição → não é pendência do fiscal
-    if(o.medida280) return false;    // já tem Med.280 → concluído
-    const prazo280 = prazoMedida280(o);
-    return prazo280 && prazo280 <= fimMes;
+  const agFisc      = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
+  const agMed       = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
+  const med280urg   = ativas.filter(o=>{
+    if(!o.medida230||!o.kaffa||o.medicao||o.medida280) return false;
+    const p=prazoMedida280(o);
+    return p && p<=fimMes;
   });
 
-  const cardStyle = "background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px";
-  const listaObras = (list, cor) => list.length===0
-    ? `<div style="font-size:11px;color:var(--muted)">Nenhuma obra nesta situação. ✓</div>`
-    : `<div style="display:flex;flex-direction:column;gap:4px">${list.slice(0,8).map(o=>
-        `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:var(--bg);border-radius:4px;cursor:pointer" onclick="showPage('pgObras')">
-          <strong style="color:var(--accent)">${o.numero}</strong>
-          <span style="color:var(--muted)">${o.cidade||'—'}</span>
-          <span style="color:var(--muted)">${o.empreiteira||'—'}</span>
-        </div>`).join('')}
-      ${list.length>8?`<div style="font-size:10px;color:var(--muted);text-align:center">... e mais ${list.length-8}</div>`:''}
-    </div>`;
+  const cardStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px';
+
+  function hexRgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)].join(','); }
+
+  function listaComCiente(list, campo, tipo, cor){
+    if(!list.length) return `<div style="font-size:11px;color:var(--muted)">Nenhuma obra. ✓</div>`;
+    return list.slice(0,10).map(o=>{
+      const visto = !!o[campo];
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;
+        background:${visto?'var(--bg)':'rgba('+hexRgb(cor)+',.07)'};
+        border:1px solid ${visto?'var(--border)':cor+'55'};border-radius:6px">
+        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${visto?'transparent':cor}"></span>
+        <strong style="color:var(--accent);font-size:11px;cursor:pointer" onclick="showPage('pgObras')">${o.numero}</strong>
+        <span style="font-size:10px;color:var(--muted);flex:1">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
+        ${!visto
+          ?`<button onclick="marcarCiente('${o.id}','${tipo}')"
+              style="background:${cor};color:#fff;border:none;border-radius:4px;padding:2px 10px;font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap">
+              ✓ Ciente
+            </button>`
+          :`<span style="font-size:9px;color:var(--muted);white-space:nowrap">✓ ciente</span>`}
+      </div>`;
+    }).join('')
+    +(list.length>10?`<div style="font-size:10px;color:var(--muted);padding-left:15px">... e mais ${list.length-10}</div>`:'');
+  }
+
+  function badge(n, cor){ return n>0?`<span style="background:#EF4444;color:#fff;padding:1px 7px;border-radius:8px;font-size:9px;margin-left:6px">${n} nova(s)</span>`:''; }
 
   return `
     <div style="${cardStyle};border-left:3px solid #3B82F6">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700;font-size:12px">🔍 Aguardando Fiscalização</div>
+        <div><span style="font-weight:700;font-size:12px">🔍 Aguardando Fiscalização</span>${badge(agFisc.filter(o=>!o.cienFisc).length,'#3B82F6')}</div>
         <span style="background:#3B82F6;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agFisc.length}</span>
       </div>
-      ${listaObras(agFisc,'#3B82F6')}
+      ${listaComCiente(agFisc,'cienFisc','fisc','#3B82F6')}
     </div>
     <div style="${cardStyle};border-left:3px solid #F59E0B">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700;font-size:12px">📐 Aguardando Medição</div>
+        <div><span style="font-weight:700;font-size:12px">📐 Aguardando Medição</span>${badge(agMed.filter(o=>!o.cienMed).length,'#F59E0B')}</div>
         <span style="background:#F59E0B;color:#000;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agMed.length}</span>
       </div>
-      ${listaObras(agMed,'#F59E0B')}
+      ${listaComCiente(agMed,'cienMed','med','#F59E0B')}
     </div>
     <div style="${cardStyle};border-left:3px solid #EF4444">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700;font-size:12px">🚨 Medida 280 — Fechar Este Mês — Pendente Medição</div>
-        <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${med280urgente.length}</span>
+        <div><span style="font-weight:700;font-size:12px">🚨 Med.280 — Fechar Este Mês — Pendente Medição</span>${badge(med280urg.filter(o=>!o.cienMed280).length,'#EF4444')}</div>
+        <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${med280urg.length}</span>
       </div>
-      ${listaObras(med280urgente,'#EF4444')}
+      ${listaComCiente(med280urg,'cienMed280','med280','#EF4444')}
     </div>`;
 }
 
