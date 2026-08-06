@@ -2250,7 +2250,7 @@ window.openUserModal=async function(uid){
       document.getElementById('uPerfil').value=u.perfil||'';
       onPerfilChange();
       if(u.perfil==='empreiteira') document.getElementById('uVincEmp').value=u.vinculo||'';
-      if(u.perfil==='fiscal') document.getElementById('uVincFis').value=u.vinculo||'';
+      if(u.perfil==='fiscal'||u.perfil==='fiscal_adm') document.getElementById('uVincFis').value=u.vinculo||'';
     }
     note.style.display='block';
   } else { note.style.display='none'; }
@@ -2260,7 +2260,8 @@ window.closeUserModal=function(){ document.getElementById('ovUser').classList.re
 window.onPerfilChange=function(){
   const p=document.getElementById('uPerfil').value;
   document.getElementById('fgVincEmp').style.display=p==='empreiteira'?'flex':'none';
-  document.getElementById('fgVincFis').style.display=p==='fiscal'?'flex':'none';
+  // fiscal E fiscal_adm precisam do campo "Nome do Fiscal (igual ao cadastro nas obras)"
+  document.getElementById('fgVincFis').style.display=(p==='fiscal'||p==='fiscal_adm')?'flex':'none';
   // genesis e estagiário: sem vínculo necessário
 };
 window.saveUser=async function(){
@@ -2274,7 +2275,7 @@ window.saveUser=async function(){
     const senha=document.getElementById('uSenha').value;
     const perfil=document.getElementById('uPerfil').value;
     const vinculo=perfil==='empreiteira'?document.getElementById('uVincEmp').value
-      :perfil==='fiscal'?document.getElementById('uVincFis').value.trim():'';
+      :(perfil==='fiscal'||perfil==='fiscal_adm')?document.getElementById('uVincFis').value.trim():'';
     if(!nome||!email||!perfil){ toast('Preencha todos os campos.','err'); return; }
 
     if(isEdit){
@@ -4569,7 +4570,7 @@ function renderOtimDeslig(obras_list, nivel){
           <label style="font-size:10px">🔎 Buscar por Chave de Abertura (Nº Equipamento)</label>
           <input type="number" id="inpChaveBusca" placeholder="ex: 81094">
         </div>
-        <button onclick="buscarPorChave(me.perfil==='empreiteira'?obras.filter(o=>!o.cancelado&&o.equipamentoRef&&o.empreiteira===me.vinculo):null)" class="btn btn-secondary btn-sm">Buscar</button>
+        <button onclick="buscarPorChave()" class="btn btn-secondary btn-sm">Buscar</button>
       </div>
       <div id="resultChave" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
 
@@ -4818,8 +4819,9 @@ window.buscarPorChave = function(poolParam){
     if(chain.some(c=>c.nr===nr)) resultado.push({o, chain, nivel: chain.findIndex(c=>c.nr===nr)+1});
   });
   console.log(`[BuscaChave] Equip ${nr}: pool=${pool.length} semEquipRef=${semEquipRef} semChain=${semChain} comChain=${comChain} resultado=${resultado.length}`);
-  const elId = poolParam ? 'resultChavePort' : 'resultChave';
-  const cont = document.getElementById(elId); if(!cont) return;
+  // Usa o elemento que existir no DOM atual (dependendo da aba ativa)
+  const cont = document.getElementById('resultChave') || document.getElementById('resultChavePort');
+  if(!cont){ console.warn('[BuscaChave] Nenhum elemento de resultado encontrado.'); return; }
   if(!resultado.length){
     cont.innerHTML = `<div style="color:var(--muted);font-size:11px">Nenhuma obra encontrada na cadeia de desligamento do equipamento ${nr}.</div>`;
     return;
