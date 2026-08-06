@@ -206,11 +206,15 @@ async function iniciarApp(){
   const btnApagarTodas=document.getElementById('btnApagarTodas');
   if(btnApagarTodas) btnApagarTodas.style.display=me.perfil==='gerente'?'inline-flex':'none';
   // Fix #2: bulk medidas button
-  const btnBulkMed=document.getElementById('btnBulkMedidas');
-  if(btnBulkMed){
-    btnBulkMed.style.display=['gerente','fiscal','fiscal_adm'].includes(me.perfil)?'inline-flex':'none';
-    btnBulkMed.onclick=window.abrirBulkMedidas;
-  }
+  // Botões de operação em lote por perfil
+  const isFiscalAll = ['gerente','fiscal','fiscal_adm'].includes(me.perfil);
+  const isEmpMain = me.perfil==='empreiteira';
+  const setBtn = (id, show) => { const el=document.getElementById(id); if(el) el.style.display=show?'inline-flex':'none'; };
+  setBtn('btnBulkMedidas', isFiscalAll);
+  setBtn('btnBulkFisc',    isFiscalAll);
+  setBtn('btnBulkMed',     isFiscalAll);
+  setBtn('btnBulkKaffa',   isEmpMain);
+  setBtn('btnBulkConc',    isEmpMain);
   buildTableHeader();
 
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
@@ -1249,7 +1253,8 @@ function renderObras(){
   let baseList = (() => {
     let b = obras;
     if(me.perfil==='empreiteira') b = b.filter(o => o.empreiteira===me.vinculo);
-    else if(me.perfil==='fiscal' && !window._bulkMedidasMode) b = b.filter(o => o.fiscal===me.vinculo);
+    else if(me.perfil==='fiscal' && !window._bulkMode) b = b.filter(o => o.fiscal===me.vinculo);
+    else if(me.perfil==='fiscal_adm' && !window._bulkMode) b = b.filter(o => o.fiscal===me.vinculo);
     // Tab filter — read from DOM attribute for reliability
     if(_tabAtual === 'RD')  b = b.filter(o => o.tipo !== 'ODI');
     if(_tabAtual === 'ODI') b = b.filter(o => o.tipo === 'ODI');
@@ -1317,7 +1322,7 @@ function renderObras(){
       ?`${fmtTxt((o.kaffaEntries||[]).slice(-1)[0]?.data)} <span class="chip ${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${(o.kaffaEntries||[]).slice(-1)[0]?.tipo==='final'?'Final':'Parc.'}</span>`
       :fmt(o.kaffa);
     // Row background color based on status
-    const isChkMode = document.getElementById('bulkMedidasBar')?.style.display!=='none';
+    const isChkMode = !!window._bulkMode; // qualquer modo de lote ativo
     const rowBg = o.processoCancelamento && !o.cancelado
       ? 'background:rgba(168,85,247,.08);border-left:2px solid #A855F7;'
       : (o.pendencia&&!o.pendenciaResolvida)
@@ -1332,7 +1337,7 @@ function renderObras(){
     return `<tr style="${rowBg}">
       <td class="col-chk" style="display:none;width:32px;padding:4px 8px">
         <input type="checkbox" class="chk-obra" data-id="${o.id}"
-          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkMedidasCount'); if(el) el.textContent=n+' obras selecionadas'; })()">
+          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obras selecionadas'; })()">
       </td>
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
@@ -2775,44 +2780,104 @@ window.exportCSVFiltrado = function() {
 
 
 
-// ══ FIX #2: ATUALIZAÇÃO DE MEDIDAS EM LOTE ═══════════════════════════
-window.abrirBulkMedidas = function(){
-  window._bulkMedidasMode = true; // Fix #3: fiscal vê todas as obras
-  document.getElementById('bulkMedidasBar').style.display='flex';
-  document.getElementById('btnBulkMedidas').textContent='✕ Cancelar';
-  document.getElementById('btnBulkMedidas').onclick = window.fecharBulkMedidas;
-  window.renderObras(); // CRÍTICO: re-renderiza mostrando TODAS as obras para seleção
+// ══ SISTEMA DE OPERAÇÕES EM LOTE (UNIFICADO) ═══════════════════════
+window._bulkMode = null; // 'medidas'|'fisc'|'medicao'|'kaffa'|'conclusao'
+window._bulkMedidasMode = false; // legado — mantido para compatibilidade
+
+const BULK_CONFIG = {
+  medidas:  { titulo:'📐 Medidas em Lote',       campos:'bulkCamposMedidas', perfis:['gerente','fiscal','fiscal_adm'] },
+  fisc:     { titulo:'🔍 Fiscalização em Lote',  campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
+  medicao:  { titulo:'📏 Medição em Lote',        campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
+  kaffa:    { titulo:'⚡ Kaffa em Lote',           campos:'bulkCamposKaffa',   perfis:['empreiteira'] },
+  conclusao:{ titulo:'✓ Conclusão em Lote',       campos:null,                perfis:['empreiteira'] },
 };
-window.fecharBulkMedidas = function(){
-  window._bulkMedidasMode = false; // Fix #3
-  document.getElementById('bulkMedidasBar').style.display='none';
-  document.getElementById('btnBulkMedidas').textContent='📐 Medidas em Lote';
-  document.getElementById('btnBulkMedidas').onclick = window.abrirBulkMedidas;
-  window.renderObras(); // Volta a mostrar só obras do fiscal
+
+window.abrirBulk = function(modo){
+  if(window._bulkMode === modo){ fecharBulk(); return; } // toggle
+  window._bulkMode = modo;
+  window._bulkMedidasMode = (modo==='medidas'); // legado
+  const cfg = BULK_CONFIG[modo];
+  // Esconde todos os campos específicos
+  ['bulkCamposMedidas','bulkCamposKaffa'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
+  // Mostra campos do modo
+  if(cfg.campos){ const el=document.getElementById(cfg.campos); if(el) el.style.display='flex'; }
+  document.getElementById('bulkBarTitulo').textContent = cfg.titulo;
+  document.getElementById('bulkBar').style.display = 'block';
+  document.getElementById('bulkData').value = '';
+  document.getElementById('bulkCount').textContent = '0 obras selecionadas';
+  window.renderObras();
 };
-window.confirmarBulkMedidas = async function(){
-  const selecionadas = [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id);
-  if(!selecionadas.length){ toast('Selecione pelo menos uma obra.','err'); return; }
-  const data = document.getElementById('bulkMedData').value;
+
+function fecharBulk(){
+  window._bulkMode = null;
+  window._bulkMedidasMode = false;
+  document.getElementById('bulkBar').style.display = 'none';
+  window.renderObras();
+}
+window.fecharBulk = fecharBulk;
+window.abrirBulkMedidas = ()=>window.abrirBulk('medidas'); // legado
+window.fecharBulkMedidas = fecharBulk; // legado
+
+function bulkSelecionadas(){ return [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id); }
+
+window.confirmarBulk = async function(){
+  const modo = window._bulkMode;
+  if(!modo){ toast('Nenhum modo de lote ativo.','err'); return; }
+  const ids = bulkSelecionadas();
+  if(!ids.length){ toast('Selecione pelo menos uma obra.','err'); return; }
+  const data = document.getElementById('bulkData').value;
   if(!data){ toast('Informe a data.','err'); return; }
   if(data > hojeStr()){ toast('Data não pode ser futura.','err'); return; }
-  const tipos = [...document.querySelectorAll('.chk-med-tipo:checked')].map(el=>el.value);
-  if(!tipos.length){ toast('Selecione pelo menos um tipo de medida.','err'); return; }
-  const btn = document.getElementById('btnBulkConfirmar');
-  btn.disabled=true; btn.textContent='Atualizando…';
+
   let count=0, erros=0;
-  for(const id of selecionadas){
-    const patch={atualizadaEm:serverTimestamp()};
-    if(tipos.includes('70'))  patch.medida70=data;
-    if(tipos.includes('230')) patch.medida230=data;
-    if(tipos.includes('280')) patch.medida280=data;
-    try{ await updateDoc(doc(db,'obras',id),patch); count++; }
-    catch(e){ console.error('Erro medida lote',id,e.message); erros++; }
+
+  for(const id of ids){
+    const obra = obras.find(o=>o.id===id);
+    const patch = {atualizadaEm:serverTimestamp()};
+    try{
+      if(modo==='medidas'){
+        const tipos=[...document.querySelectorAll('.chk-med-tipo:checked')].map(el=>el.value);
+        if(!tipos.length){ toast('Selecione pelo menos um tipo de medida.','err'); return; }
+        if(tipos.includes('70'))  patch.medida70=data;
+        if(tipos.includes('230')) patch.medida230=data;
+        if(tipos.includes('280')) patch.medida280=data;
+      }
+      else if(modo==='fisc'){
+        patch.fiscalizacao=data;
+        patch.cienFisc=true; // fiscal já está ciente
+      }
+      else if(modo==='medicao'){
+        patch.medicao=data;
+      }
+      else if(modo==='kaffa'){
+        const tipo = document.getElementById('bulkKaffaTipo').value;
+        const novoKaffa={id:`k_${Date.now()}_${id}`,data,tipo};
+        const existentes=obra?.kaffaEntries||[];
+        patch.kaffaEntries=[...existentes,novoKaffa];
+        patch.kaffa=data;
+        patch.cienFisc=false; // avisa fiscal
+        // Envia email ao fiscal
+        if(obra) await enviarEmailKaffa({...obra,...patch}, tipo, data);
+      }
+      else if(modo==='conclusao'){
+        patch.conclusao=data;
+        patch.cienFisc=false; // avisa fiscal
+        // Envia email ao fiscal
+        if(obra) await enviarEmailConclusao({...obra,...patch});
+      }
+      await updateDoc(doc(db,'obras',id),patch);
+      count++;
+    }catch(e){ console.error('[Bulk]',modo,id,e.message); erros++; }
   }
-  btn.disabled=false; btn.textContent='✓ Atualizar';
-  toast(erros?`${count} atualizadas, ${erros} com erro.`:`✓ ${count} obras atualizadas!`,(erros?'err':''));
-  window.fecharBulkMedidas();
+
+  toast(erros?`${count} atualizada(s), ${erros} com erro.`:`✓ ${count} obras atualizadas!`,(erros?'err':''));
+  fecharBulk();
 };
+
+// Legado
+window.confirmarBulkMedidas = ()=>window.confirmarBulk();
 
 
 // ══════════════════════════════════════════════════════════════════════
