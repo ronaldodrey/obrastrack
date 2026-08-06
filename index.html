@@ -58,7 +58,11 @@
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
         <button class="btn btn-secondary btn-sm" id="btnEquipDB" onclick="uploadEquipDB()" title="Carregar base de equipamentos para otimização" style="font-size:10px">📡 Base Equipamentos</button>
-        <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none">📐 Medidas em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none" onclick="abrirBulk('medidas')">📐 Medidas em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkFisc" style="display:none" onclick="abrirBulk('fisc')">🔍 Fiscalização em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkMed" style="display:none" onclick="abrirBulk('medicao')">📏 Medição em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkKaffa" style="display:none" onclick="abrirBulk('kaffa')">⚡ Kaffa em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkConc" style="display:none" onclick="abrirBulk('conclusao')">✓ Conclusão em Lote</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
     </div>
@@ -170,22 +174,34 @@
 
     <!-- FILTROS RÁPIDOS -->
     <!-- Bulk medidas bar -->
-  <div id="bulkMedidasBar" style="display:none;align-items:center;gap:12px;padding:10px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin:8px 0;flex-wrap:wrap">
-    <span style="font-size:11px;font-weight:700;color:var(--accent)">📐 Atualizar Medidas em Lote</span>
-    <span style="font-size:11px;color:var(--muted)">Marque as obras na tabela, selecione a(s) medida(s) e data:</span>
-    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
-      <input type="checkbox" class="chk-med-tipo" value="70"> Medida 70
-    </label>
-    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
-      <input type="checkbox" class="chk-med-tipo" value="230"> Medida 230
-    </label>
-    <label style="display:flex;align-items:center;gap:6px;font-size:11px">
-      <input type="checkbox" class="chk-med-tipo" value="280"> Medida 280
-    </label>
-    <input type="date" id="bulkMedData" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px">
-    <button id="btnBulkConfirmar" onclick="confirmarBulkMedidas()" class="btn btn-primary btn-sm">✓ Atualizar</button>
-    <span id="bulkMedidasCount" style="font-size:11px;color:var(--muted)"></span>
+  <!-- ── BARRAS DE LOTE UNIFICADAS ──────────────────────────────────── -->
+  <div id="bulkBar" style="display:none;padding:10px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin:8px 0">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span id="bulkBarTitulo" style="font-size:11px;font-weight:700;color:var(--accent)"></span>
+      <span style="font-size:11px;color:var(--muted)">→ Marque as obras na tabela abaixo, preencha os dados e clique em Aplicar</span>
+
+      <!-- Campos por modo -->
+      <span id="bulkCamposMedidas" style="display:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" class="chk-med-tipo" value="70"> Med. 70</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" class="chk-med-tipo" value="230"> Med. 230</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" class="chk-med-tipo" value="280"> Med. 280</label>
+      </span>
+
+      <span id="bulkCamposKaffa" style="display:none">
+        <label style="font-size:11px;margin-right:6px">Tipo:</label>
+        <select id="bulkKaffaTipo" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
+          <option value="parcial">Kaffa Parcial</option>
+          <option value="final">Kaffa Final</option>
+        </select>
+      </span>
+
+      <input type="date" id="bulkData" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px">
+      <button onclick="confirmarBulk()" class="btn btn-primary btn-sm">✓ Aplicar</button>
+      <span id="bulkCount" style="font-size:11px;color:var(--muted)">0 obras selecionadas</span>
+    </div>
   </div>
+  <!-- Manter ID legado para compatibilidade -->
+  <div id="bulkMedidasBar" style="display:none"></div>
 
   <div id="filtrosRapidos" style="margin-bottom:10px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
