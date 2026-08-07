@@ -1083,16 +1083,19 @@ function renderMonitorPrazosTipo_inner(list){
     ].filter(Boolean).join(' ');
     const linhas = lista.slice(0,12).map(x => {
       const d = x.dias;
-      const cor2 = d < 0 ? '#EF4444' : d === 0 ? '#F97316' : d <= 5 ? '#FBBF24' : '#6b7280';
-      const txt  = d < 0 ? `Vencida há ${Math.abs(d)}d` : d === 0 ? 'Vence hoje!' : `${d}d restantes`;
+      const cor2 = d < 0 ? '#EF4444' : d === 0 ? '#F97316' : d <= 5 ? '#FBBF24' : d <= 15 ? '#F59E0B' : '#6b7280';
+      const txt  = d < 0 ? `⚠️ Vencida há ${Math.abs(d)}d` : d === 0 ? '🔴 Vence hoje!' : `${d}d restantes`;
       const prazoData = fnPrazo(x.o);
+      const prazoFmt  = prazoData ? fmtTxt(prazoData) : '—';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent)">${x.o.numero}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.cidade||'—'}</td>
+        <td style="padding:5px 10px">
+          <span style="font-weight:700;font-size:11px;color:${cor2}">${prazoFmt}</span>
+          <span style="font-size:9px;color:${cor2};margin-left:4px;opacity:.85">${txt}</span>
+        </td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
-        <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${prazoData?fmtTxt(prazoData):'—'}</td>
-        <td style="padding:5px 10px;font-size:10px;font-weight:700;color:${cor2}">${txt}</td>
       </tr>`;
     }).join('');
     const maisTxt = lista.length > 12 ? `<tr><td colspan="6" style="padding:5px 10px;font-size:10px;color:var(--muted)">... e mais ${lista.length-12} obra(s)</td></tr>` : '';
@@ -1111,10 +1114,9 @@ function renderMonitorPrazosTipo_inner(list){
               <thead><tr style="background:var(--surface2)">
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Nº Obra</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Cidade</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Prazo Limite · Situação</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Fiscal</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Empreiteira</th>
-                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Prazo Limite</th>
-                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Situação</th>
               </tr></thead>
               <tbody>${linhas}${maisTxt}</tbody>
             </table>`
@@ -4992,7 +4994,9 @@ function renderDashSummaryEmpreiteira(minhas){
   const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
   // Aguardando kaffa: obra aberta, sem kaffa registrado
-  const agKaffa = ativas.filter(o=>!o.kaffa);
+  // Aguardando kaffa: obra COM conclusão informada mas SEM kaffa registrado
+  // (sem conclusão = obra não executada = não faz sentido aguardar kaffa)
+  const agKaffa = ativas.filter(o=>o.conclusao && !o.kaffa);
   // Kaffa urgente PENDENTE KAFFA: obra com medida 230, sem kaffa registrado, sem med.280, prazo vence este mês
   const kaffaUrgente = minhas.filter(o=>{
     if(!o.medida230 || o.medida280 || o.armazenado) return false;
