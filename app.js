@@ -1175,10 +1175,13 @@ function buildTableHeader(){
 
   // Colunas fixas (frozen/congeladas)
   const stickyStyle = 'position:sticky;z-index:2;background:var(--surface)';
-  const frozen1 = `<th style="${stickyStyle};left:0;min-width:120px" title="Status atual da obra">Status</th>`;
+  // Coluna de checkbox no modo lote
+  const chkTh = window._bulkMode ? `<th style="width:32px;padding:4px 8px;text-align:center"><input type="checkbox" id="chkTodos" onchange="document.querySelectorAll('.chk-obra').forEach(c=>c.checked=this.checked);const n=document.querySelectorAll('.chk-obra:checked').length;const el=document.getElementById('bulkCount');if(el)el.textContent=n+' obra(s) selecionada(s)';" title="Selecionar todas"></th>` : '';
+  const frozen1 = (window._bulkMode?'':'')+`<th style="${stickyStyle};left:0;min-width:120px" title="Status atual da obra">Status</th>`;
   const frozen2 = `<th style="${stickyStyle};left:120px;min-width:100px;cursor:pointer" onclick="window.sortObras('numero')" title="Número da obra — clique para ordenar">Nº <span style="font-size:8px;opacity:.6">${sortIcon('numero')}</span></th>`;
 
   let cols = `<tr>
+    ${chkTh}
     ${frozen1}
     ${frozen2}
     ${sth('Tipo','tipo','Tipo da obra: R1, R2 ou ODI')}
@@ -1263,6 +1266,7 @@ function renderObras(){
   if(_filtroRapidoAtivo === 'sem_medida70')    baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
+  else if(_filtroRapidoAtivo === 'sem_conclusao') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
   let list = aplicarFiltros(baseList);
@@ -1335,9 +1339,9 @@ function renderObras(){
       : '';
     const stk = 'position:sticky;z-index:1;background:' + (rowBg.includes('EF4444')?'rgba(20,5,5,1)':rowBg.includes('A855F7')?'rgba(15,5,20,1)':rowBg.includes('F97316')?'rgba(20,10,0,1)':'var(--surface)');
     return `<tr style="${rowBg}">
-      <td class="col-chk" style="display:none;width:32px;padding:4px 8px">
+      <td class="col-chk" style="display:${isChkMode?'table-cell':'none'};width:32px;padding:4px 8px;text-align:center">
         <input type="checkbox" class="chk-obra" data-id="${o.id}"
-          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obras selecionadas'; })()">
+          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obra(s) selecionada(s)'; })()">
       </td>
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
@@ -2788,7 +2792,6 @@ const BULK_CONFIG = {
   medidas:  { titulo:'📐 Medidas em Lote',       campos:'bulkCamposMedidas', perfis:['gerente','fiscal','fiscal_adm'] },
   fisc:     { titulo:'🔍 Fiscalização em Lote',  campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
   medicao:  { titulo:'📏 Medição em Lote',        campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
-  kaffa:    { titulo:'⚡ Kaffa em Lote',           campos:'bulkCamposKaffa',   perfis:['empreiteira'] },
   conclusao:{ titulo:'✓ Conclusão em Lote',       campos:null,                perfis:['empreiteira'] },
 };
 
@@ -2850,16 +2853,6 @@ window.confirmarBulk = async function(){
       }
       else if(modo==='medicao'){
         patch.medicao=data;
-      }
-      else if(modo==='kaffa'){
-        const tipo = document.getElementById('bulkKaffaTipo').value;
-        const novoKaffa={id:`k_${Date.now()}_${id}`,data,tipo};
-        const existentes=obra?.kaffaEntries||[];
-        patch.kaffaEntries=[...existentes,novoKaffa];
-        patch.kaffa=data;
-        patch.cienFisc=false; // avisa fiscal
-        // Envia email ao fiscal
-        if(obra) await enviarEmailKaffa({...obra,...patch}, tipo, data);
       }
       else if(modo==='conclusao'){
         patch.conclusao=data;
