@@ -61,7 +61,6 @@
         <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none" onclick="abrirBulk('medidas')">📐 Medidas em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkFisc" style="display:none" onclick="abrirBulk('fisc')">🔍 Fiscalização em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkMed" style="display:none" onclick="abrirBulk('medicao')">📏 Medição em Lote</button>
-        <button class="btn btn-secondary btn-sm" id="btnBulkKaffa" style="display:none" onclick="abrirBulk('kaffa')">⚡ Kaffa em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkConc" style="display:none" onclick="abrirBulk('conclusao')">✓ Conclusão em Lote</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
@@ -187,14 +186,6 @@
         <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" class="chk-med-tipo" value="280"> Med. 280</label>
       </span>
 
-      <span id="bulkCamposKaffa" style="display:none">
-        <label style="font-size:11px;margin-right:6px">Tipo:</label>
-        <select id="bulkKaffaTipo" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
-          <option value="parcial">Kaffa Parcial</option>
-          <option value="final">Kaffa Final</option>
-        </select>
-      </span>
-
       <input type="date" id="bulkData" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:11px">
       <button onclick="confirmarBulk()" class="btn btn-primary btn-sm">✓ Aplicar</button>
       <span id="bulkCount" style="font-size:11px;color:var(--muted)">0 obras selecionadas</span>
@@ -209,6 +200,7 @@
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida70')">📋 Sem Med. 70</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida230')">📋 Sem Med. 230</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('med230_sem280')">📋 Med.230 s/ 280</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_conclusao')">🔲 Sem Conclusão</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('encerradas')">✅ Encerradas completas</button>
           <button class="btn btn-secondary btn-sm" style="border-color:rgba(168,85,247,.4);color:#A855F7" onclick="filtroRapido('proc_cancelamento')">⏸ Proc. Cancelamento</button>
         <button class="btn btn-danger btn-sm" id="btnBulkDelete" style="display:none" onclick="bulkDeleteEncerradas()">🗑️ Excluir seleção</button>
