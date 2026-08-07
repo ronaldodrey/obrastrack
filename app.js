@@ -4993,10 +4993,9 @@ function renderDashSummaryFiscal(minhas){
 function renderDashSummaryEmpreiteira(minhas){
   const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
-  // Aguardando kaffa: obra aberta, sem kaffa registrado
-  // Aguardando kaffa: obra COM conclusão informada mas SEM kaffa registrado
-  // (sem conclusão = obra não executada = não faz sentido aguardar kaffa)
-  const agKaffa = ativas.filter(o=>o.conclusao && !o.kaffa);
+  // agKaffa vem de 'minhas' (não de 'ativas' que exclui obras com conclusão)
+  // Lógica: obra COM conclusão informada + SEM kaffa registrado = fiscal deve ser avisado
+  const agKaffa = minhas.filter(o => !o.cancelado && !o.armazenado && o.conclusao && !o.kaffa);
   // Kaffa urgente PENDENTE KAFFA: obra com medida 230, sem kaffa registrado, sem med.280, prazo vence este mês
   const kaffaUrgente = minhas.filter(o=>{
     if(!o.medida230 || o.medida280 || o.armazenado) return false;
