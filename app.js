@@ -1,5 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
+console.log('%c[SPPC] app.js v2608 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -1998,13 +1999,7 @@ window.saveObra=async function(){
       const kaffa=g('oKaffa')||(obraAntiga?.kaffa||'');
       const med=g('oMedicao')||(obraAntiga?.medicao||'');
       if(med&&kaffa&&med<kaffa) erros.push('Medição não pode ser anterior ao Kaffa.');
-      // Conclusão: só empreiteira precisa preencher placas/SAP
-      if(me.perfil==='empreiteira'&&g('oConclusao')){
-        // Placas podem ser preenchidas no kaffa ou na conclusão
-        if(!g('oSAP'))    erros.push('Informe o Nº SAP do Transformador.');
-        if(!g('oSerie'))  erros.push('Informe o Nº Série do Transformador.');
-        if(!g('oFabricante')) erros.push('Informe o Fabricante.');
-      }
+      // Dados do transformador (SAP, Série, Fabricante) são coletados no kaffa — não obrigatórios aqui
       const med230=g('oMedida230')||(obraAntiga?.medida230||'');
       if(g('oMedida280')&&!med230) erros.push('Medida 280 só pode ser preenchida após a Medida 230.');
       if(g('oRegularizacao')&&g('oRegularizacao')>hojeStr())
