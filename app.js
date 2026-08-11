@@ -214,6 +214,8 @@ async function iniciarApp(){
   setBtn('btnBulkMedidas', isFiscalAll);
   setBtn('btnBulkFisc',    isFiscalAll);
   setBtn('btnBulkMed',     isFiscalAll);
+  setBtn('btnBulkCad',     isFiscalAll);
+  setBtn('btnBulkConfCad', me.perfil==='gerente'||me.perfil==='genesis');
   setBtn('btnBulkKaffa',   isEmpMain);
   setBtn('btnBulkConc',    isEmpMain);
   buildTableHeader();
@@ -222,7 +224,11 @@ async function iniciarApp(){
   unsubObras=onSnapshot(q,snap=>{
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
-    if(active?.id==='pgDash'){ renderDash(); setTimeout(renderChart,200); }
+    if(active?.id==='pgDash'){ renderDash(); setTimeout(()=>{ 
+      const id = me?.perfil==='gerente'?'pendenciasChartGerente':me?.perfil==='empreiteira'?'pendenciasChartEmp':'pendenciasChartFiscal';
+      const list = me?.perfil==='gerente'?visibleObras():me?.perfil==='empreiteira'?obras.filter(o=>o.empreiteira===me.vinculo):obras.filter(o=>o.fiscal===me.vinculo);
+      renderChartPendencias(list, id);
+    },300); }
     if(active?.id==='pgObras') window.renderObras();
     if(active?.id==='pgCarteira') renderCarteira();
   });
@@ -1364,15 +1370,16 @@ function renderObras(){
       <td>${pendChip}</td>
       <td>${kaffaDisp}</td>
       <td>${o.dataCadastro?`<span style="color:${o.cadastroConfirmado?'var(--green)':'var(--text)'}">${fmtTxt(o.dataCadastro)}${o.cadastroConfirmado?' ✓':''}</span>`:'—'}</td>
-      <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
+      <td>${fmt(o.medicao)||'—'}</td>
       <td>${o.usc||'—'}</td>
       <td>${o.ulv||'—'}</td>
+      <td>${tipoMedicao(o)?`<span class="chip ${tipoMedicao(o)==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${tipoMedicao(o)==='final'?'✓ Final':'~ Parcial'}</span>`:'<span class="chip">—</span>'}</td>
       <td>${o.tipo==='R2'?'<span style="color:var(--muted);font-size:10px">N/A</span>':fmt(o.medida70)}</td>
       <td>${o.tipo==='R2'?'<span style="color:var(--muted)">—</span>':celulaPrazo(diasParaMedida(o,'med70'))}</td>
       <td>${fmt(o.medida230)}</td>
       <td>${celulaPrazo(diasParaMedida(o,'med230'))}</td>
       <td>${fmt(o.medida280)}</td>
-      <td>${celulaPrazo(diasParaMedida(o,'med280'))}</td>
+      <td style="font-size:10px;color:var(--muted)">${o.medida280Motivo||'—'}</td>
       <td>${armChip}</td>
       <td><div style="display:flex;gap:4px">${acts}</div></td>
     </tr>`;
@@ -1439,7 +1446,7 @@ window.openObraModal=function(obraId){
     }
     set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||'');
     // Transformer fields
-    set('oPotencia',obra.potencia||''); set('oPotenciaRet',obra.potenciaRet||'');
+    set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
     const retChk=document.getElementById('oTemRetirado'); if(retChk){ retChk.checked=!!obra.temRetirado; toggleRetirado(); } set('oDesligamento',obra.dataDesligamento);
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
@@ -1512,7 +1519,7 @@ window.openObraModal=function(obraId){
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Preenche view-only do transformador para fiscal e gerente
     // Preenche campos de visualização do transformador
-    const transf_vals=[obra.placas,obra.potencia,obra.sap,obra.serie,obra.fabricante];
+    const transf_vals=[obra.placas,obra.potencia,obra.sap,obra.serie,obra.fabricante,obra.dataTransf];
     ['oPlacasView','oPotenciaView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
       const el=document.getElementById(id); if(el) el.value=transf_vals[i]||'';
     });
@@ -2038,6 +2045,7 @@ window.saveObra=async function(){
         // Reset ciente do fiscal quando empreiteira informa kaffa/conclusão
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
+        dataTransf:g('oDataTransf')||null,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -2061,6 +2069,7 @@ window.saveObra=async function(){
         descricao:g('oDescricao')||null,
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
+        dataTransf:g('oDataTransf')||null,
         potencia: g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado: document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet: g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
@@ -2084,6 +2093,7 @@ window.saveObra=async function(){
         // Reset ciente do fiscal quando empreiteira informa kaffa/conclusão
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
+        dataTransf:g('oDataTransf')||null,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -2786,10 +2796,12 @@ window._bulkMode = null; // 'medidas'|'fisc'|'medicao'|'kaffa'|'conclusao'
 window._bulkMedidasMode = false; // legado — mantido para compatibilidade
 
 const BULK_CONFIG = {
-  medidas:  { titulo:'📐 Medidas em Lote',       campos:'bulkCamposMedidas', perfis:['gerente','fiscal','fiscal_adm'] },
-  fisc:     { titulo:'🔍 Fiscalização em Lote',  campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
-  medicao:  { titulo:'📏 Medição em Lote',        campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
-  conclusao:{ titulo:'✓ Conclusão em Lote',       campos:null,                perfis:['empreiteira'] },
+  medidas:  { titulo:'📐 Medidas em Lote',          campos:'bulkCamposMedidas', perfis:['gerente','fiscal','fiscal_adm'] },
+  fisc:     { titulo:'🔍 Fiscalização em Lote',     campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
+  medicao:  { titulo:'📏 Medição em Lote',           campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
+  cadastro: { titulo:'📋 Envio ao Cadastro em Lote',campos:null,                perfis:['gerente','fiscal','fiscal_adm'] },
+  confcad:  { titulo:'✅ Confirmar Cadastro em Lote',campos:null,               perfis:['gerente','genesis'] },
+  conclusao:{ titulo:'✓ Conclusão em Lote',          campos:null,               perfis:['empreiteira'] },
 };
 
 window.abrirBulk = function(modo){
@@ -2851,10 +2863,16 @@ window.confirmarBulk = async function(){
       else if(modo==='medicao'){
         patch.medicao=data;
       }
+      else if(modo==='cadastro'){
+        patch.dataCadastro=data;
+      }
+      else if(modo==='confcad'){
+        patch.dataCadastro=obraAntiga?.dataCadastro||data;
+        patch.cadastroConfirmado=true;
+      }
       else if(modo==='conclusao'){
         patch.conclusao=data;
-        patch.cienFisc=false; // avisa fiscal
-        // Envia email ao fiscal
+        patch.cienFisc=false;
         if(obra) await enviarEmailConclusao({...obra,...patch});
       }
       await updateDoc(doc(db,'obras',id),patch);
@@ -4926,13 +4944,21 @@ window.buscarPorChave = function(poolParam){
 function renderDashSummaryFiscal(minhas){
   const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado);
-  const agFisc      = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  const agMed       = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
+  // Bug 5: obra aparece em apenas 1 card (maior prioridade ganha)
+  // Prioridade: med280urg > agMed > agFisc
+  const agFisc_all  = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
+  const agMed_all   = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
   const med280urg   = ativas.filter(o=>{
     if(!o.medida230||!o.kaffa||o.medicao||o.medida280) return false;
     const p=prazoMedida280(o);
     return p && p<=fimMes;
   });
+
+  // Prioridade: obra aparece em apenas 1 card (mais urgente ganha)
+  const med280Ids = new Set(med280urg.map(o=>o.id));
+  const agMed_allIds = new Set(agMed_all.map(o=>o.id));
+  const agMed  = agMed_all.filter(o=>!med280Ids.has(o.id));
+  const agFisc = agFisc_all_UNREACHABLE.filter(o=>!med280Ids.has(o.id)&&!agMed_allIds.has(o.id));
 
   const cardStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px';
 
@@ -4940,12 +4966,14 @@ function renderDashSummaryFiscal(minhas){
 
   function listaComCiente(list, campo, tipo, cor){
     if(!list.length) return `<div style="font-size:11px;color:var(--muted)">Nenhuma obra. ✓</div>`;
-    return list.slice(0,10).map(o=>{
+    // Mostra TODAS as obras (sem limite) — Bug 3 fix
+    return list.map(o=>{
       const visto = !!o[campo];
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;
-        background:${visto?'var(--bg)':'rgba('+hexRgb(cor)+',.07)'};
-        border:1px solid ${visto?'var(--border)':cor+'55'};border-radius:6px">
-        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${visto?'transparent':cor}"></span>
+        background:${visto?'rgba(34,197,94,.08)':'rgba('+hexRgb(cor)+',.07)'};
+        border:1px solid ${visto?'#22C55E55':cor+'55'};border-radius:6px;
+        transition:background .3s">
+        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${visto?'#22C55E':cor}"></span>
         <strong style="color:var(--accent);font-size:11px;cursor:pointer" onclick="showPage('pgObras')">${o.numero}</strong>
         <span style="font-size:10px;color:var(--muted);flex:1">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
         ${!visto
@@ -4953,10 +4981,9 @@ function renderDashSummaryFiscal(minhas){
               style="background:${cor};color:#fff;border:none;border-radius:4px;padding:2px 10px;font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap">
               ✓ Ciente
             </button>`
-          :`<span style="font-size:9px;color:var(--muted);white-space:nowrap">✓ ciente</span>`}
+          :`<span style="font-size:9px;color:#22C55E;font-weight:700;white-space:nowrap">✓ Ciente</span>`}
       </div>`;
-    }).join('')
-    +(list.length>10?`<div style="font-size:10px;color:var(--muted);padding-left:15px">... e mais ${list.length-10}</div>`:'');
+    }).join('');
   }
 
   function badge(n, cor){ return n>0?`<span style="background:#EF4444;color:#fff;padding:1px 7px;border-radius:8px;font-size:9px;margin-left:6px">${n} nova(s)</span>`:''; }
