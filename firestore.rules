@@ -18,10 +18,19 @@ service cloud.firestore {
         perfil() == 'estagiario' ||
         (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
         (perfil() == 'fiscal' && resource.data.fiscal == vinculo()) ||
-        // Fix #3: qualquer fiscal pode atualizar medidas de controle de qualquer obra
-        (perfil() == 'fiscal' &&
+        // fiscal_adm: pode atualizar campos de fiscalização/medição em QUALQUER obra
+        (perfil() == 'fiscal_adm' &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['medida70','medida230','medida280','medida280Motivo','atualizadaEm']))
+            .hasOnly(['fiscalizacao','pendencia','tiposPendencia','prazoPendencia','dataPendencia',
+                      'pendenciaResolvida','regularizacaoData','medicao','medida70','medida230',
+                      'medida280','medida280Motivo','cienFisc','cienMed','cienMed280',
+                      'cadastroConfirmado','locaisTrabalho','atualizadaEm'])) ||
+        (perfil() == 'fiscal_adm' && resource.data.fiscal == vinculo()) ||
+        // Qualquer fiscal pode atualizar medidas e cientes de qualquer obra
+        ((perfil() == 'fiscal' || perfil() == 'fiscal_adm') &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['medida70','medida230','medida280','medida280Motivo',
+                      'cienFisc','cienMed','cienMed280','atualizadaEm']))
       );
       allow delete: if request.auth != null && perfil() == 'gerente';
     }
