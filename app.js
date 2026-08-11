@@ -215,7 +215,7 @@ async function iniciarApp(){
   setBtn('btnBulkFisc',    isFiscalAll);
   setBtn('btnBulkMed',     isFiscalAll);
   setBtn('btnBulkCad',     isFiscalAll);
-  setBtn('btnBulkConfCad', me.perfil==='gerente'||me.perfil==='genesis');
+  setBtn('btnBulkConfCad', me.perfil==='gerente'||me.perfil==='genesis'||me.perfil==='estagiario');
   setBtn('btnBulkKaffa',   isEmpMain);
   setBtn('btnBulkConc',    isEmpMain);
   buildTableHeader();
@@ -224,11 +224,7 @@ async function iniciarApp(){
   unsubObras=onSnapshot(q,snap=>{
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
     const active=document.querySelector('.page.active');
-    if(active?.id==='pgDash'){ renderDash(); setTimeout(()=>{ 
-      const id = me?.perfil==='gerente'?'pendenciasChartGerente':me?.perfil==='empreiteira'?'pendenciasChartEmp':'pendenciasChartFiscal';
-      const list = me?.perfil==='gerente'?visibleObras():me?.perfil==='empreiteira'?obras.filter(o=>o.empreiteira===me.vinculo):obras.filter(o=>o.fiscal===me.vinculo);
-      renderChartPendencias(list, id);
-    },300); }
+    if(active?.id==='pgDash'){ renderDash(); }
     if(active?.id==='pgObras') window.renderObras();
     if(active?.id==='pgCarteira') renderCarteira();
   });
@@ -568,6 +564,7 @@ function renderDashFiscal(list, meuNome){
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">📊 Pendências por Mês</div>';
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;overflow-x:auto" id="pendenciasChartFiscal"></div>';
   html += '<div style="margin-top:16px">' + renderDashSummaryFiscal(minhas) + '</div>';
+    setTimeout(()=>renderChartPendencias(list,'pendenciasChartFiscal'),100);
     return html;
 }
 
@@ -1266,7 +1263,7 @@ function renderObras(){
     let b = obras;
     if(me.perfil==='empreiteira') b = b.filter(o => o.empreiteira===me.vinculo);
     else if(me.perfil==='fiscal' && !window._bulkMode) b = b.filter(o => o.fiscal===me.vinculo);
-    else if(me.perfil==='fiscal_adm' && !window._bulkMode) b = b.filter(o => o.fiscal===me.vinculo);
+    // fiscal_adm vê TODAS as obras (sem filtro por vinculo) — acesso administrativo
     // Tab filter — read from DOM attribute for reliability
     if(_tabAtual === 'RD')  b = b.filter(o => o.tipo !== 'ODI');
     if(_tabAtual === 'ODI') b = b.filter(o => o.tipo === 'ODI');
@@ -2058,6 +2055,13 @@ window.saveObra=async function(){
         ...(g('oFiscalizacao') && g('oFiscalizacao')!==(obraAntiga?.fiscalizacao||'') ? {cienMed: false} : {}),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
+        // Devolução: fiscal devolve para empreiteira regularizar de novo
+        ...(gChk('oPendenciaNaoResolvida') ? {
+          pendenciaResolvida: false,
+          regularizacaoData: null,  // limpa regularização anterior
+          pendenciaDevolvidaEm: hojeStr(),
+          pendenciaDevolvida: true,
+        } : {}),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
         medicoes: allMedsG,
         medicao: lastMedG,
@@ -2120,6 +2124,13 @@ window.saveObra=async function(){
         ...(g('oFiscalizacao') && g('oFiscalizacao')!==(obraAntiga?.fiscalizacao||'') ? {cienMed: false} : {}),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
+        // Devolução: fiscal devolve para empreiteira regularizar de novo
+        ...(gChk('oPendenciaNaoResolvida') ? {
+          pendenciaResolvida: false,
+          regularizacaoData: null,  // limpa regularização anterior
+          pendenciaDevolvidaEm: hojeStr(),
+          pendenciaDevolvida: true,
+        } : {}),
         dataCadastro:g('oCadastro'),
         // cadastroConfirmado only valid for gerente/genesis, fiscal cannot confirm
         medida70:g('oMedida70'), medida230:g('oMedida230'),
@@ -3070,6 +3081,28 @@ window.marcarCiente = async function(obraId, tipo){
     toast('Erro ao registrar ciente.','err');
   }
 };
+
+
+// ══ PENDÊNCIA — DEVOLUÇÃO PELO FISCAL ══════════════════════════════
+// Exibe a opção de devolução somente quando a empreiteira já regularizou
+window.togglePendNaoResolvida = function(){
+  const chk = document.getElementById('oPendenciaNaoResolvida');
+  if(chk?.checked){
+    // Desmarcar "pendência resolvida" se marcou devolução
+    const res = document.getElementById('oPendenciaResolvida');
+    if(res) res.checked = false;
+  }
+};
+
+// Mostra botão de devolução quando empreiteira já regularizou
+function atualizarVisibilidadeDevoPend(obra){
+  const row = document.getElementById('rowDevolvePend');
+  if(!row) return;
+  // Aparece para fiscal/gerente quando empreiteira informou regularização mas pendência ainda não foi confirmada
+  const podeDevolver = (me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='gerente')
+    && obra?.regularizacaoData && !obra?.pendenciaResolvida && obra?.pendencia;
+  row.style.display = podeDevolver ? 'flex' : 'none';
+}
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
@@ -4958,7 +4991,7 @@ function renderDashSummaryFiscal(minhas){
   const med280Ids = new Set(med280urg.map(o=>o.id));
   const agMed_allIds = new Set(agMed_all.map(o=>o.id));
   const agMed  = agMed_all.filter(o=>!med280Ids.has(o.id));
-  const agFisc = agFisc_all_UNREACHABLE.filter(o=>!med280Ids.has(o.id)&&!agMed_allIds.has(o.id));
+  const agFisc = agFisc_all.filter(o=>!med280Ids.has(o.id)&&!agMed_allIds.has(o.id));
 
   const cardStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px';
 
