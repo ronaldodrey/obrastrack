@@ -595,6 +595,12 @@
       <label class="toggle"><input type="checkbox" id="oPendenciaResolvida"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Pendência conferida e resolvida pelo fiscal</span>
     </div>
+    <!-- Devolução de pendência — fiscal devolve para empreiteira regularizar novamente -->
+    <div id="rowDevolvePend" class="toggle-row" style="margin-top:8px;display:none">
+      <label class="toggle"><input type="checkbox" id="oPendenciaNaoResolvida" onchange="togglePendNaoResolvida()">
+        <span class="toggle-slider" style="--slider-on:#EF4444"></span></label>
+      <span class="toggle-lbl" style="color:#EF4444">⚠️ Devolver — pendência NÃO foi sanada (empreiteira deve regularizar novamente)</span>
+    </div>
   </div>
   <div class="modal-section" id="secMedicao">
     <div class="modal-section-title">📏 Medições</div>
