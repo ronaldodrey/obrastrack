@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPPC_ARLAG</title>
+<title>SPCC_ARLAG [v2608]</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
@@ -26,7 +26,7 @@
 <!-- APP -->
 <div id="appScreen" style="display:none">
   <header>
-    <div class="h-logo">SPCC_<span>ARLAG</span></div>
+    <div class="h-logo">SPCC_<span>ARLAG</span> <span style="font-size:9px;background:#7c6af7;color:#fff;padding:1px 6px;border-radius:4px;vertical-align:middle">v2608</span></div>
     <div class="h-right">
       <div class="h-user">Olá, <strong id="hName"></strong></div>
       <span class="role-badge" id="hRole"></span>
@@ -61,6 +61,8 @@
         <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none" onclick="abrirBulk('medidas')">📐 Medidas em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkFisc" style="display:none" onclick="abrirBulk('fisc')">🔍 Fiscalização em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkMed" style="display:none" onclick="abrirBulk('medicao')">📏 Medição em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkCad" style="display:none" onclick="abrirBulk('cadastro')">📋 Cadastro em Lote</button>
+        <button class="btn btn-secondary btn-sm" id="btnBulkConfCad" style="display:none" onclick="abrirBulk('confcad')">✅ Confirmar Cadastro em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkConc" style="display:none" onclick="abrirBulk('conclusao')">✓ Conclusão em Lote</button>
         <button class="btn btn-warn btn-sm" id="btnLimparFiltros" style="display:none" onclick="limparFiltros()">✕ Limpar Filtros</button>
       </div>
@@ -443,6 +445,9 @@
             <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
           </div>
           <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
+          <div class="fg"><label>Data do Transformador <span style="font-size:10px;color:var(--muted)">(data de fabricação)</span></label>
+            <input type="text" id="oDataTransf" placeholder="Ex: 01/2024" maxlength="20">
+          </div>
           <!-- Equipamento Retirado -->
           <div class="toggle-row" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
             <label class="toggle"><input type="checkbox" id="oTemRetirado" onchange="toggleRetirado()"><span class="toggle-slider"></span></label>
@@ -540,6 +545,11 @@
           <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Estrutura"><span>Estrutura</span></label>
           <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Aterramento"><span>Aterramento</span></label>
           <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Transformador"><span>Transformador</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Poste"><span>Poste</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Compartilhadora"><span>Compartilhadora</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Desmonte"><span>Desmonte</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Lixo no local"><span>Lixo no local</span></label>
+          <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Calçada"><span>Calçada</span></label>
           <label class="chk-item"><input type="checkbox" class="chk-pendencia" value="Outro" onchange="togglePendenciaOutro()"><span>Outro</span></label>
         </div>
       </div>
