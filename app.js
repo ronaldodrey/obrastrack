@@ -697,6 +697,7 @@ function renderDashEmpreiteira(minhas){
     html += '<div class="modal-note" style="margin-top:16px;color:#22C55E">✅ Nenhuma obra atrasada!</div>';
   }
   html += '<div style="margin-top:16px">' + renderDashSummaryEmpreiteira(minhas) + '</div>';
+    setTimeout(()=>renderChartPendencias(minhas,'pendenciasChartEmp'),100);
     return html;
 }
 
@@ -1174,6 +1175,7 @@ function buildTableHeader(){
     ${frozen1}
     ${frozen2}
     ${sth('Tipo','tipo','Tipo da obra: R1, R2 ou ODI')}
+    ${sth('Enquadramento','enquadramento','Enquadramento da obra (R1): Universalização, PF ou Grupo A')}
     ${sth('Descrição','descricao','Descrição resumida da obra')}
     ${sth('Equip. Ref.','equipamentoRef','Número do Equipamento de Referência (transformador/ponto de trabalho)')}
     ${sth('Cidade','cidade','Município onde a obra será executada')}
@@ -1335,6 +1337,7 @@ function renderObras(){
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
+      <td style="font-size:10px;color:var(--muted)">${o.enquadramento||'—'}</td>
       <td style="font-size:11px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.descricao||''}"><span>${o.descricao||'—'}</span></td>
       <td style="font-size:11px;color:var(--muted)">${o.equipamentoRef||'—'}</td>
       <td>${o.cidade||'—'}</td>
@@ -1424,7 +1427,7 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||'');
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); toggleEnquadramento();
     // Transformer fields
     set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
@@ -2064,6 +2067,7 @@ window.saveObra=async function(){
         medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
         descricao:g('oDescricao')||null,
+        enquadramento:g('oEnquadramento')||null,
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         dataTransf:g('oDataTransf')||null,
@@ -2101,6 +2105,8 @@ window.saveObra=async function(){
         dataDesligamento:g('oDesligamento'),
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
+        // Reset flag de devolução quando empreiteira informa regularização novamente
+        ...(g('oRegularizacao') ? {pendenciaDevolvida:false, pendenciaDevolvidaEm:null} : {}),
         kaffaEntries: allKaffasEmp,
         kaffa: lastKaffaDate || g('oKaffa') || obraAntiga?.kaffa || '',
         atualizadaEm:serverTimestamp()
@@ -5184,5 +5190,74 @@ function renderDashSummaryEmpreiteira(minhas){
         <span style="background:#EF4444;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${kaffaUrgente.length}</span>
       </div>
       ${listaObras(kaffaUrgente)}
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  ENQUADRAMENTO — mostra/oculta conforme tipo
+// ══════════════════════════════════════════════════════════════════════
+window.toggleEnquadramento = function(){
+  const tipo = document.getElementById('oTipo')?.value;
+  const fg   = document.getElementById('fgEnquadramento');
+  if(fg) fg.style.display = tipo === 'R1' ? 'flex' : 'none';
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  FAVORITOS — cada usuário pode favoritar obras com nota
+// ══════════════════════════════════════════════════════════════════════
+window.toggleFavorito = async function(obraId){
+  const favs = await getFavoritos();
+  const jaFav = favs.some(f=>f.obraId===obraId);
+  if(jaFav){
+    const novos = favs.filter(f=>f.obraId!==obraId);
+    await saveFavoritos(novos);
+  } else {
+    favs.push({obraId, nota:'', favoritadoEm: hojeStr()});
+    await saveFavoritos(favs);
+  }
+  renderDash();
+};
+
+window.salvarNotaFavorito = async function(obraId){
+  const favs = await getFavoritos();
+  const fav = favs.find(f=>f.obraId===obraId);
+  const nota = document.getElementById('notaFav_'+obraId)?.value||'';
+  if(fav){ fav.nota=nota; await saveFavoritos(favs); toast('Nota salva.'); }
+};
+
+async function getFavoritos(){
+  try{
+    const snap = await getDoc(doc(db,'usuarios',me.uid));
+    return snap.data()?.favoritos||[];
+  }catch(e){ return []; }
+}
+
+async function saveFavoritos(favs){
+  await updateDoc(doc(db,'usuarios',me.uid),{favoritos:favs});
+}
+
+async function renderDashFavoritos(html_ref){
+  const favs = await getFavoritos();
+  if(!favs.length) return '';
+  const obrasFav = favs.map(f=>({...obras.find(o=>o.id===f.obraId), _nota:f.nota, _favId:f.obraId})).filter(o=>o.id);
+  if(!obrasFav.length) return '';
+  return `
+    <div style="background:var(--surface);border:1px solid #F59E0B55;border-left:3px solid #F59E0B;border-radius:12px;padding:16px;margin-bottom:20px">
+      <div style="font-family:'Syne',sans-serif;font-size:13px;font-weight:800;color:#F59E0B;margin-bottom:12px">⭐ Obras Favoritas</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${obrasFav.map(o=>`
+          <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+              <strong style="color:var(--accent);cursor:pointer;font-size:12px" onclick="openObraModal('${o.id}')">${o.numero}</strong>
+              <span style="font-size:10px;color:var(--muted)">${o.cidade||'—'} · ${o.tipo||'—'}</span>
+              <span style="font-size:10px;background:var(--surface2);padding:1px 8px;border-radius:8px">${statusOf(o)}</span>
+              <button onclick="toggleFavorito('${o.id}')" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:11px;margin-left:auto">✕ Remover</button>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <textarea id="notaFav_${o.id}" style="flex:1;font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);resize:none;height:40px" placeholder="Adicione uma nota sobre esta obra...">${o._nota||''}</textarea>
+              <button onclick="salvarNotaFavorito('${o.id}')" class="btn btn-secondary btn-sm" style="font-size:10px">Salvar</button>
+            </div>
+          </div>`).join('')}
+      </div>
     </div>`;
 }
