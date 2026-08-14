@@ -326,7 +326,16 @@
     <div class="fg-grid">
       <div class="fg"><label>Nº da Obra</label><input type="text" id="oNum" placeholder="2024-001"></div>
       <div class="fg"><label>Tipo</label>
-        <select id="oTipo"><option value="">— tipo —</option><option>R1</option><option>R2</option><option>ODI</option></select></div>
+        <select id="oTipo" onchange="toggleEnquadramento()"><option value="">— tipo —</option><option>R1</option><option>R2</option><option>ODI</option></select></div>
+      <div class="fg" id="fgEnquadramento" style="display:none">
+        <label>Enquadramento <span style="font-size:10px;color:var(--muted)">(somente R1)</span></label>
+        <select id="oEnquadramento">
+          <option value="">— selecione —</option>
+          <option value="Obra Universalização">Obra Universalização</option>
+          <option value="Obra PF">Obra PF</option>
+          <option value="Obra Grupo A">Obra Grupo A</option>
+        </select>
+      </div>
       <div class="fg"><label>Descrição <span style="font-size:10px;color:var(--muted)">(ex: Obra BRO05)</span></label>
         <input type="text" id="oDescricao" placeholder="Breve descrição da obra…" maxlength="80">
       </div>
