@@ -435,35 +435,29 @@
         </div>
         <!-- Dados do transformador — visível SOMENTE para empreiteira, dentro do kaffa -->
         <div style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)" id="secConclusaoExtra">
-          <div id="transDataNota" class="modal-note" style="margin-bottom:10px">🔩 Dados do Transformador Instalado — preencha uma única vez.</div>
-          <div class="fg-grid">
-            <div class="fg"><label>Placas Instaladas</label><input type="text" id="oPlacas" placeholder="Quantidade"></div>
-            <div class="fg"><label>Potência (kVA)</label><input type="number" id="oPotencia" placeholder="Ex: 30" min="0" step="0.1"></div>
-          </div>
-          <div class="fg-grid">
-            <div class="fg"><label>Nº SAP Transformador</label><input type="text" id="oSAP" placeholder="Nº SAP"></div>
-            <div class="fg"><label>Nº Série Transformador</label><input type="text" id="oSerie" placeholder="Nº Série"></div>
-          </div>
-          <div class="fg"><label>Fabricante</label><input type="text" id="oFabricante" placeholder="Fabricante"></div>
-          <div class="fg"><label>Data do Transformador <span style="font-size:10px;color:var(--muted)">(data de fabricação)</span></label>
-            <input type="text" id="oDataTransf" placeholder="Ex: 01/2024" maxlength="20">
-          </div>
-          <!-- Equipamento Retirado -->
-          <div class="toggle-row" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-            <label class="toggle"><input type="checkbox" id="oTemRetirado" onchange="toggleRetirado()"><span class="toggle-slider"></span></label>
-            <span class="toggle-lbl">🔄 Existe equipamento retirado da rede</span>
-          </div>
-          <div id="secRetirado" style="display:none;margin-top:10px;padding:12px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px">
-            <div class="modal-note" style="margin-bottom:8px;color:#EF4444">⬇️ Dados do Transformador Retirado</div>
-            <div class="fg-grid">
-              <div class="fg"><label>Potência Retirada (kVA)</label><input type="number" id="oPotenciaRet" placeholder="Ex: 15" min="0" step="0.1"></div>
-              <div class="fg"><label>Nº SAP Retirado</label><input type="text" id="oSAPRet" placeholder="Nº SAP"></div>
+          <div id="transDataNota" class="modal-note" style="margin-bottom:10px">🔩 Equipamentos — adicione quantos forem necessários.</div>
+          <!-- Equipamentos Instalados -->
+          <div style="margin-bottom:10px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700">⚡ Transformadores Instalados</span>
+              <button type="button" onclick="adicionarEquipInstalado()" class="btn btn-secondary btn-sm" style="font-size:10px">+ Adicionar</button>
             </div>
-            <div class="fg-grid">
-              <div class="fg"><label>Nº Série Retirado</label><input type="text" id="oSerieRet" placeholder="Nº Série"></div>
-              <div class="fg"><label>Fabricante Retirado</label><input type="text" id="oFabricanteRet" placeholder="Fabricante"></div>
-            </div>
+            <div id="listaEquipInstalados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado adicionado.</div></div>
           </div>
+          <!-- Equipamentos Retirados -->
+          <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:11px;font-weight:700;color:#EF4444">⬇️ Transformadores Retirados</span>
+              <button type="button" onclick="adicionarEquipRetirado()" class="btn btn-secondary btn-sm" style="font-size:10px">+ Adicionar</button>
+            </div>
+            <div id="listaEquipRetirados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado adicionado.</div></div>
+          </div>
+          <!-- Campos ocultos para compatibilidade com patches antigos -->
+          <input type="hidden" id="oPlacas"><input type="hidden" id="oPotencia">
+          <input type="hidden" id="oSAP"><input type="hidden" id="oSerie">
+          <input type="hidden" id="oFabricante"><input type="hidden" id="oDataTransf">
+          <input type="hidden" id="oPotenciaRet"><input type="hidden" id="oSAPRet">
+          <input type="hidden" id="oSerieRet"><input type="hidden" id="oFabricanteRet">
         </div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-primary btn-sm" onclick="adicionarKaffa()">✓ Adicionar</button>
