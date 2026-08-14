@@ -786,59 +786,42 @@ function renderChartPendencias(list, containerId){
   const cont = document.getElementById(containerId);
   if(!cont) return;
 
-  // Filtrar obras com dataPendencia
-  const comData = list.filter(o => o.dataPendencia);
-  if(!comData.length){
-    cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:11px">Nenhuma pendência com data registrada ainda.</div>';
+  // Conta pendências por mês (usa dataPendencia — quando a pendência foi registrada)
+  const meses = {};
+  list.forEach(o=>{
+    const dp = o.dataPendencia||o.prazoPendencia;
+    if(!dp) return;
+    const [y,m] = dp.split('-');
+    if(!y||!m) return;
+    const key = `${m}/${y}`;
+    meses[key] = (meses[key]||0) + 1;
+  });
+
+  const entries = Object.entries(meses)
+    .sort((a,b)=>{ const[ma,ya]=a[0].split('/'); const[mb,yb]=b[0].split('/');
+      return (+ya*100+ +ma)-(+yb*100+ +mb); });
+
+  if(!entries.length){
+    cont.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">Nenhuma pendência registrada.</div>';
     return;
   }
 
-  // Agrupar por mês (MM/YYYY)
-  const grupos = {};
-  comData.forEach(o => {
-    const [y,m] = o.dataPendencia.split('-');
-    const key = `${m}/${y}`;
-    if(!grupos[key]) grupos[key] = { total: 0, resolvidas: 0 };
-    grupos[key].total++;
-    if(o.pendenciaResolvida) grupos[key].resolvidas++;
+  const maxV = Math.max(...entries.map(e=>e[1]), 1);
+  const colW = 60, barH = 100, topP = 40, botP = 24, padL = 8;
+  const svgW = padL + entries.length * colW + padL;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+  svg += `<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
+
+  entries.forEach(([mes, qtd], i)=>{
+    const x = padL + i*colW;
+    const cx = x + colW/2;
+    const bh = Math.max(6, Math.round((qtd/maxV)*barH));
+    const by = topP + barH - bh;
+    svg += `<rect x="${x+4}" y="${by}" width="${colW-8}" height="${bh}" rx="4" fill="#F59E0B" opacity="0.85"/>`;
+    svg += `<text x="${cx}" y="${by-14}" text-anchor="middle" font-size="12" font-weight="800" fill="#F59E0B">${qtd}</text>`;
+    svg += `<text x="${cx}" y="${topP+barH+16}" text-anchor="middle" font-size="9" fill="#9ca3af">${mes}</text>`;
   });
-
-  // Ordenar cronologicamente (últimos 12 meses)
-  const mesesOrd = Object.keys(grupos).sort((a,b) => {
-    const [ma,ya] = a.split('/'); const [mb,yb] = b.split('/');
-    return (+ya*12+ +ma) - (+yb*12+ +mb);
-  }).slice(-12);
-
-  const maxVal = Math.max(...mesesOrd.map(k => grupos[k].total), 1);
-  const barW = Math.max(30, Math.floor(560 / (mesesOrd.length + 1)));
-  const h = 120;
-
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(600, mesesOrd.length * (barW + 12) + 60)}" height="${h + 70}" style="font-family:'DM Mono',monospace">`;
-
-  mesesOrd.forEach((mes, i) => {
-    const g = grupos[mes];
-    const x = 40 + i * (barW + 12);
-    const barH = Math.max(4, Math.round((g.total / maxVal) * h));
-    const barHRes = g.resolvidas > 0 ? Math.max(2, Math.round((g.resolvidas / maxVal) * h)) : 0;
-    const y = h - barH + 10;
-
-    // Total (laranja)
-    svg += `<rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="3" fill="rgba(249,115,22,.7)"/>`;
-    // Resolvidas (verde, em cima)
-    if(barHRes > 0)
-      svg += `<rect x="${x}" y="${h - barHRes + 10}" width="${barW}" height="${barHRes}" rx="3" fill="rgba(34,197,94,.7)"/>`;
-    // Label valor
-    svg += `<text x="${x+barW/2}" y="${y-4}" text-anchor="middle" font-size="9" fill="#F97316" font-weight="700">${g.total}</text>`;
-    // Label mês
-    svg += `<text x="${x+barW/2}" y="${h+26}" text-anchor="middle" font-size="9" fill="#6b7280">${mes}</text>`;
-  });
-
-  // Legenda
-  svg += `<rect x="40" y="${h+40}" width="10" height="8" rx="2" fill="rgba(249,115,22,.7)"/>
-    <text x="54" y="${h+48}" font-size="9" fill="#e8eaf0">Total de pendências</text>
-    <rect x="180" y="${h+40}" width="10" height="8" rx="2" fill="rgba(34,197,94,.7)"/>
-    <text x="194" y="${h+48}" font-size="9" fill="#e8eaf0">Resolvidas</text>`;
-
   svg += '</svg>';
   cont.innerHTML = svg;
 }
@@ -1467,6 +1450,8 @@ window.openObraModal=function(obraId){
     set('oMotivoParalisada',obra.motivoParalisada);
     setChk('oTemImpedimento',obra.impedimento); setChk('oTemPendencia',obra.pendencia);
     setChk('oPendenciaResolvida',obra.pendenciaResolvida); setChk('oArmazenado',obra.armazenado);
+    // Mostra botão de devolução de pendência para fiscal quando empreiteira já regularizou
+    setTimeout(()=>atualizarVisibilidadeDevoPend(obra), 50);
     setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
     // Restore USC/ULV medido gerente
     const uscMedEl=document.getElementById('oUSCMedidoGerente');
@@ -1516,6 +1501,7 @@ window.openObraModal=function(obraId){
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Preenche view-only do transformador para fiscal e gerente
     // Preenche campos de visualização do transformador
+    // Multi-equipment view: show all installed
     const transf_vals=[obra.placas,obra.potencia,obra.sap,obra.serie,obra.fabricante,obra.dataTransf];
     ['oPlacasView','oPotenciaView','oSAPView','oSerieView','oFabricanteView'].forEach((id,i)=>{
       const el=document.getElementById(id); if(el) el.value=transf_vals[i]||'';
@@ -1776,6 +1762,11 @@ window.abrirNovoKaffa = function(){
   if(hasFinal){ toast('Esta obra já possui kaffa final registrado.','warn'); return; }
   document.getElementById('frmNovoKaffa').style.display='block';
   document.getElementById('btnNovoKaffa').style.display='none';
+  // Inicializa listas de equipamentos
+  if(me.perfil==='empreiteira'){
+    const obraAtualEq=obras.find(o=>o.id===document.getElementById('obraId')?.value);
+    initEquipFromObra(obraAtualEq);
+  }
   // Campos do transformador: só para empreiteira, só no 1° kaffa
   if(me.perfil==='empreiteira'){
     const secExtra=document.getElementById('secConclusaoExtra');
@@ -2043,6 +2034,8 @@ window.saveObra=async function(){
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         dataTransf:g('oDataTransf')||null,
+        equipamentosInstalados:_equipInstalados,
+        equipamentosRetirados:_equipRetirados,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -2074,6 +2067,8 @@ window.saveObra=async function(){
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         dataTransf:g('oDataTransf')||null,
+        equipamentosInstalados:_equipInstalados,
+        equipamentosRetirados:_equipRetirados,
         potencia: g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado: document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet: g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
@@ -2098,6 +2093,8 @@ window.saveObra=async function(){
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         dataTransf:g('oDataTransf')||null,
+        equipamentosInstalados:_equipInstalados,
+        equipamentosRetirados:_equipRetirados,
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -3098,10 +3095,113 @@ window.togglePendNaoResolvida = function(){
 function atualizarVisibilidadeDevoPend(obra){
   const row = document.getElementById('rowDevolvePend');
   if(!row) return;
-  // Aparece para fiscal/gerente quando empreiteira informou regularização mas pendência ainda não foi confirmada
   const podeDevolver = (me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='gerente')
-    && obra?.regularizacaoData && !obra?.pendenciaResolvida && obra?.pendencia;
+    && !!obra?.regularizacaoData && !obra?.pendenciaResolvida && !!obra?.pendencia;
   row.style.display = podeDevolver ? 'flex' : 'none';
+  if(podeDevolver) console.log('[Pend] Mostrando botão de devolução. regularizacaoData=', obra.regularizacaoData);
+}
+
+
+// ══ EQUIPAMENTOS DO KAFFA — múltiplos instalados e retirados ════════
+let _equipInstalados = [];   // [{id,placas,potencia,sap,serie,fabricante,dataTransf}]
+let _equipRetirados  = [];   // [{id,potencia,sap,serie,fabricante,dataTransf}]
+
+window.adicionarEquipInstalado = function(){
+  const id = `ei_${Date.now()}`;
+  _equipInstalados.push({id,placas:'',potencia:'',sap:'',serie:'',fabricante:'',dataTransf:''});
+  renderEquipInstalados();
+};
+window.adicionarEquipRetirado = function(){
+  const id = `er_${Date.now()}`;
+  _equipRetirados.push({id,potencia:'',sap:'',serie:'',fabricante:'',dataTransf:''});
+  renderEquipRetirados();
+};
+window.removerEquipInstalado = function(id){
+  _equipInstalados = _equipInstalados.filter(e=>e.id!==id);
+  renderEquipInstalados();
+};
+window.removerEquipRetirado = function(id){
+  _equipRetirados = _equipRetirados.filter(e=>e.id!==id);
+  renderEquipRetirados();
+};
+window.toggleEquipItem = function(id){
+  const body = document.getElementById('body_'+id);
+  const icon = document.getElementById('icon_'+id);
+  if(!body) return;
+  const isOpen = body.style.display!=='none';
+  body.style.display = isOpen ? 'none' : 'block';
+  if(icon) icon.textContent = isOpen ? '▶' : '▼';
+};
+
+function renderEquipInstalados(){
+  const cont = document.getElementById('listaEquipInstalados'); if(!cont) return;
+  if(!_equipInstalados.length){ cont.innerHTML='<div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado adicionado.</div>'; return; }
+  cont.innerHTML = _equipInstalados.map((e,i)=>`
+    <div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2);cursor:pointer" onclick="toggleEquipItem('ins${e.id}')">
+        <span id="icon_ins${e.id}" style="font-size:10px">▼</span>
+        <span style="font-size:11px;font-weight:700">Transformador Instalado #${i+1}</span>
+        <button onclick="event.stopPropagation();removerEquipInstalado('${e.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:auto;font-size:11px">✕</button>
+      </div>
+      <div id="body_ins${e.id}" style="padding:10px">
+        <div class="fg-grid">
+          <div class="fg"><label style="font-size:9px">Placas Instaladas</label><input type="text" id="ins_placas_${e.id}" value="${e.placas}" placeholder="Quantidade" onchange="syncEquip('ins','${e.id}','placas',this.value)"></div>
+          <div class="fg"><label style="font-size:9px">Potência (kVA)</label><input type="number" id="ins_pot_${e.id}" value="${e.potencia}" placeholder="Ex: 30" onchange="syncEquip('ins','${e.id}','potencia',this.value)"></div>
+        </div>
+        <div class="fg-grid">
+          <div class="fg"><label style="font-size:9px">Nº SAP</label><input type="text" id="ins_sap_${e.id}" value="${e.sap}" placeholder="Nº SAP" onchange="syncEquip('ins','${e.id}','sap',this.value)"></div>
+          <div class="fg"><label style="font-size:9px">Nº Série</label><input type="text" id="ins_serie_${e.id}" value="${e.serie}" placeholder="Nº Série" onchange="syncEquip('ins','${e.id}','serie',this.value)"></div>
+        </div>
+        <div class="fg-grid">
+          <div class="fg"><label style="font-size:9px">Fabricante</label><input type="text" id="ins_fab_${e.id}" value="${e.fabricante}" placeholder="Fabricante" onchange="syncEquip('ins','${e.id}','fabricante',this.value)"></div>
+          <div class="fg"><label style="font-size:9px">Data Transformador</label><input type="text" id="ins_dat_${e.id}" value="${e.dataTransf}" placeholder="Ex: 01/2024" onchange="syncEquip('ins','${e.id}','dataTransf',this.value)"></div>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderEquipRetirados(){
+  const cont = document.getElementById('listaEquipRetirados'); if(!cont) return;
+  if(!_equipRetirados.length){ cont.innerHTML='<div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado adicionado.</div>'; return; }
+  cont.innerHTML = _equipRetirados.map((e,i)=>`
+    <div style="border:1px solid rgba(239,68,68,.3);border-radius:6px;margin-bottom:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(239,68,68,.06);cursor:pointer" onclick="toggleEquipItem('ret${e.id}')">
+        <span id="icon_ret${e.id}" style="font-size:10px">▼</span>
+        <span style="font-size:11px;font-weight:700;color:#EF4444">Transformador Retirado #${i+1}</span>
+        <button onclick="event.stopPropagation();removerEquipRetirado('${e.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:auto;font-size:11px">✕</button>
+      </div>
+      <div id="body_ret${e.id}" style="padding:10px">
+        <div class="fg-grid">
+          <div class="fg"><label style="font-size:9px">Potência (kVA)</label><input type="number" id="ret_pot_${e.id}" value="${e.potencia}" placeholder="Ex: 15" onchange="syncEquip('ret','${e.id}','potencia',this.value)"></div>
+          <div class="fg"><label style="font-size:9px">Nº SAP</label><input type="text" id="ret_sap_${e.id}" value="${e.sap}" placeholder="Nº SAP" onchange="syncEquip('ret','${e.id}','sap',this.value)"></div>
+        </div>
+        <div class="fg-grid">
+          <div class="fg"><label style="font-size:9px">Nº Série</label><input type="text" id="ret_serie_${e.id}" value="${e.serie}" placeholder="Nº Série" onchange="syncEquip('ret','${e.id}','serie',this.value)"></div>
+          <div class="fg"><label style="font-size:9px">Fabricante</label><input type="text" id="ret_fab_${e.id}" value="${e.fabricante}" placeholder="Fabricante" onchange="syncEquip('ret','${e.id}','fabricante',this.value)"></div>
+        </div>
+        <div class="fg"><label style="font-size:9px">Data Transformador</label><input type="text" id="ret_dat_${e.id}" value="${e.dataTransf}" placeholder="Ex: 01/2024" onchange="syncEquip('ret','${e.id}','dataTransf',this.value)"></div>
+      </div>
+    </div>`).join('');
+}
+
+window.syncEquip = function(tipo, id, campo, valor){
+  const arr = tipo==='ins'?_equipInstalados:_equipRetirados;
+  const item = arr.find(e=>e.id===id);
+  if(item) item[campo]=valor;
+};
+
+function initEquipFromObra(obra){
+  _equipInstalados = obra?.equipamentosInstalados?.length ? [...obra.equipamentosInstalados] : [];
+  _equipRetirados  = obra?.equipamentosRetirados?.length  ? [...obra.equipamentosRetirados]  : [];
+  // Se obra tem os campos antigos (único equip), migra para array
+  if(!_equipInstalados.length && (obra?.sap||obra?.potencia)){
+    _equipInstalados = [{id:'ei_legacy',placas:obra.placas||'',potencia:obra.potencia||'',sap:obra.sap||'',serie:obra.serie||'',fabricante:obra.fabricante||'',dataTransf:obra.dataTransf||''}];
+  }
+  if(!_equipRetirados.length && (obra?.sapRet||obra?.potenciaRet)){
+    _equipRetirados = [{id:'er_legacy',potencia:obra.potenciaRet||'',sap:obra.sapRet||'',serie:obra.serieRet||'',fabricante:obra.fabricanteRet||'',dataTransf:''}];
+  }
+  renderEquipInstalados();
+  renderEquipRetirados();
 }
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
@@ -5062,13 +5162,12 @@ function renderDashSummaryEmpreiteira(minhas){
   const cardStyle = "background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px";
   const listaObras = list => list.length===0
     ? `<div style="font-size:11px;color:var(--muted)">Nenhuma obra nesta situação. ✓</div>`
-    : `<div style="display:flex;flex-direction:column;gap:4px">${list.slice(0,8).map(o=>
+    : `<div style="display:flex;flex-direction:column;gap:4px">${list.map(o=>
         `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 8px;background:var(--bg);border-radius:4px;cursor:pointer" onclick="showPage('pgObras')">
           <strong style="color:var(--accent)">${o.numero}</strong>
           <span style="color:var(--muted)">${o.cidade||'—'}</span>
           <span style="color:var(--muted)">${statusOf(o)}</span>
         </div>`).join('')}
-      ${list.length>8?`<div style="font-size:10px;color:var(--muted);text-align:center">... e mais ${list.length-8}</div>`:''}
     </div>`;
 
   return `
