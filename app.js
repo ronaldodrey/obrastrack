@@ -191,7 +191,7 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras']];
+  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras'],['pgAbertura','📊 Abertura de Obras']];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
@@ -243,6 +243,7 @@ window.showPage=function(id){
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
+  if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
@@ -1081,8 +1082,8 @@ function renderMonitorPrazosTipo_inner(list){
         <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent)">${x.o.numero}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.cidade||'—'}</td>
         <td style="padding:5px 10px">
-          <span style="font-weight:700;font-size:11px;color:${cor2}">${prazoFmt}</span>
-          <span style="font-size:9px;color:${cor2};margin-left:4px;opacity:.85">${txt}</span>
+          <div style="font-weight:700;font-size:11px;color:${cor2}">${prazoFmt}</div>
+          <div style="font-size:9px;color:${cor2};opacity:.85">${txt}</div>
         </td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
@@ -5223,21 +5224,30 @@ window.toggleFavorito = async function(obraId){
 };
 
 window.salvarNotaFavorito = async function(obraId){
-  const favs = await getFavoritos();
-  const fav = favs.find(f=>f.obraId===obraId);
-  const nota = document.getElementById('notaFav_'+obraId)?.value||'';
-  if(fav){ fav.nota=nota; await saveFavoritos(favs); toast('Nota salva.'); }
+  try{
+    const favs = await getFavoritos();
+    const fav = favs.find(f=>f.obraId===obraId);
+    const nota = document.getElementById('notaFav_'+obraId)?.value||'';
+    if(fav){ fav.nota=nota; await saveFavoritos(favs); toast('✓ Nota salva.','ok'); }
+    else { toast('Obra não está nos favoritos.','warn'); }
+  }catch(e){ toast('Erro ao salvar: '+e.message,'err'); }
 };
 
 async function getFavoritos(){
   try{
     const snap = await getDoc(doc(db,'usuarios',me.uid));
-    return snap.data()?.favoritos||[];
-  }catch(e){ return []; }
+    return Array.isArray(snap.data()?.favoritos) ? snap.data().favoritos : [];
+  }catch(e){ console.warn('[Favoritos] getFavoritos error:',e.message); return []; }
 }
 
 async function saveFavoritos(favs){
-  await updateDoc(doc(db,'usuarios',me.uid),{favoritos:favs});
+  try{
+    // Use setDoc with merge to handle both create and update
+    await setDoc(doc(db,'usuarios',me.uid),{favoritos:favs},{merge:true});
+  }catch(e){
+    console.error('[Favoritos] saveFavoritos error:',e.message);
+    throw e;
+  }
 }
 
 async function renderDashFavoritos(html_ref){
@@ -5265,3 +5275,135 @@ async function renderDashFavoritos(html_ref){
       </div>
     </div>`;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  ABA "ABERTURA DE OBRAS" — Gerente
+// ══════════════════════════════════════════════════════════════════════
+function renderAberturaObras(){
+  const cont = document.getElementById('pgAberturaContent');
+  if(!cont) return;
+
+  const EMP = ['CS ELETRICIDADE','ELETELSUL'];
+  const hoje = new Date();
+  const meses12 = [];
+  for(let i=11;i>=0;i--){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+    meses12.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const mLabel = ym => { const [y,m]=ym.split('-'); return `${m}/${y.slice(2)}`; };
+
+  // Filter apenas obras RD (R1+R2)
+  const obrasRD = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+
+  // Build data: {empreiteira: {tipo: {mes: {qtd,usc}}}}
+  function buildData(pool){
+    const data = {};
+    pool.forEach(o=>{
+      const emp = EMP.includes(o.empreiteira?.toUpperCase()) ? o.empreiteira : 'Outros';
+      const tipo = o.tipo||'R1';
+      const ab = o.dataAbertura||'';
+      const mes = ab.slice(0,7); // YYYY-MM
+      if(!meses12.includes(mes)) return;
+      if(!data[emp]) data[emp]={};
+      if(!data[emp][tipo]) data[emp][tipo]={};
+      if(!data[emp][tipo][mes]) data[emp][tipo][mes]={qtd:0,usc:0};
+      data[emp][tipo][mes].qtd++;
+      data[emp][tipo][mes].usc += parseFloat(o.usc)||0;
+    });
+    return data;
+  }
+
+  function renderGrafico(data, titulo, cor, pool){
+    const tipos = ['R1','R2'];
+    const cores = {R1:cor, R2:cor+'aa'};
+    const colW = 56, barH = 100, topP = 48, botP = 24, padL = 6;
+    const svgW = padL + meses12.length * colW * 2 + padL;
+
+    // Count per mes (all tipos combined)
+    const totaisMes = meses12.map(m=>{
+      let qtd=0, usc=0;
+      tipos.forEach(t=>{ qtd+=(data?.[t]?.[m]?.qtd||0); usc+=(data?.[t]?.[m]?.usc||0); });
+      return {m, qtd, usc};
+    });
+    const maxQ = Math.max(...totaisMes.map(t=>t.qtd), 1);
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+    svg += `<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
+
+    meses12.forEach((m,i)=>{
+      tipos.forEach((tipo,ti)=>{
+        const qtd = data?.[tipo]?.[m]?.qtd||0;
+        const usc = data?.[tipo]?.[m]?.usc||0;
+        const x   = padL + i*colW*2 + ti*colW;
+        const cx  = x+colW/2;
+        const bh  = qtd>0 ? Math.max(6,Math.round((qtd/maxQ)*barH)) : 0;
+        const by  = topP+barH-bh;
+        if(bh>0){
+          svg += `<rect x="${x+2}" y="${by}" width="${colW-4}" height="${bh}" rx="3" fill="${cores[tipo]}" opacity="0.85"/>`;
+          if(qtd>0) svg += `<text x="${cx}" y="${by-10}" text-anchor="middle" font-size="10" font-weight="800" fill="${cores[tipo]}">${qtd}</text>`;
+        }
+        svg += `<text x="${cx}" y="${topP+barH+12}" text-anchor="middle" font-size="8" fill="#9ca3af">${tipo}</text>`;
+      });
+      const cx = padL + i*colW*2 + colW;
+      svg += `<text x="${cx}" y="${topP+barH+22}" text-anchor="middle" font-size="8" font-weight="600" fill="#9ca3af">${mLabel(m)}</text>`;
+    });
+    svg += '</svg>';
+
+    const totalQ = totaisMes.reduce((s,t)=>s+t.qtd,0);
+    const totalUSC = totaisMes.reduce((s,t)=>s+t.usc,0);
+    const r1Q = meses12.reduce((s,m)=>s+(data?.R1?.[m]?.qtd||0),0);
+    const r2Q = meses12.reduce((s,m)=>s+(data?.R2?.[m]?.qtd||0),0);
+
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${cor};border-radius:12px;padding:18px;margin-bottom:20px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800">${titulo}</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:4px">Barras: <span style="color:${cor}">■ R1</span> <span style="color:${cor}aa">■ R2</span> — últimos 12 meses</div>
+          </div>
+          <div style="display:flex;gap:20px;flex-shrink:0">
+            <div style="text-align:center"><div style="font-size:22px;font-weight:800;color:${cor}">${totalQ}</div><div style="font-size:9px;color:var(--muted)">OBRAS (12m)</div></div>
+            <div style="text-align:center"><div style="font-size:18px;font-weight:800;color:${cor}">${(totalUSC/1000).toFixed(1)}k</div><div style="font-size:9px;color:var(--muted)">USC (12m)</div></div>
+            <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:${cor}">${r1Q} R1 / ${r2Q} R2</div><div style="font-size:9px;color:var(--muted)">TIPOS</div></div>
+          </div>
+        </div>
+        <div style="overflow-x:auto">${svg}</div>
+      </div>`;
+  }
+
+  const data = buildData(obrasRD);
+  const geral = buildData(obrasRD); // same pool, all empreiteiras
+
+  // Build "geral" consolidated per mes
+  const geralPorTipo = {R1:{},R2:{}};
+  obrasRD.forEach(o=>{
+    const tipo = o.tipo||'R1';
+    const mes  = (o.dataAbertura||'').slice(0,7);
+    if(!meses12.includes(mes)) return;
+    if(!geralPorTipo[tipo][mes]) geralPorTipo[tipo][mes]={qtd:0,usc:0};
+    geralPorTipo[tipo][mes].qtd++;
+    geralPorTipo[tipo][mes].usc += parseFloat(o.usc)||0;
+  });
+
+  let html = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📊 Abertura de Obras — Últimos 12 Meses</div>
+    ${renderGrafico(geralPorTipo,'🌐 Geral — Todas as Empreiteiras','#7c6af7', obrasRD)}
+  `;
+
+  EMP.forEach((emp,i)=>{
+    const cor = i===0?'#3B82F6':'#22C55E';
+    const empData = {};
+    ['R1','R2'].forEach(t=>{
+      empData[t] = {};
+      meses12.forEach(m=>{
+        const v = data[emp]?.[t]?.[m];
+        if(v) empData[t][m]=v;
+      });
+    });
+    html += renderGrafico(empData, `🏢 ${emp}`, cor, obrasRD.filter(o=>o.empreiteira===emp));
+  });
+
+  cont.innerHTML = html;
+}
+
+window.renderAberturaObras = renderAberturaObras;
