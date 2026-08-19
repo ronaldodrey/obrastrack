@@ -341,6 +341,8 @@ function renderDash(){
   const listAll = obras; // todas as obras (sem filtro de perfil para o gerente navegar)
   const list = visibleObras();
   let html = '';
+  html += '<div id="dashFavoritosSlot"></div>';
+  renderDashFavoritos().then(h=>{ const d=document.getElementById('dashFavoritosSlot'); if(d&&h) d.innerHTML=h; });
 
   if(me.perfil === 'gerente'){
     // Seletor de perspectiva
@@ -1306,6 +1308,7 @@ function renderObras(){
       ||(me.perfil==='empreiteira'&&o.empreiteira===me.vinculo);
     const acts=canEdit
       ?`<button class="btn btn-secondary btn-sm" onclick="openObraModal('${o.id}')">✏️</button>
+        <button onclick="toggleFavorito('${o.id}')" title="Favoritar" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:12px;color:#F59E0B">⭐</button>
         ${me.perfil==='gerente'?`<button class="btn btn-danger btn-sm" onclick="delObra('${o.id}')">🗑️</button>`:''}`
       :'';
     const pendChip=o.pendencia
@@ -2106,7 +2109,8 @@ window.saveObra=async function(){
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
         // Reset flag de devolução quando empreiteira informa regularização novamente
-        ...(g('oRegularizacao') ? {pendenciaDevolvida:false, pendenciaDevolvidaEm:null} : {}),
+        // Reset devolução se obra estava devolvida (empreiteira regularizou novamente)
+        ...(obraAntiga?.pendenciaDevolvida ? {pendenciaDevolvida:false, pendenciaDevolvidaEm:null} : {}),
         kaffaEntries: allKaffasEmp,
         kaffa: lastKaffaDate || g('oKaffa') || obraAntiga?.kaffa || '',
         atualizadaEm:serverTimestamp()
