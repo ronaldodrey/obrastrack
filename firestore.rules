@@ -18,16 +18,8 @@ service cloud.firestore {
         perfil() == 'estagiario' ||
         (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
         (perfil() == 'fiscal' && resource.data.fiscal == vinculo()) ||
-        // fiscal_adm: pode atualizar campos de fiscalização/medição em QUALQUER obra
-        (perfil() == 'fiscal_adm' &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['fiscalizacao','pendencia','tiposPendencia','prazoPendencia','dataPendencia',
-                      'pendenciaResolvida','regularizacaoData','medicao','medida70','medida230',
-                      'medida280','medida280Motivo','cienFisc','cienMed','cienMed280',
-                      'cadastroConfirmado','locaisTrabalho','pendenciaDevolvida',
-                      'pendenciaDevolvidaEm','enquadramento','favorito','favoritoNota',
-                      'atualizadaEm'])) ||
-        (perfil() == 'fiscal_adm' && resource.data.fiscal == vinculo()) ||
+        // fiscal_adm: acesso completo de escrita (perfil administrativo)
+        perfil() == 'fiscal_adm' ||
         // Qualquer fiscal pode atualizar medidas e cientes de qualquer obra
         ((perfil() == 'fiscal' || perfil() == 'fiscal_adm') &&
           request.resource.data.diff(resource.data).affectedKeys()
@@ -40,14 +32,14 @@ service cloud.firestore {
     match /usuarios/{uid} {
       allow read: if request.auth != null &&
         (request.auth.uid == uid || perfil() == 'gerente');
-      // Usuário pode atualizar seus próprios favoritos
-      allow write: if request.auth != null && (perfil() == 'gerente' || request.auth.uid == uid);
+      // uid check FIRST to avoid perfil() call failing on own-document updates
+      allow write: if request.auth != null && (request.auth.uid == uid || perfil() == 'gerente');
     }
 
     match /empreiteiras/{id} {
       allow read: if request.auth != null;
-      // Usuário pode atualizar seus próprios favoritos
-      allow write: if request.auth != null && (perfil() == 'gerente' || request.auth.uid == uid);
+      // uid check FIRST to avoid perfil() call failing on own-document updates
+      allow write: if request.auth != null && (request.auth.uid == uid || perfil() == 'gerente');
     }
 
     match /notificacoes/{id} {
