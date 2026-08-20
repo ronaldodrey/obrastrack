@@ -191,7 +191,7 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras'],['pgAbertura','📊 Abertura de Obras']];
+  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras'],['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
@@ -244,6 +244,7 @@ window.showPage=function(id){
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
   if(id==='pgAbertura') renderAberturaObras();
+  if(id==='pgAnalise') renderAnaliseFinanceira();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
@@ -2116,7 +2117,8 @@ window.saveObra=async function(){
         atualizadaEm:serverTimestamp()
       };
       if(_kaffasPendentes.length > 0) _kaffasPendentes=[];
-    } else if(me.perfil==='fiscal'){
+    } else if(me.perfil==='fiscal'||me.perfil==='fiscal_adm'){
+      console.log('[SPPC] salvando como fiscal/fiscal_adm:', me.perfil);
       // Build medicoes array directly in the patch (same as empreiteira kaffa pattern)
       const existingMedsF = obraAntiga?.medicoes||[];
       const allMedsF = [...existingMedsF, ..._medicoesPendentes];
@@ -2214,7 +2216,7 @@ window.saveObra=async function(){
          patch.conclusao !== (obraAntiga?.conclusao||'') &&
          (me.perfil==='empreiteira'||me.perfil==='gerente'))
         await enviarEmailConclusao({...obraAntiga,...patch});
-      if(me.perfil==='fiscal'&&!obraAntiga?.pendencia&&patch.pendencia){
+      if((me.perfil==='fiscal'||me.perfil==='fiscal_adm')&&!obraAntiga?.pendencia&&patch.pendencia){
         patch.dataPendencia = hojeStr(); // registra a data em que a pendência foi cadastrada
         await enviarEmailPendencia({...obraAntiga,...patch});
       }
@@ -5329,9 +5331,11 @@ function renderAberturaObras(){
     });
     const maxQ = Math.max(...totaisMes.map(t=>t.qtd),1);
 
-    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+    const svgH = topP+barH+botP;
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
     svg += `<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
 
+    // BARRAS: obras por tipo
     meses12.forEach((m,i)=>{
       tipos.forEach((tipo,ti)=>{
         const v=data?.[tipo]?.[m]; const qtd=v?.qtd||0;
@@ -5339,15 +5343,42 @@ function renderAberturaObras(){
         const bh=qtd>0?Math.max(5,Math.round((qtd/maxQ)*barH)):0;
         const by=topP+barH-bh;
         if(bh>0){
-          svg+=`<rect x="${x+2}" y="${by}" width="${colW-4}" height="${bh}" rx="3" fill="${cores[tipo]}" opacity="0.9"/>`;
-          svg+=`<text x="${cx}" y="${by-8}" text-anchor="middle" font-size="10" font-weight="800" fill="${cores[tipo]}">${qtd}</text>`;
-          if(v?.usc>0) svg+=`<text x="${cx}" y="${by-20}" text-anchor="middle" font-size="8" fill="${cores[tipo]}" opacity=".8">${Math.round(v.usc)}USC</text>`;
+          svg+=`<rect x="${x+2}" y="${by}" width="${colW-4}" height="${bh}" rx="3" fill="${cores[tipo]}" opacity="0.85"/>`;
+          svg+=`<text x="${cx}" y="${by-4}" text-anchor="middle" font-size="10" font-weight="800" fill="${cores[tipo]}">${qtd}</text>`;
         }
         svg+=`<text x="${cx}" y="${topP+barH+12}" text-anchor="middle" font-size="7.5" fill="#9ca3af">${tipo}</text>`;
       });
       const cx=padL+i*colW*2+colW;
       svg+=`<text x="${cx}" y="${topP+barH+22}" text-anchor="middle" font-size="8" font-weight="600" fill="#9ca3af">${mLabel(m)}</text>`;
     });
+
+    // LINHAS USC: R1=laranja, R2=vermelho, Total=verde
+    const maxUSC = Math.max(...totaisMes.map(t=>t.usc), 1);
+    function uscY(u){ return topP+barH - Math.round((u/maxUSC)*barH); }
+    function mCx(i){ return padL + i*colW*2 + colW; }
+
+    const ptsR1=meses12.map((m,i)=>`${mCx(i)},${uscY(totaisMes[i].r1u)}`).join(' ');
+    const ptsR2=meses12.map((m,i)=>`${mCx(i)},${uscY(totaisMes[i].r2u)}`).join(' ');
+    const ptsTot=meses12.map((m,i)=>`${mCx(i)},${uscY(totaisMes[i].usc)}`).join(' ');
+
+    svg+=`<polyline points="${ptsR1}" fill="none" stroke="#F97316" stroke-width="2" stroke-dasharray="4 2" opacity="0.9"/>`;
+    svg+=`<polyline points="${ptsR2}" fill="none" stroke="#EF4444" stroke-width="2" stroke-dasharray="4 2" opacity="0.9"/>`;
+    svg+=`<polyline points="${ptsTot}" fill="none" stroke="#22C55E" stroke-width="2.5" opacity="0.95"/>`;
+
+    // Pontos nas linhas
+    meses12.forEach((m,i)=>{
+      const cx=mCx(i);
+      if(totaisMes[i].r1u>0){svg+=`<circle cx="${cx}" cy="${uscY(totaisMes[i].r1u)}" r="3" fill="#F97316"/><text x="${cx}" y="${uscY(totaisMes[i].r1u)-6}" text-anchor="middle" font-size="8" fill="#F97316">${Math.round(totaisMes[i].r1u)}</text>`;}
+      if(totaisMes[i].r2u>0){svg+=`<circle cx="${cx}" cy="${uscY(totaisMes[i].r2u)}" r="3" fill="#EF4444"/>`;}
+      if(totaisMes[i].usc>0){svg+=`<circle cx="${cx}" cy="${uscY(totaisMes[i].usc)}" r="3" fill="#22C55E"/>`;}
+    });
+
+    // Legenda linhas USC
+    const lx=svgW-150;
+    svg+=`<rect x="${lx}" y="4" width="148" height="34" rx="4" fill="var(--surface)" opacity="0.9"/>`;
+    svg+=`<line x1="${lx+6}" y1="14" x2="${lx+24}" y2="14" stroke="#F97316" stroke-width="2" stroke-dasharray="4 2"/><text x="${lx+28}" y="17" font-size="8" fill="#F97316">USC R1</text>`;
+    svg+=`<line x1="${lx+6}" y1="24" x2="${lx+24}" y2="24" stroke="#EF4444" stroke-width="2" stroke-dasharray="4 2"/><text x="${lx+28}" y="27" font-size="8" fill="#EF4444">USC R2</text>`;
+    svg+=`<line x1="${lx+80}" y1="14" x2="${lx+98}" y2="14" stroke="#22C55E" stroke-width="2.5"/><text x="${lx+102}" y="17" font-size="8" fill="#22C55E">USC Total</text>`;
     svg+='</svg>';
 
     const totalQ=totaisMes.reduce((s,t)=>s+t.qtd,0);
@@ -5441,3 +5472,150 @@ function renderAberturaObras(){
 }
 
 window.renderAberturaObras = renderAberturaObras;
+
+// ══════════════════════════════════════════════════════════════════════
+//  ABA "ANÁLISE FINANCEIRA" — Gerente
+// ══════════════════════════════════════════════════════════════════════
+function getParamsFinanceiros(){
+  return {
+    valorUSC:  parseFloat(localStorage.getItem('sppc_valorUSC')||'0'),
+    ajusteLM:  parseFloat(localStorage.getItem('sppc_ajusteLM')||'18'),
+    valorULV:  parseFloat(localStorage.getItem('sppc_valorULV')||'0'),
+    ajusteLV:  parseFloat(localStorage.getItem('sppc_ajusteLV')||'18'),
+  };
+}
+function saveParamsFinanceiros(){
+  const get = id => parseFloat(document.getElementById(id)?.value||'0');
+  const p = {
+    valorUSC: get('pfValorUSC'), ajusteLM: get('pfAjusteLM'),
+    valorULV: get('pfValorULV'), ajusteLV: get('pfAjusteLV'),
+  };
+  Object.entries(p).forEach(([k,v])=>localStorage.setItem('sppc_'+k, v));
+  toast('✓ Parâmetros salvos.');
+  renderAnaliseFinanceira();
+}
+window.saveParamsFinanceiros = saveParamsFinanceiros;
+
+function calcFinanceiro(obrasLista, p){
+  const totalUSC = obrasLista.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const totalULV = obrasLista.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const valUSC   = totalUSC * p.valorUSC * (1 + p.ajusteLM/100);
+  const valULV   = totalULV * p.valorULV * (1 + p.ajusteLV/100);
+  return { totalUSC, totalULV, valUSC, valULV, total: valUSC+valULV, qtd: obrasLista.length };
+}
+
+function brlFmt(n){ return n.toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+function fimDoMes(anoMes){ const [y,m]=anoMes.split('-'); return `${y}-${m}-${new Date(+y,+m,0).getDate()}`; }
+
+function renderAnaliseFinanceira(){
+  const cont = document.getElementById('pgAnaliseContent');
+  if(!cont) return;
+  const p = getParamsFinanceiros();
+  const hoje = new Date();
+
+  // SALDO DEVEDOR: obras concluídas sem medição
+  const devOp = obras.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medicao&&(o.tipo==='R1'||o.tipo==='R2'));
+  const devCalc = calcFinanceiro(devOp, p);
+
+  // SALDO FUTURO: obras sem conclusão com prazo vencendo nos próximos 3 meses
+  const futuro = [];
+  for(let mes=0;mes<3;mes++){
+    const dt = new Date(hoje.getFullYear(), hoje.getMonth()+mes+1, 1);
+    const ym = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+    const fim = fimDoMes(ym);
+    const ini = `${ym}-01`;
+    const obMes = obras.filter(o=>!o.cancelado&&!o.conclusao&&(o.tipo==='R1'||o.tipo==='R2')&&o.dataLimite>=ini&&o.dataLimite<=fim);
+    futuro.push({ ym, mes: String(dt.getMonth()+1).padStart(2,'0')+'/'+dt.getFullYear(), obMes, calc: calcFinanceiro(obMes,p) });
+  }
+  const totalFuturo = futuro.reduce((s,f)=>s+f.calc.total,0);
+
+  const cardStyle = (bor,bg) => `style="background:${bg||'var(--surface)'};border:1px solid var(--border);border-left:4px solid ${bor};border-radius:12px;padding:18px;margin-bottom:16px"`;
+
+  const paramBlock = `
+    <div ${cardStyle('#7c6af7')}>
+      <div style="font-weight:800;font-size:14px;margin-bottom:14px">⚙️ Parâmetros de Cálculo</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px">
+        <div class="fg"><label>Valor Unitário USC (R$)</label><input type="number" id="pfValorUSC" value="${p.valorUSC}" placeholder="0.00" step="0.01" min="0"></div>
+        <div class="fg"><label>Ajuste de correção LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" placeholder="18" step="0.1"></div>
+        <div class="fg"><label>Valor Unitário ULV (R$)</label><input type="number" id="pfValorULV" value="${p.valorULV}" placeholder="0.00" step="0.01" min="0"></div>
+        <div class="fg"><label>Ajuste de correção LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" placeholder="18" step="0.1"></div>
+      </div>
+      <button onclick="saveParamsFinanceiros()" class="btn btn-primary btn-sm">💾 Aplicar e Calcular</button>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">Fórmula: Qtd USC × Valor USC × (1 + Ajuste LM%) + Qtd ULV × Valor ULV × (1 + Ajuste LV%)</div>
+    </div>`;
+
+  const saldoDevedor = `
+    <div ${cardStyle('#EF4444')}>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:800;font-size:15px;color:#EF4444">🔴 Saldo Devedor</div>
+          <div style="font-size:10px;color:var(--muted)">Obras concluídas sem medição (${devCalc.qtd} obras RD)</div>
+        </div>
+        <div style="font-size:28px;font-weight:900;color:#EF4444">${brlFmt(devCalc.total)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+        <div style="background:var(--bg);border-radius:8px;padding:10px">
+          <div style="font-size:10px;color:var(--muted)">USC Total</div>
+          <div style="font-size:18px;font-weight:800">${devCalc.totalUSC.toFixed(1)}</div>
+          <div style="font-size:10px;color:#EF4444">→ ${brlFmt(devCalc.valUSC)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:10px">
+          <div style="font-size:10px;color:var(--muted)">ULV Total</div>
+          <div style="font-size:18px;font-weight:800">${devCalc.totalULV.toFixed(1)}</div>
+          <div style="font-size:10px;color:#EF4444">→ ${brlFmt(devCalc.valULV)}</div>
+        </div>
+      </div>
+    </div>`;
+
+  const saldoFuturoCards = futuro.map((f,i)=>`
+    <div ${cardStyle('#F59E0B')}>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:800;font-size:14px;color:#F59E0B">⏳ Saldo Futuro — ${f.mes} (Mês +${i+1})</div>
+          <div style="font-size:10px;color:var(--muted)">${f.calc.qtd} obras com prazo neste mês</div>
+        </div>
+        <div style="font-size:24px;font-weight:900;color:#F59E0B">${brlFmt(f.calc.total)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+        <div style="background:var(--bg);border-radius:8px;padding:8px">
+          <div style="font-size:9px;color:var(--muted)">USC Total</div>
+          <div style="font-size:16px;font-weight:700">${f.calc.totalUSC.toFixed(1)}</div>
+          <div style="font-size:10px;color:#F59E0B">→ ${brlFmt(f.calc.valUSC)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:8px">
+          <div style="font-size:9px;color:var(--muted)">ULV Total</div>
+          <div style="font-size:16px;font-weight:700">${f.calc.totalULV.toFixed(1)}</div>
+          <div style="font-size:10px;color:#F59E0B">→ ${brlFmt(f.calc.valULV)}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  const totalGeral = devCalc.total + totalFuturo;
+  const resumo = `
+    <div ${cardStyle('#22C55E','rgba(34,197,94,.05)')}>
+      <div style="font-weight:800;font-size:14px;margin-bottom:12px">📊 Resumo Geral de Exposição</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        <div style="text-align:center;padding:12px;background:rgba(239,68,68,.08);border-radius:8px;border:1px solid rgba(239,68,68,.3)">
+          <div style="font-size:11px;color:var(--muted)">Saldo Devedor Atual</div>
+          <div style="font-size:22px;font-weight:900;color:#EF4444">${brlFmt(devCalc.total)}</div>
+        </div>
+        <div style="text-align:center;padding:12px;background:rgba(245,158,11,.08);border-radius:8px;border:1px solid rgba(245,158,11,.3)">
+          <div style="font-size:11px;color:var(--muted)">Saldo Futuro (3 meses)</div>
+          <div style="font-size:22px;font-weight:900;color:#F59E0B">${brlFmt(totalFuturo)}</div>
+        </div>
+        <div style="text-align:center;padding:12px;background:rgba(34,197,94,.08);border-radius:8px;border:1px solid rgba(34,197,94,.3)">
+          <div style="font-size:11px;color:var(--muted)">Total Exposição</div>
+          <div style="font-size:24px;font-weight:900;color:#22C55E">${brlFmt(totalGeral)}</div>
+        </div>
+      </div>
+    </div>`;
+
+  cont.innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">💰 Análise Financeira</div>
+    ${paramBlock}
+    ${resumo}
+    ${saldoDevedor}
+    ${saldoFuturoCards}`;
+}
+window.renderAnaliseFinanceira = renderAnaliseFinanceira;
