@@ -1944,7 +1944,7 @@ function renderListaMedicoes(){
         ${m.tipo==='final'?'<span style="font-size:10px;color:var(--accent)">Encerra a medição</span>':'<span style="font-size:10px;color:var(--muted)">Parcial</span>'}
         ${isPend?`<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>
           <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerMedicaoPendente('${m.id}')">✕</button>`:
-         (me.perfil==='gerente'||me.perfil==='fiscal_adm')?`<button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px;margin-left:auto" onclick="excluirMedicaoSalva('${obraId}','${m.id}')">✕</button>`:''}
+         (me.perfil==='gerente'||me.perfil==='fiscal_adm')?`<button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px;margin-left:auto" onclick="excluirMedicaoSalva('${obra?.id}','${m.id}')">✕</button>`:''}
       </div>`;
     }).join('')}`;
 }
