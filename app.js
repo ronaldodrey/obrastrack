@@ -191,7 +191,13 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  const tabs=[['pgDash','📊 Dashboard'],['pgObras','🏗️ Obras'],['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']];
+  // pgAbertura e pgAnalise somente para gerente e fiscais
+  const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm';
+  const tabs=[
+    ['pgDash','📊 Dashboard'],
+    ['pgObras','🏗️ Obras'],
+    ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
+  ];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
@@ -1460,11 +1466,13 @@ window.openObraModal=function(obraId){
     // Mostra botão de devolução de pendência para fiscal quando empreiteira já regularizou
     setTimeout(()=>atualizarVisibilidadeDevoPend(obra), 50);
     setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
-    // Restore USC/ULV medido gerente
+    // Restore USC/ULV medido — visível para fiscal/fiscal_adm/gerente
     const uscMedEl=document.getElementById('oUSCMedidoGerente');
     const ulvMedEl=document.getElementById('oULVMedidoGerente');
-    if(uscMedEl) uscMedEl.value=obra.uscMedidoGerente!=null?obra.uscMedidoGerente:'';
-    if(ulvMedEl) ulvMedEl.value=obra.ulvMedidoGerente!=null?obra.ulvMedidoGerente:'';
+    if(uscMedEl){ uscMedEl.value=obra.uscMedidoGerente!=null?obra.uscMedidoGerente:'';
+      const fgUsc=document.getElementById('fgUSCMedido'); if(fgUsc) fgUsc.style.display=(p==='gerente'||p==='fiscal'||p==='fiscal_adm')?'flex':'none'; }
+    if(ulvMedEl){ ulvMedEl.value=obra.ulvMedidoGerente!=null?obra.ulvMedidoGerente:'';
+      const fgUlv=document.getElementById('fgULVMedido'); if(fgUlv) fgUlv.style.display=(p==='gerente'||p==='fiscal'||p==='fiscal_adm')?'flex':'none'; }
     setChk('oContratosAssinado',obra.contratosAssinado); setChk('oMedicoesAssinadas',obra.medicoesAssinadas);
     setChk('oProjetosAsBuilt',obra.projetosAsBuilt); set('oCaixaArmazenada',obra.caixaArmazenada);
     // Enable oArmazenado if all deps met (delayed to allow DOM update)
@@ -1876,6 +1884,22 @@ window.adicionarMedicao = function(){
   renderListaMedicoes();
   cancelarNovaMedicao();
 };
+
+window.excluirMedicaoSalva = async function(obraId, medId){
+  if(!confirm('Excluir esta medição do Firestore?')) return;
+  try{
+    const obra = obras.find(o=>o.id===obraId);
+    if(!obra) return;
+    const novas = (obra.medicoes||[]).filter(m=>m.id!==medId);
+    const lastDate = novas.map(m=>m.data).filter(Boolean).sort().slice(-1)[0]||'';
+    await updateDoc(doc(db,'obras',obraId),{
+      medicoes:novas,
+      medicao:lastDate||null,
+      atualizadaEm:serverTimestamp()
+    });
+    toast('✓ Medição excluída.');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
 window.removerMedicaoPendente = function(id){
   _medicoesPendentes=_medicoesPendentes.filter(m=>m.id!==id);
   renderListaMedicoes();
@@ -1910,7 +1934,8 @@ function renderListaMedicoes(){
         <span class="chip ${m.tipo==='final'?'chip-green':'chip-yellow'}" style="font-size:9px">${m.tipo==='final'?'✓ Final':'~ Parcial'}</span>
         ${m.tipo==='final'?'<span style="font-size:10px;color:var(--accent)">Encerra a medição</span>':'<span style="font-size:10px;color:var(--muted)">Parcial</span>'}
         ${isPend?`<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>
-          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerMedicaoPendente('${m.id}')">✕</button>`:''}
+          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px" onclick="removerMedicaoPendente('${m.id}')">✕</button>`:
+         (me.perfil==='gerente'||me.perfil==='fiscal_adm')?`<button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px;margin-left:auto" onclick="excluirMedicaoSalva('${obraId}','${m.id}')">✕</button>`:''}
       </div>`;
     }).join('')}`;
 }
@@ -2053,6 +2078,7 @@ window.saveObra=async function(){
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         // Reset cienMed quando fiscal confirma nova fiscalização (spread condicional evita undefined)
         ...(g('oFiscalizacao') && g('oFiscalizacao')!==(obraAntiga?.fiscalizacao||'') ? {cienMed: false} : {}),
+        ...(document.getElementById('oUSCMedidoGerente')?.value!==''?{uscMedidoGerente:parseFloat(document.getElementById('oUSCMedidoGerente')?.value)||null}:{}),
         tiposPendencia:getTiposPendencia(), pendenciaOutro:g('oPendenciaOutro'), prazoPendencia:g('oPrazoPendencia'), prazoPendenciaLabel:document.getElementById('oPrazoPendenciaLabel')?.value||'',
         pendenciaResolvida:gChk('oPendenciaResolvida'),
         // Devolução: fiscal devolve para empreiteira regularizar de novo
@@ -5492,14 +5518,25 @@ function saveParamsFinanceiros(){
     valorULV: get('pfValorULV'), ajusteLV: get('pfAjusteLV'),
     meta:     get('pfMetaMensal'),
   };
-  Object.entries(p).forEach(([k,v])=>localStorage.setItem('sppc_'+k, v));
+  // Save each param with explicit key to avoid key mismatches
+  localStorage.setItem('sppc_valorUSC',   p.valorUSC);
+  localStorage.setItem('sppc_ajusteLM',   p.ajusteLM);
+  localStorage.setItem('sppc_valorULV',   p.valorULV);
+  localStorage.setItem('sppc_ajusteLV',   p.ajusteLV);
+  localStorage.setItem('sppc_metaMensal', p.meta);
   toast('✓ Parâmetros salvos.');
   renderAnaliseFinanceira();
 }
 window.saveParamsFinanceiros = saveParamsFinanceiros;
 
 function calcFinanceiro(obrasLista, p){
-  const totalUSC = obrasLista.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  // Desconta USC/ULV já medidos (parciais e gerente)
+  const totalUSC = obrasLista.reduce((s,o)=>{
+    const bruto = parseFloat(o.usc)||0;
+    const medido = o.uscMedidoGerente!=null ? parseFloat(o.uscMedidoGerente)||0
+      : (o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);
+    return s + Math.max(0, bruto-medido);
+  },0);
   const totalULV = obrasLista.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
   const valLM    = totalUSC * p.valorUSC * (1 + p.ajusteLM/100);
   const valLV    = totalULV * p.valorULV * (1 + p.ajusteLV/100);
