@@ -1875,14 +1875,13 @@ window.adicionarMedicao = function(){
   const tipo=document.getElementById('oMedicaoTipo').value;
   if(!data||!tipo){ toast('Preencha data e tipo.','err'); return; }
   if(data>hojeStr()){ toast('Data de medição não pode ser futura.','err'); return; }
-  const med={
-    id:'med_'+Date.now(),
-    data, tipo,
-    // USC/ULV é definido pelo gerente no campo da obra, não no lançamento da medição
-    uscMedido: 0,
-    ulvMedido: 0,
-  };
+  const uscMedido = tipo==='parcial' ? (parseFloat(document.getElementById('oMedUSCParcial')?.value)||0) : 0;
+  const ulvMedido = tipo==='parcial' ? (parseFloat(document.getElementById('oMedULVParcial')?.value)||0) : 0;
+  const med={ id:'med_'+Date.now(), data, tipo, uscMedido, ulvMedido };
   _medicoesPendentes.push(med);
+  // Limpa campos parciais
+  if(document.getElementById('oMedUSCParcial')) document.getElementById('oMedUSCParcial').value='';
+  if(document.getElementById('oMedULVParcial')) document.getElementById('oMedULVParcial').value='';
   renderListaMedicoes();
   cancelarNovaMedicao();
 };
@@ -1891,16 +1890,24 @@ window.excluirMedicaoSalva = async function(obraId, medId){
   if(!confirm('Excluir esta medição do Firestore?')) return;
   try{
     const obra = obras.find(o=>o.id===obraId);
-    if(!obra) return;
-    const novas = (obra.medicoes||[]).filter(m=>m.id!==medId);
-    const lastDate = novas.map(m=>m.data).filter(Boolean).sort().slice(-1)[0]||'';
+    if(!obra){ toast('Obra não encontrada.','err'); return; }
+    const novas = (obra.medicoes||[]).filter(m=>String(m.id)!==String(medId));
+    console.log('[ExcluirMed] total antes:', obra.medicoes?.length, '→ depois:', novas.length, 'medId:', medId);
+    // Só atualiza medicao (data) se houver medição FINAL restante
+    const finalRestantes = novas.filter(m=>m.tipo==='final');
+    const lastFinalDate = finalRestantes.map(m=>m.data).sort().slice(-1)[0]||null;
     await updateDoc(doc(db,'obras',obraId),{
-      medicoes:novas,
-      medicao:lastDate||null,
-      atualizadaEm:serverTimestamp()
+      medicoes: novas,
+      medicao: lastFinalDate,
+      atualizadaEm: serverTimestamp()
     });
     toast('✓ Medição excluída.');
-  }catch(e){ toast('Erro: '+e.message,'err'); }
+    // Refresh modal list
+    setTimeout(()=>{ if(document.getElementById('listaMedicoes')) renderListaMedicoes(); }, 300);
+  }catch(e){
+    console.error('[ExcluirMed] erro:', e);
+    toast('Erro ao excluir: '+e.message,'err');
+  }
 };
 window.removerMedicaoPendente = function(id){
   _medicoesPendentes=_medicoesPendentes.filter(m=>m.id!==id);
@@ -2150,7 +2157,9 @@ window.saveObra=async function(){
       // Build medicoes array directly in the patch (same as empreiteira kaffa pattern)
       const existingMedsF = obraAntiga?.medicoes||[];
       const allMedsF = [...existingMedsF, ..._medicoesPendentes];
-      const lastMedDate = allMedsF.map(m=>m.data).filter(Boolean).sort().slice(-1)[0]||'';
+      // medicao (data) só é atualizado pela medição FINAL — parcial não muda status da obra
+      const finalMedsF = allMedsF.filter(m=>m.tipo==='final');
+      const lastMedDate = finalMedsF.map(m=>m.data).filter(Boolean).sort().slice(-1)[0] || obraAntiga?.medicao || '';
       patch={
         dataDesligamento:g('oDesligamento'),
         desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
@@ -2210,8 +2219,11 @@ window.saveObra=async function(){
       if(_medicoesPendentes.length > 0 && (me.perfil==='gerente' || !patch.medicoes)){
         const existingMeds = obraAntiga?.medicoes||[];
         patch.medicoes = [...existingMeds, ..._medicoesPendentes];
-        const allDates = patch.medicoes.map(m=>m.data).filter(Boolean).sort();
-        if(allDates.length) patch.medicao = allDates[allDates.length-1];
+        // medicao (campo de data) só é setado pela medição FINAL
+        const finalMeds = patch.medicoes.filter(m=>m.tipo==='final');
+        const lastFinalDate = finalMeds.map(m=>m.data).filter(Boolean).sort().slice(-1)[0];
+        if(lastFinalDate) patch.medicao = lastFinalDate;
+        else patch.medicao = obraAntiga?.medicao||null; // mantém medicao anterior se havia
         _medicoesPendentes = [];
       }
       // Save kaffaEntries for non-empreiteira profiles (empreiteira handled in patch above)
