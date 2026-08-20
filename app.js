@@ -1470,9 +1470,11 @@ window.openObraModal=function(obraId){
     const uscMedEl=document.getElementById('oUSCMedidoGerente');
     const ulvMedEl=document.getElementById('oULVMedidoGerente');
     if(uscMedEl){ uscMedEl.value=obra.uscMedidoGerente!=null?obra.uscMedidoGerente:'';
-      const fgUsc=document.getElementById('fgUSCMedido'); if(fgUsc) fgUsc.style.display=(p==='gerente'||p==='fiscal'||p==='fiscal_adm')?'flex':'none'; }
+      const fgUsc=document.getElementById('fgUSCMedido');
+      if(fgUsc) fgUsc.style.display=(me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm')?'flex':'none'; }
     if(ulvMedEl){ ulvMedEl.value=obra.ulvMedidoGerente!=null?obra.ulvMedidoGerente:'';
-      const fgUlv=document.getElementById('fgULVMedido'); if(fgUlv) fgUlv.style.display=(p==='gerente'||p==='fiscal'||p==='fiscal_adm')?'flex':'none'; }
+      const fgUlv=document.getElementById('fgULVMedido');
+      if(fgUlv) fgUlv.style.display=(me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm')?'flex':'none'; }
     setChk('oContratosAssinado',obra.contratosAssinado); setChk('oMedicoesAssinadas',obra.medicoesAssinadas);
     setChk('oProjetosAsBuilt',obra.projetosAsBuilt); set('oCaixaArmazenada',obra.caixaArmazenada);
     // Enable oArmazenado if all deps met (delayed to allow DOM update)
@@ -5602,7 +5604,7 @@ function renderGraficoFinanceiro(meses, titulo, cor, p){
   if(p.meta>0){
     const metaY = toY(p.meta);
     svg+=`<line x1="${padL}" y1="${metaY}" x2="${svgW-4}" y2="${metaY}" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="6 3"/>`;
-    svg+=`<text x="${svgW-6}" y="${metaY-4}" text-anchor="end" font-size="8" fill="#F59E0B" font-weight="700">META ${brlFmt(p.meta)}</text>`;
+    svg+=`<text x="${svgW-6}" y="${metaY-4}" text-anchor="end" font-size="8" fill="#F59E0B" font-weight="700">🎯 META ${brlFmt(p.meta)}/mês</text>`;
   }
   svg+='</svg>';
   return svg;
@@ -5689,7 +5691,13 @@ function renderAnaliseFinanceira(){
         <div class="fg"><label>Ajuste LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" placeholder="18" step="0.1"></div>
         <div class="fg"><label>Valor Unitário ULV (R$/ULV)</label><input type="number" id="pfValorULV" value="${p.valorULV}" placeholder="0.00" step="0.01" min="0"></div>
         <div class="fg"><label>Ajuste LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" placeholder="18" step="0.1"></div>
-        <div class="fg"><label>🎯 Meta Mensal de Custo (R$)</label><input type="number" id="pfMetaMensal" value="${p.meta}" placeholder="0.00" step="1000" min="0" style="border-color:#F59E0B"></div>
+        <div class="fg"><label>🎯 Meta Mensal de Custo <span style="color:#F59E0B;font-weight:700">(valor em R$)</span></label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:#F59E0B;font-weight:700">R$</span>
+            <input type="number" id="pfMetaMensal" value="${p.meta}" placeholder="Ex: 500000" step="10000" min="0" style="border-color:#F59E0B;flex:1">
+          </div>
+          <div style="font-size:9px;color:var(--muted)">Ex: se quer limitar custo mensal em R$ 500.000 → digite 500000</div>
+        </div>
       </div>
       <button onclick="saveParamsFinanceiros()" class="btn btn-primary btn-sm">💾 Aplicar e Calcular</button>
       <div style="font-size:10px;color:var(--muted);margin-top:8px">
