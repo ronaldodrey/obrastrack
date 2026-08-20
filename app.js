@@ -1079,19 +1079,17 @@ function renderMonitorPrazosTipo_inner(list){
       const prazoData = fnPrazo(x.o);
       const prazoFmt  = prazoData ? fmtTxt(prazoData) : '—';
       return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent)">${x.o.numero}</td>
+        <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent);white-space:nowrap">${x.o.numero}</td>
+        <td style="padding:5px 10px;font-weight:700;font-size:12px;color:${cor2};white-space:nowrap">${prazoFmt}</td>
+        <td style="padding:5px 10px;font-size:10px;color:${cor2};white-space:nowrap">${txt}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.cidade||'—'}</td>
-        <td style="padding:5px 10px">
-          <div style="font-weight:700;font-size:11px;color:${cor2}">${prazoFmt}</div>
-          <div style="font-size:9px;color:${cor2};opacity:.85">${txt}</div>
-        </td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
       </tr>`;
     }).join('');
     const maisTxt = lista.length > 12 ? `<tr><td colspan="6" style="padding:5px 10px;font-size:10px;color:var(--muted)">... e mais ${lista.length-12} obra(s)</td></tr>` : '';
     return `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow-x:auto">
         <div style="padding:10px 14px;background:${cor}12;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <div>
             <span style="font-weight:700;font-size:12px">${titulo}</span>
@@ -1104,8 +1102,9 @@ function renderMonitorPrazosTipo_inner(list){
           : `<table style="width:100%;border-collapse:collapse">
               <thead><tr style="background:var(--surface2)">
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Nº Obra</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;color:#EF4444">Data Lim.</th>
+                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Situação</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Cidade</th>
-                <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Prazo Limite · Situação</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Fiscal</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Empreiteira</th>
               </tr></thead>
@@ -5315,59 +5314,94 @@ function renderAberturaObras(){
 
   function renderGrafico(data, titulo, cor, pool){
     const tipos = ['R1','R2'];
-    const cores = {R1:cor, R2:cor+'aa'};
-    const colW = 56, barH = 100, topP = 48, botP = 24, padL = 6;
+    const cores = {R1:cor, R2:cor+'88'};
+    const colW = 52, barH = 90, topP = 44, botP = 24, padL = 6;
     const svgW = padL + meses12.length * colW * 2 + padL;
 
-    // Count per mes (all tipos combined)
     const totaisMes = meses12.map(m=>{
-      let qtd=0, usc=0;
-      tipos.forEach(t=>{ qtd+=(data?.[t]?.[m]?.qtd||0); usc+=(data?.[t]?.[m]?.usc||0); });
-      return {m, qtd, usc};
+      let qtd=0, usc=0, r1q=0, r2q=0, r1u=0, r2u=0;
+      tipos.forEach(t=>{
+        const v=data?.[t]?.[m]; if(!v) return;
+        qtd+=v.qtd; usc+=v.usc;
+        if(t==='R1'){r1q+=v.qtd;r1u+=v.usc;}else{r2q+=v.qtd;r2u+=v.usc;}
+      });
+      return {m,qtd,usc,r1q,r2q,r1u,r2u};
     });
-    const maxQ = Math.max(...totaisMes.map(t=>t.qtd), 1);
+    const maxQ = Math.max(...totaisMes.map(t=>t.qtd),1);
 
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
     svg += `<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
 
     meses12.forEach((m,i)=>{
       tipos.forEach((tipo,ti)=>{
-        const qtd = data?.[tipo]?.[m]?.qtd||0;
-        const usc = data?.[tipo]?.[m]?.usc||0;
-        const x   = padL + i*colW*2 + ti*colW;
-        const cx  = x+colW/2;
-        const bh  = qtd>0 ? Math.max(6,Math.round((qtd/maxQ)*barH)) : 0;
-        const by  = topP+barH-bh;
+        const v=data?.[tipo]?.[m]; const qtd=v?.qtd||0;
+        const x=padL+i*colW*2+ti*colW; const cx=x+colW/2;
+        const bh=qtd>0?Math.max(5,Math.round((qtd/maxQ)*barH)):0;
+        const by=topP+barH-bh;
         if(bh>0){
-          svg += `<rect x="${x+2}" y="${by}" width="${colW-4}" height="${bh}" rx="3" fill="${cores[tipo]}" opacity="0.85"/>`;
-          if(qtd>0) svg += `<text x="${cx}" y="${by-10}" text-anchor="middle" font-size="10" font-weight="800" fill="${cores[tipo]}">${qtd}</text>`;
+          svg+=`<rect x="${x+2}" y="${by}" width="${colW-4}" height="${bh}" rx="3" fill="${cores[tipo]}" opacity="0.9"/>`;
+          svg+=`<text x="${cx}" y="${by-8}" text-anchor="middle" font-size="10" font-weight="800" fill="${cores[tipo]}">${qtd}</text>`;
+          if(v?.usc>0) svg+=`<text x="${cx}" y="${by-20}" text-anchor="middle" font-size="8" fill="${cores[tipo]}" opacity=".8">${Math.round(v.usc)}USC</text>`;
         }
-        svg += `<text x="${cx}" y="${topP+barH+12}" text-anchor="middle" font-size="8" fill="#9ca3af">${tipo}</text>`;
+        svg+=`<text x="${cx}" y="${topP+barH+12}" text-anchor="middle" font-size="7.5" fill="#9ca3af">${tipo}</text>`;
       });
-      const cx = padL + i*colW*2 + colW;
-      svg += `<text x="${cx}" y="${topP+barH+22}" text-anchor="middle" font-size="8" font-weight="600" fill="#9ca3af">${mLabel(m)}</text>`;
+      const cx=padL+i*colW*2+colW;
+      svg+=`<text x="${cx}" y="${topP+barH+22}" text-anchor="middle" font-size="8" font-weight="600" fill="#9ca3af">${mLabel(m)}</text>`;
     });
-    svg += '</svg>';
+    svg+='</svg>';
 
-    const totalQ = totaisMes.reduce((s,t)=>s+t.qtd,0);
-    const totalUSC = totaisMes.reduce((s,t)=>s+t.usc,0);
-    const r1Q = meses12.reduce((s,m)=>s+(data?.R1?.[m]?.qtd||0),0);
-    const r2Q = meses12.reduce((s,m)=>s+(data?.R2?.[m]?.qtd||0),0);
+    const totalQ=totaisMes.reduce((s,t)=>s+t.qtd,0);
+    const totalUSC=totaisMes.reduce((s,t)=>s+t.usc,0);
+    const r1Q=totaisMes.reduce((s,t)=>s+t.r1q,0); const r1USC=totaisMes.reduce((s,t)=>s+t.r1u,0);
+    const r2Q=totaisMes.reduce((s,t)=>s+t.r2q,0); const r2USC=totaisMes.reduce((s,t)=>s+t.r2u,0);
+
+    // USC monthly table
+    const uscTable = `<div style="overflow-x:auto;margin-top:14px"><table style="width:100%;border-collapse:collapse;font-size:10px">
+      <thead><tr style="background:var(--surface2)">
+        <th style="padding:5px 8px;text-align:left">Mês</th>
+        <th style="padding:5px 8px;text-align:right;color:${cor}">R1 Obras</th>
+        <th style="padding:5px 8px;text-align:right;color:${cor}">R1 USC</th>
+        <th style="padding:5px 8px;text-align:right;color:${cor}88">R2 Obras</th>
+        <th style="padding:5px 8px;text-align:right;color:${cor}88">R2 USC</th>
+        <th style="padding:5px 8px;text-align:right;font-weight:700">Total USC</th>
+      </tr></thead>
+      <tbody>${totaisMes.filter(t=>t.qtd>0).map(t=>`
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:4px 8px;font-weight:600">${mLabel(t.m)}</td>
+          <td style="padding:4px 8px;text-align:right">${t.r1q}</td>
+          <td style="padding:4px 8px;text-align:right;color:${cor}">${t.r1u.toFixed(1)}</td>
+          <td style="padding:4px 8px;text-align:right">${t.r2q}</td>
+          <td style="padding:4px 8px;text-align:right;color:${cor}88">${t.r2u.toFixed(1)}</td>
+          <td style="padding:4px 8px;text-align:right;font-weight:700">${t.usc.toFixed(1)}</td>
+        </tr>`).join('')}
+        <tr style="background:var(--surface2);font-weight:700">
+          <td style="padding:5px 8px">TOTAL</td>
+          <td style="padding:5px 8px;text-align:right">${r1Q}</td>
+          <td style="padding:5px 8px;text-align:right;color:${cor}">${r1USC.toFixed(1)}</td>
+          <td style="padding:5px 8px;text-align:right">${r2Q}</td>
+          <td style="padding:5px 8px;text-align:right;color:${cor}88">${r2USC.toFixed(1)}</td>
+          <td style="padding:5px 8px;text-align:right">${totalUSC.toFixed(1)}</td>
+        </tr>
+      </tbody></table></div>`;
 
     return `
       <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${cor};border-radius:12px;padding:18px;margin-bottom:20px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px">
           <div>
             <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800">${titulo}</div>
-            <div style="font-size:10px;color:var(--muted);margin-top:4px">Barras: <span style="color:${cor}">■ R1</span> <span style="color:${cor}aa">■ R2</span> — últimos 12 meses</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">
+              <span style="color:${cor}">■ R1</span> &nbsp; <span style="color:${cor}88">■ R2</span> &nbsp;—&nbsp; últimos 12 meses
+            </div>
           </div>
-          <div style="display:flex;gap:20px;flex-shrink:0">
-            <div style="text-align:center"><div style="font-size:22px;font-weight:800;color:${cor}">${totalQ}</div><div style="font-size:9px;color:var(--muted)">OBRAS (12m)</div></div>
-            <div style="text-align:center"><div style="font-size:18px;font-weight:800;color:${cor}">${(totalUSC/1000).toFixed(1)}k</div><div style="font-size:9px;color:var(--muted)">USC (12m)</div></div>
-            <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:${cor}">${r1Q} R1 / ${r2Q} R2</div><div style="font-size:9px;color:var(--muted)">TIPOS</div></div>
+          <div style="display:flex;gap:16px;flex-shrink:0;flex-wrap:wrap">
+            <div style="text-align:center"><div style="font-size:22px;font-weight:800;color:${cor}">${totalQ}</div><div style="font-size:9px;color:var(--muted)">OBRAS TOTAL</div></div>
+            <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:${cor}">${totalUSC.toFixed(0)}</div><div style="font-size:9px;color:var(--muted)">USC TOTAL</div></div>
+            <div style="text-align:center"><div style="font-size:13px;font-weight:700;color:${cor}">${r1Q}<br><span style="font-size:9px">obras R1</span></div><div style="font-size:9px;color:var(--muted)">${r1USC.toFixed(0)} USC</div></div>
+            <div style="text-align:center"><div style="font-size:13px;font-weight:700;color:${cor}88">${r2Q}<br><span style="font-size:9px">obras R2</span></div><div style="font-size:9px;color:var(--muted)">${r2USC.toFixed(0)} USC</div></div>
           </div>
         </div>
         <div style="overflow-x:auto">${svg}</div>
+        ${uscTable}
       </div>`;
   }
 
