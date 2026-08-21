@@ -3262,6 +3262,19 @@ function initEquipFromObra(obra){
   renderEquipRetirados();
 }
 
+
+window._salvarFiltroPrograma = function(){
+  const progs = ['PODI','Mono-Tri','Regulatório','Melhoria'];
+  const f = {};
+  progs.forEach(prog=>{
+    const el = document.getElementById('filtProg_'+prog);
+    f[prog] = el ? el.checked : true;
+  });
+  const semEl = document.getElementById('filtProg__semProg');
+  f['_semProg'] = semEl ? semEl.checked : true;
+  localStorage.setItem('analise_prog_filtro', JSON.stringify(f));
+  renderAnaliseFinanceira();
+};
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -5340,8 +5353,7 @@ function renderAberturaObras(){
   const mLabel = ym => { const [y,m]=ym.split('-'); return `${m}/${y.slice(2)}`; };
 
   // Filter apenas obras RD (R1+R2)
-  const obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
-  const obrasRD = obrasComFiltro(obrasRDtodas);
+  const obrasRD = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
 
   // Build data: {empreiteira: {tipo: {mes: {qtd,usc}}}}
   function buildData(pool){
@@ -5699,7 +5711,14 @@ function renderAnaliseFinanceira(){
   if(!cont) return;
   const p = getParamsFinanceiros();
   const EMP = ['CS ELETRICIDADE','ELETELSUL'];
-  const obrasRD = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+
+  // Filtro por programa
+  const progFiltros = JSON.parse(localStorage.getItem('analise_prog_filtro')||'{}');
+  function obrasComFiltro(pool){
+    return pool.filter(o=>!o.programa ? progFiltros['_semProg']!==false : progFiltros[o.programa]!==false);
+  }
+  const obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+  const obrasRD = obrasComFiltro(obrasRDtodas);
   const cores = {'CS ELETRICIDADE':'#3B82F6', 'ELETELSUL':'#22C55E', 'Geral':'#7c6af7'};
 
   const paramBlock = `
