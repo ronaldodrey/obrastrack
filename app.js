@@ -1442,7 +1442,7 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); set('oPrograma',obra.programa||''); toggleEnquadramento();
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); set('oPrograma',obra.programa||(obra.tipo==='R1'?'Regulatório':'')); toggleEnquadramento();
     // Transformer fields
     set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
@@ -2112,7 +2112,7 @@ window.saveObra=async function(){
         caixaArmazenada:g('oCaixaArmazenada'),
         descricao:g('oDescricao')||null,
         enquadramento:g('oEnquadramento')||null,
-        programa:g('oPrograma')||null,
+        programa: g('oTipo')==='R1' ? 'Regulatório' : (g('oPrograma')||null),
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         dataTransf:g('oDataTransf')||null,
@@ -5263,8 +5263,27 @@ function renderDashSummaryEmpreiteira(minhas){
 // ══════════════════════════════════════════════════════════════════════
 window.toggleEnquadramento = function(){
   const tipo = document.getElementById('oTipo')?.value;
-  const fg   = document.getElementById('fgEnquadramento');
+  // Enquadramento: apenas R1
+  const fg = document.getElementById('fgEnquadramento');
   if(fg) fg.style.display = tipo === 'R1' ? 'flex' : 'none';
+  // Programa: R1 → automático (Regulatório, campo oculto); R2 → usuário escolhe
+  const fgProg = document.getElementById('fgPrograma');
+  const sel    = document.getElementById('oPrograma');
+  if(tipo === 'R1'){
+    if(sel) sel.value = 'Regulatório';
+    if(fgProg) fgProg.style.display = 'none';
+  } else if(tipo === 'R2'){
+    if(fgProg) fgProg.style.display = 'flex';
+    // Remove Regulatório from options for R2
+    if(sel && sel.querySelector('option[value="Regulatório"]')){
+      [...sel.querySelectorAll('option')].forEach(o=>{
+        o.style.display = o.value === 'Regulatório' ? 'none' : '';
+      });
+      if(sel.value === 'Regulatório') sel.value = '';
+    }
+  } else {
+    if(fgProg) fgProg.style.display = 'none';
+  }
 };
 
 // ══════════════════════════════════════════════════════════════════════
