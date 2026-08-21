@@ -193,10 +193,12 @@ async function iniciarApp(){
 
   // pgAbertura e pgAnalise somente para gerente e fiscais
   const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm';
+  const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
     ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
+    ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
   ];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
@@ -251,6 +253,7 @@ window.showPage=function(id){
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
   if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgAnalise') renderAnaliseFinanceira();
+  if(id==='pgProgramas') renderProgramas();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
@@ -1185,6 +1188,7 @@ function buildTableHeader(){
     ${frozen2}
     ${sth('Tipo','tipo','Tipo da obra: R1, R2 ou ODI')}
     ${sth('Enquadramento','enquadramento','Enquadramento da obra (R1): Universalização, PF ou Grupo A')}
+    ${sth('Programa','programa','Programa orçamentário: PODI, Mono-Tri, Regulatório ou Melhoria')}
     ${sth('Descrição','descricao','Descrição resumida da obra')}
     ${sth('Equip. Ref.','equipamentoRef','Número do Equipamento de Referência (transformador/ponto de trabalho)')}
     ${sth('Cidade','cidade','Município onde a obra será executada')}
@@ -1348,6 +1352,7 @@ function renderObras(){
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
       <td style="font-size:10px;color:var(--muted)">${o.enquadramento||'—'}</td>
+      <td style="font-size:10px">${o.programa?`<span style="background:${{'PODI':'#7c6af7','Mono-Tri':'#F59E0B','Regulatório':'#22C55E','Melhoria':'#3B82F6'}[o.programa]||'#6b7280'};color:#fff;padding:1px 7px;border-radius:8px;font-size:9px">${o.programa}</span>`:'—'}</td>
       <td style="font-size:11px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.descricao||''}"><span>${o.descricao||'—'}</span></td>
       <td style="font-size:11px;color:var(--muted)">${o.equipamentoRef||'—'}</td>
       <td>${o.cidade||'—'}</td>
@@ -1437,7 +1442,7 @@ window.openObraModal=function(obraId){
       if(predefined.includes(prazoStr)){ selPrazo.value=prazoStr; inpPrazo.style.display='none'; inpPrazo.value=prazoStr; }
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
-    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); toggleEnquadramento();
+    set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); set('oPrograma',obra.programa||''); toggleEnquadramento();
     // Transformer fields
     set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
@@ -2107,6 +2112,7 @@ window.saveObra=async function(){
         caixaArmazenada:g('oCaixaArmazenada'),
         descricao:g('oDescricao')||null,
         enquadramento:g('oEnquadramento')||null,
+        programa:g('oPrograma')||null,
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         dataTransf:g('oDataTransf')||null,
@@ -5334,7 +5340,8 @@ function renderAberturaObras(){
   const mLabel = ym => { const [y,m]=ym.split('-'); return `${m}/${y.slice(2)}`; };
 
   // Filter apenas obras RD (R1+R2)
-  const obrasRD = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+  const obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+  const obrasRD = obrasComFiltro(obrasRDtodas);
 
   // Build data: {empreiteira: {tipo: {mes: {qtd,usc}}}}
   function buildData(pool){
@@ -5715,6 +5722,20 @@ function renderAnaliseFinanceira(){
       <div style="font-size:10px;color:var(--muted);margin-top:8px">
         LM = USC × Valor USC × (1 + Ajuste LM%) &nbsp;|&nbsp; LV = ULV × Valor ULV × (1 + Ajuste LV%) &nbsp;|&nbsp; 🟡 Linha de meta no gráfico
       </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;margin-bottom:8px">🔎 Filtrar por Programa (desmarque para excluir da análise):</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          ${['PODI','Mono-Tri','Regulatório','Melhoria'].map(prog=>`
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+              <input type="checkbox" ${(progFiltros[prog]!==false)?'checked':''} id="filtProg_${prog}" onchange="window._salvarFiltroPrograma()">
+              ${prog}
+            </label>`).join('')}
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer">
+            <input type="checkbox" ${(progFiltros['_semProg']!==false)?'checked':''} id="filtProg__semProg" onchange="window._salvarFiltroPrograma()">
+            (Sem programa definido)
+          </label>
+        </div>
+      </div>
     </div>`;
 
   // Geral
@@ -5727,3 +5748,194 @@ function renderAnaliseFinanceira(){
   cont.innerHTML = html;
 }
 window.renderAnaliseFinanceira = renderAnaliseFinanceira;
+
+// ══════════════════════════════════════════════════════════════════════
+//  GRÁFICO USC MEDIDO POR MÊS — Análise Financeira
+// ══════════════════════════════════════════════════════════════════════
+function renderGraficoUSCMedido(obrasPool, cor){
+  const hoje = new Date();
+  const meses12 = [];
+  for(let i=11;i>=0;i--){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+    meses12.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const mLabel = ym => { const [y,m]=ym.split('-'); return `${m}/${y.slice(2)}`; };
+
+  const uscPorMes = {};
+  meses12.forEach(m=>{ uscPorMes[m]={usc:0,qt:0}; });
+  obrasPool.forEach(o=>{
+    (o.medicoes||[]).forEach(med=>{
+      const mes = (med.data||'').slice(0,7);
+      if(!uscPorMes[mes]) return;
+      uscPorMes[mes].usc += parseFloat(med.uscMedido)||0;
+      uscPorMes[mes].qt++;
+    });
+  });
+
+  const vals = meses12.map(m=>uscPorMes[m].usc);
+  const maxV = Math.max(...vals,1);
+  const colW=56,barH=80,topP=36,botP=24,padL=6;
+  const svgW = padL+meses12.length*colW+padL;
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+  svg+=`<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
+  meses12.forEach((m,i)=>{
+    const usc=uscPorMes[m].usc, qt=uscPorMes[m].qt;
+    const cx=padL+i*colW+colW/2, x=padL+i*colW;
+    const bh=usc>0?Math.max(4,Math.round((usc/maxV)*barH)):0;
+    const by=topP+barH-bh;
+    if(bh>0){
+      svg+=`<rect x="${x+4}" y="${by}" width="${colW-8}" height="${bh}" rx="3" fill="${cor}" opacity="0.85"/>`;
+      svg+=`<text x="${cx}" y="${by-4}" text-anchor="middle" font-size="9" fill="${cor}" font-weight="700">${usc.toFixed(0)}</text>`;
+    }
+    svg+=`<text x="${cx}" y="${topP+barH+14}" text-anchor="middle" font-size="8" fill="#9ca3af">${mLabel(m)}</text>`;
+    if(qt>0) svg+=`<text x="${cx}" y="${topP+barH+23}" text-anchor="middle" font-size="7" fill="${cor}99">${qt}med</text>`;
+  });
+  svg+='</svg>';
+  const totalUSCMed=vals.reduce((s,v)=>s+v,0);
+  return `
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:11px;font-weight:700;color:${cor}">📈 USC Medido por Mês (12 meses)</div>
+        <div style="font-size:12px;font-weight:800;color:${cor}">${totalUSCMed.toFixed(1)} USC total medido</div>
+      </div>
+      <div style="overflow-x:auto">${svg}</div>
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  ABA "PROGRAMAS" — PODI e Mono-Tri
+// ══════════════════════════════════════════════════════════════════════
+function getProgramaMeta(){
+  return {
+    pct:    parseFloat(localStorage.getItem('prog_meta_pct')||'0'),
+    period: localStorage.getItem('prog_meta_period')||'mensal',
+  };
+}
+window.saveProgramaMeta = function(){
+  localStorage.setItem('prog_meta_pct',    document.getElementById('pgProgMetaPct')?.value||'0');
+  localStorage.setItem('prog_meta_period', document.getElementById('pgProgMetaPeriod')?.value||'mensal');
+  toast('✓ Meta salva.');
+  renderProgramas();
+};
+
+function calcProgressoParcial(obra){
+  const uscPrev = parseFloat(obra.usc)||0;
+  if(uscPrev===0) return {pct:0, medido:0, prev:0};
+  const medido = (obra.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0),0);
+  return { pct: Math.round((medido/uscPrev)*100), medido, prev: uscPrev };
+}
+
+function calcMetaEsperada(meta){
+  if(!meta.pct) return 0;
+  const hoje = new Date();
+  const anoInicio = hoje.getFullYear();
+  const mesInicio = hoje.getMonth(); // 0-indexed
+  const meses = mesInicio+1; // meses desde Jan
+  if(meta.period==='mensal')     return Math.min(100, meta.pct * meses);
+  if(meta.period==='trimestral') return Math.min(100, meta.pct * Math.ceil(meses/3));
+  if(meta.period==='semestral')  return Math.min(100, meta.pct * Math.ceil(meses/6));
+  if(meta.period==='anual')      return Math.min(100, meta.pct);
+  return 0;
+}
+
+function renderCardPrograma(obra, meta){
+  const prog = calcProgressoParcial(obra);
+  const esperado = calcMetaEsperada(meta);
+  const cor = prog.pct >= esperado ? '#22C55E' : prog.pct >= esperado*0.7 ? '#F59E0B' : '#EF4444';
+  const corMeta = '#F59E0B';
+
+  // Mini timeline de medições parciais
+  const parciais = (obra.medicoes||[]).filter(m=>m.tipo==='parcial').sort((a,b)=>a.data>b.data?1:-1);
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <strong style="color:var(--accent);cursor:pointer;font-size:13px" onclick="openObraModal('${obra.id}')">${obra.numero}</strong>
+        <span style="font-size:10px;color:var(--muted)">${obra.cidade||'—'} · ${obra.empreiteira||'—'} · ${obra.fiscal||'—'}</span>
+        <span style="background:${{PODI:'#7c6af7','Mono-Tri':'#F59E0B'}[obra.programa]||'#6b7280'};color:#fff;padding:1px 8px;border-radius:8px;font-size:9px;font-weight:700">${obra.programa}</span>
+        <span style="margin-left:auto;font-size:20px;font-weight:900;color:${cor}">${prog.pct}%</span>
+      </div>
+
+      <!-- Barra de progresso -->
+      <div style="position:relative;height:20px;background:var(--surface2);border-radius:8px;overflow:visible;margin-bottom:6px">
+        <div style="height:100%;width:${Math.min(prog.pct,100)}%;background:${cor};border-radius:8px;transition:width .5s;position:relative">
+          ${prog.pct>5?`<span style="position:absolute;right:6px;top:2px;font-size:9px;color:#fff;font-weight:700">${prog.pct}%</span>`:''}
+        </div>
+        ${esperado>0?`<div style="position:absolute;top:-3px;left:${Math.min(esperado,100)}%;width:2px;height:calc(100%+6px);background:${corMeta};border-radius:1px" title="Meta: ${esperado.toFixed(0)}%">
+          <div style="position:absolute;bottom:100%;left:-16px;font-size:8px;color:${corMeta};white-space:nowrap;font-weight:700">META ${esperado.toFixed(0)}%</div>
+        </div>`:''}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:8px">
+        <span>USC Medido: <strong style="color:${cor}">${prog.medido.toFixed(1)}</strong></span>
+        <span>USC Previsto: <strong>${prog.prev.toFixed(1)}</strong></span>
+        ${esperado>0?`<span>Meta Esperada: <strong style="color:${corMeta}">${esperado.toFixed(0)}%</strong></span>`:''}
+        <span style="color:${cor};font-weight:700">${prog.pct>=esperado?'✓ No prazo':'⚠️ Abaixo da meta'}</span>
+      </div>
+
+      <!-- Timeline medições parciais -->
+      ${parciais.length?`<div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${parciais.map(m=>`<div style="background:var(--surface2);border-radius:6px;padding:3px 8px;font-size:9px">
+          <span style="color:var(--muted)">${fmtTxt(m.data)}</span>
+          ${m.uscMedido>0?`<strong style="color:#7c6af7;margin-left:4px">${parseFloat(m.uscMedido).toFixed(1)} USC</strong>`:''}
+        </div>`).join('')}
+      </div>`:'<div style="font-size:10px;color:var(--muted)">Nenhuma medição parcial registrada</div>'}
+    </div>`;
+}
+
+function renderProgramas(){
+  const cont = document.getElementById('pgProgramasContent');
+  if(!cont) return;
+  const meta = getProgramaMeta();
+
+  // Filter obras by profile
+  let pool = obras.filter(o=>!o.cancelado&&(o.programa==='PODI'||o.programa==='Mono-Tri'));
+  if(me.perfil==='empreiteira') pool=pool.filter(o=>o.empreiteira===me.vinculo);
+  else if(me.perfil==='fiscal') pool=pool.filter(o=>o.fiscal===me.vinculo);
+  else if(me.perfil==='fiscal_adm'){} // sees all
+
+  const podi = pool.filter(o=>o.programa==='PODI');
+  const mono = pool.filter(o=>o.programa==='Mono-Tri');
+
+  const paramBlock = ['gerente','fiscal','fiscal_adm'].includes(me.perfil) ? `
+    <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #F59E0B;border-radius:10px;padding:14px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+      <div class="fg" style="margin:0;min-width:140px">
+        <label style="font-size:10px">🎯 Meta de Medição (%)</label>
+        <input type="number" id="pgProgMetaPct" value="${meta.pct}" placeholder="Ex: 10" min="0" max="100" step="1">
+      </div>
+      <div class="fg" style="margin:0;min-width:160px">
+        <label style="font-size:10px">Período da Meta</label>
+        <select id="pgProgMetaPeriod">
+          <option value="mensal" ${meta.period==='mensal'?'selected':''}>Mensal (% por mês)</option>
+          <option value="trimestral" ${meta.period==='trimestral'?'selected':''}>Trimestral (% por trimestre)</option>
+          <option value="semestral" ${meta.period==='semestral'?'selected':''}>Semestral (% por semestre)</option>
+          <option value="anual" ${meta.period==='anual'?'selected':''}>Anual (% por ano)</option>
+        </select>
+      </div>
+      <button onclick="saveProgramaMeta()" class="btn btn-primary btn-sm">💾 Salvar Meta</button>
+      <div style="font-size:9px;color:var(--muted)">Meta: ${meta.pct}% ${{'mensal':'por mês','trimestral':'por trimestre','semestral':'por semestre','anual':'por ano'}[meta.period]||''}. Linha amarela na barra = esperado até hoje.</div>
+    </div>` : '';
+
+  const renderSecao = (titulo, cor, list) => {
+    if(!list.length) return `<div style="font-size:11px;color:var(--muted);margin-bottom:12px">Nenhuma obra ${titulo} encontrada.</div>`;
+    const totalUSC = list.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const medido   = list.reduce((s,o)=>s+calcProgressoParcial(o).medido,0);
+    const pctGeral = totalUSC>0?Math.round((medido/totalUSC)*100):0;
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ${cor};border-radius:12px;padding:16px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+          <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:900;color:${cor}">${titulo}</div>
+          <span style="font-size:10px;color:var(--muted)">${list.length} obras</span>
+          <span style="font-size:12px;font-weight:800;color:${cor};margin-left:auto">${pctGeral}% medido (${medido.toFixed(0)}/${totalUSC.toFixed(0)} USC)</span>
+        </div>
+        ${list.map(o=>renderCardPrograma(o,meta)).join('')}
+      </div>`;
+  };
+
+  cont.innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:16px">📋 Programas — Monitoramento de Medições</div>
+    ${paramBlock}
+    ${renderSecao('🔵 PODI','#7c6af7',podi)}
+    ${renderSecao('🟡 Mono-Tri','#F59E0B',mono)}`;
+}
+window.renderProgramas = renderProgramas;
