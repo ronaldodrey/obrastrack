@@ -231,6 +231,7 @@ async function iniciarApp(){
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
   unsubObras=onSnapshot(q,snap=>{
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
+    migrarProgramaR1();
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash'){ renderDash(); }
     if(active?.id==='pgObras') window.renderObras();
@@ -460,6 +461,22 @@ function renderDashGerente(list, listAll){
   // Tabela resumo por fiscal
   html += '<div class="sect-title" style="margin-bottom:10px">Painel de Fiscais</div>';
   html += tabelaResumoFiscais(list);
+  // ── Painel de Programas ─────────────────────────────────────────────
+  {
+    const progsDisp=['Regulatório','PODI','Mono-Tri','Melhoria'];
+    const corsP={'Regulatório':'#22C55E','PODI':'#7c6af7','Mono-Tri':'#F59E0B','Melhoria':'#3B82F6'};
+    const ativos=list.filter(o=>!o.cancelado&&!o.armazenado);
+    const emps=[...new Set(ativos.map(o=>o.empreiteira).filter(Boolean))].sort();
+    const bgs=pool=>progsDisp.filter(p=>pool.filter(o=>o.programa===p).length>0).map(p=>`<span style="background:${corsP[p]};color:#fff;padding:2px 10px;border-radius:10px;font-size:10px;font-weight:700">${p}: ${pool.filter(o=>o.programa===p).length}</span>`).join(' ');
+    html+=`<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+      <div class="sect-title" style="margin-bottom:10px">📋 PROGRAMAS</div>
+      <div style="margin-bottom:8px">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-weight:700">🌐 Geral — ${ativos.length} obras</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${bgs(ativos)||'<span style="font-size:10px;color:var(--muted)">Nenhum programa definido</span>'}</div>
+      </div>
+      ${emps.map(emp=>{const obEmp=ativos.filter(o=>o.empreiteira===emp);const b=bgs(obEmp);return b?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">🏢 ${emp} (${obEmp.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${b}</div></div>`:''}).join('')}
+    </div>`;
+  }
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">Painel de Empreiteiras</div>';
   html += tabelaResumoEmpreiteiras(list);
   html += renderMonitorPrazos(list);
@@ -3275,6 +3292,28 @@ window._salvarFiltroPrograma = function(){
   localStorage.setItem('analise_prog_filtro', JSON.stringify(f));
   renderAnaliseFinanceira();
 };
+
+// ══ MIGRAÇÃO: seta programa=Regulatório em todas as obras R1 sem programa ════
+async function migrarProgramaR1(){
+  if(localStorage.getItem('sppc_migr_prog_r1')) return; // já rodou
+  if(me.perfil !== 'gerente') return;
+  const semProg = obras.filter(o=>o.tipo==='R1' && !o.programa);
+  if(!semProg.length){
+    localStorage.setItem('sppc_migr_prog_r1','1');
+    return;
+  }
+  console.log('[Migração] Atualizando', semProg.length, 'obras R1 → Regulatório');
+  let ok=0, err=0;
+  for(const o of semProg){
+    try{
+      await updateDoc(doc(db,'obras',o.id),{programa:'Regulatório',atualizadaEm:serverTimestamp()});
+      ok++;
+    }catch(e){ err++; console.warn('[Migração] erro obra',o.id,e.message); }
+  }
+  if(!err) localStorage.setItem('sppc_migr_prog_r1','1');
+  toast(`✓ Migração: ${ok} obras R1 → Regulatório${err?` (${err} erros)`:''}`, err?'warn':'ok');
+}
+
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
