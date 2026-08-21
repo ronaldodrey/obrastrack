@@ -234,6 +234,10 @@
     <div id="pgOtimPortContent"><div class="loading">Carregando...</div></div>
   </div>
 
+  <div class="page" id="pgProgramas">
+    <div id="pgProgramasContent"><div class="loading">Carregando...</div></div>
+  </div>
+
   <div class="page" id="pgAnalise">
     <div id="pgAnaliseContent"><div class="loading">Carregando...</div></div>
   </div>
@@ -335,6 +339,16 @@
       <div class="fg"><label>Nº da Obra</label><input type="text" id="oNum" placeholder="2024-001"></div>
       <div class="fg"><label>Tipo</label>
         <select id="oTipo" onchange="toggleEnquadramento()"><option value="">— tipo —</option><option>R1</option><option>R2</option><option>ODI</option></select></div>
+      <div class="fg" id="fgPrograma">
+        <label>Programa Orçamentário</label>
+        <select id="oPrograma">
+          <option value="">— sem programa —</option>
+          <option value="PODI">PODI</option>
+          <option value="Mono-Tri">Mono-Tri</option>
+          <option value="Regulatório">Regulatório</option>
+          <option value="Melhoria">Melhoria</option>
+        </select>
+      </div>
       <div class="fg" id="fgEnquadramento" style="display:none">
         <label>Enquadramento <span style="font-size:10px;color:var(--muted)">(somente R1)</span></label>
         <select id="oEnquadramento">
