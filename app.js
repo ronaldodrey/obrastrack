@@ -2813,7 +2813,19 @@ function aplicarFiltros(list) {
   const h = hoje();
   return list.filter(o => {
     // _filtroRapidoAtivo is applied in renderObras before calling aplicarFiltros
-    if (f.srch && !(o.numero||'').toLowerCase().includes(f.srch)) return false; // busca por Nº da obra
+    if (f.srch) {
+      const t = f.srch;
+      const found =
+        (o.numero||'').toLowerCase().includes(t) ||
+        (o.descricao||'').toLowerCase().includes(t) ||
+        (o.cidade||'').toLowerCase().includes(t) ||
+        (o.empreiteira||'').toLowerCase().includes(t) ||
+        (o.fiscal||'').toLowerCase().includes(t) ||
+        (o.programa||'').toLowerCase().includes(t) ||
+        (o.enquadramento||'').toLowerCase().includes(t) ||
+        (o.locaisTrabalho||[]).some(l=>(l.descricao||'').toLowerCase().includes(t));
+      if(!found) return false;
+    } // busca por número, descrição, cidade, empreiteira, fiscal, programa
     if (f.status && statusOf(o) !== f.status) return false;
     if (f.tipo && o.tipo !== f.tipo) return false;
     if (f.empreiteira && o.empreiteira !== f.empreiteira) return false;
@@ -5827,6 +5839,7 @@ function renderAnaliseFinanceira(){
   function obrasComFiltro(pool){
     return pool.filter(o=>!o.programa ? progFiltros['_semProg']!==false : progFiltros[o.programa]!==false);
   }
+  const isGerente = me.perfil==='gerente'; // controla campos editáveis
   const obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
   const obrasRD = obrasComFiltro(obrasRDtodas);
   const cores = {'CS ELETRICIDADE':'#3B82F6', 'ELETELSUL':'#22C55E', 'Geral':'#7c6af7'};
