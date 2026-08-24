@@ -109,7 +109,7 @@ function statusOf(o){
   if(o.medicao)      return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
-    if(d!==null && d>30) return 'Encaminhar Cadastro Urgente';
+    if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa)        return 'Aguard. Medição';
   if(o.fiscalizacao) return 'Aguardando Kaffa';
@@ -231,7 +231,7 @@ async function iniciarApp(){
   const q=query(collection(db,'obras'),orderBy('criadaEm','desc'));
   unsubObras=onSnapshot(q,snap=>{
     obras=snap.docs.map(d=>({id:d.id,...d.data()}));
-    migrarProgramaR1();
+    migrarProgramaR1(); // só roda 1x, tem re-entry guard
     const active=document.querySelector('.page.active');
     if(active?.id==='pgDash'){ renderDash(); }
     if(active?.id==='pgObras') window.renderObras();
@@ -253,7 +253,7 @@ window.showPage=function(id){
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
   if(id==='pgAbertura') renderAberturaObras();
-  if(id==='pgAnalise') renderAnaliseFinanceira();
+  if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
@@ -349,12 +349,23 @@ window.delEmp=async function(id){
 // Estado para seleção de perspectiva no dashboard do gerente
 let dashPerspectiva = 'gerente'; // 'gerente' | 'fiscal:Nome' | 'empreiteira:Nome'
 
+let _renderDashTimer=null;
+function renderDashDebounced(){ clearTimeout(_renderDashTimer); _renderDashTimer=setTimeout(renderDash,80); }
+
 function renderDash(){
+  if(window._migrando) return; // não renderiza durante migração para evitar flickering
   const listAll = obras; // todas as obras (sem filtro de perfil para o gerente navegar)
   const list = visibleObras();
   let html = '';
   html += '<div id="dashFavoritosSlot"></div>';
-  renderDashFavoritos().then(h=>{ const d=document.getElementById('dashFavoritosSlot'); if(d&&h) d.innerHTML=h; });
+  // Favoritos: carrega async mas só atualiza se o slot ainda existir
+  const slotId = 'dashFavoritosSlot_'+Date.now();
+  html = html.replace('id="dashFavoritosSlot"', `id="${slotId}"`);
+  const _curSlot = slotId;
+  renderDashFavoritos().then(h=>{
+    const d=document.getElementById(_curSlot);
+    if(d&&h) d.innerHTML=h;
+  });
 
   if(me.perfil === 'gerente'){
     // Seletor de perspectiva
@@ -454,7 +465,7 @@ function renderDashGerente(list, listAll){
     ${kpiCard('Prob. Executivo',list.filter(o=>o.impedimento&&!o.conclusao).length,'Celesc verificar','#B91C1C')}
     ${kpiCard('Pendências Ativas',list.filter(o=>o.pendencia&&!o.pendenciaResolvida).length,'aguardando resolução','#F97316')}
     ${kpiCard('Ag. Conf. Pend.',list.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length,'fiscal conferir','#F59E0B')}
-    ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+30d sem cadastro','#EF4444')}
+    ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+7d sem cadastro','#EF4444')}
     ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
   </div>`;
 
@@ -580,7 +591,7 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
     ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
     ${kpiCard('Ag. Conf. Pend.',agConfPend.length,'regularizadas p/ conferir','#F59E0B')}
-    ${kpiCard('Cadastro Urgente',cadUrgente.length,'+30d sem enviar','#EF4444')}
+    ${kpiCard('Cadastro Urgente',cadUrgente.length,'+7d sem enviar','#EF4444')}
     ${kpiCard('Fiscalizadas/Mês',fiscMes.length,'mês corrente','#38bdf8')}
     ${kpiCard('Tempo Médio Fisc.',tempoFisc!==null?tempoFisc+'d':'—','conclusão→fiscalização','#a3e635')}
     ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
@@ -1288,6 +1299,12 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
   else if(_filtroRapidoAtivo === 'sem_conclusao') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
+  else if(_filtroRapidoAtivo === 'fisc_sem_cad')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
+  else if(_filtroRapidoAtivo === 'fisc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.medicao&&o.tipo!=='ODI');
+  else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medicao);
+  else if(_filtroRapidoAtivo === 'conc_sem_fisc') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
+  else if(_filtroRapidoAtivo === 'pend_exec')     baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&!o.regularizacaoData);
+  else if(_filtroRapidoAtivo === 'pend_ag_conf')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
   let list = aplicarFiltros(baseList);
@@ -3296,22 +3313,31 @@ window._salvarFiltroPrograma = function(){
 // ══ MIGRAÇÃO: seta programa=Regulatório em todas as obras R1 sem programa ════
 async function migrarProgramaR1(){
   if(localStorage.getItem('sppc_migr_prog_r1')) return; // já rodou
+  if(window._migrando) return; // re-entry guard
   if(me.perfil !== 'gerente') return;
   const semProg = obras.filter(o=>o.tipo==='R1' && !o.programa);
   if(!semProg.length){
     localStorage.setItem('sppc_migr_prog_r1','1');
     return;
   }
-  console.log('[Migração] Atualizando', semProg.length, 'obras R1 → Regulatório');
-  let ok=0, err=0;
-  for(const o of semProg){
-    try{
-      await updateDoc(doc(db,'obras',o.id),{programa:'Regulatório',atualizadaEm:serverTimestamp()});
-      ok++;
-    }catch(e){ err++; console.warn('[Migração] erro obra',o.id,e.message); }
+  // Seta flag e lock ANTES do loop para evitar re-entrada via onSnapshot
+  window._migrando = true;
+  localStorage.setItem('sppc_migr_prog_r1','1');
+  console.log('[Migração] Atualizando', semProg.length, 'obras R1 → Regulatório (em lote)');
+  try{
+    // Atualizar em lote: máx 10 por vez para não sobrecarregar
+    for(let i=0;i<semProg.length;i+=10){
+      const lote = semProg.slice(i,i+10);
+      await Promise.all(lote.map(o=>updateDoc(doc(db,'obras',o.id),{
+        programa:'Regulatório', atualizadaEm:serverTimestamp()
+      })));
+    }
+    toast(`✓ ${semProg.length} obras R1 atualizadas para Regulatório.`, 'ok');
+  }catch(e){
+    console.warn('[Migração] erro:', e.message);
+  }finally{
+    window._migrando = false;
   }
-  if(!err) localStorage.setItem('sppc_migr_prog_r1','1');
-  toast(`✓ Migração: ${ok} obras R1 → Regulatório${err?` (${err} erros)`:''}`, err?'warn':'ok');
 }
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
@@ -5190,7 +5216,7 @@ function renderDashSummaryFiscal(minhas){
   // Bug 5: obra aparece em apenas 1 card (maior prioridade ganha)
   // Prioridade: med280urg > agMed > agFisc
   const agFisc_all  = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  const agMed_all   = ativas.filter(o=>o.fiscalizacao&&!o.medicao);
+  const agMed_all   = ativas.filter(o=>o.fiscalizacao&&!o.medicao&&o.tipo!=='ODI');
   const med280urg   = ativas.filter(o=>{
     if(!o.medida230||!o.kaffa||o.medicao||o.medida280) return false;
     const p=prazoMedida280(o);
@@ -5593,6 +5619,19 @@ window.renderAberturaObras = renderAberturaObras;
 // ══════════════════════════════════════════════════════════════════════
 //  ABA "ANÁLISE FINANCEIRA" — Gerente
 // ══════════════════════════════════════════════════════════════════════
+// ── PARÂMETROS FINANCEIROS: gerente escreve no Firestore, fiscais leem ──
+let _paramsFinCache = null;
+async function loadParamsFinanceiros(){
+  try{
+    const snap = await getDoc(doc(db,'config','financeiro'));
+    if(snap.exists()){
+      _paramsFinCache = snap.data();
+      // Sync to localStorage for offline use
+      Object.entries(_paramsFinCache).forEach(([k,v])=>localStorage.setItem('sppc_'+k,v));
+    }
+  }catch(e){ console.warn('[Params] erro ao carregar:', e.message); }
+}
+
 function getParamsFinanceiros(){
   return {
     valorUSC:  parseFloat(localStorage.getItem('sppc_valorUSC')||'0'),
@@ -5603,30 +5642,35 @@ function getParamsFinanceiros(){
   };
 }
 function saveParamsFinanceiros(){
+  if(me.perfil!=='gerente'){ toast('Apenas o gerente pode alterar os parâmetros.','warn'); return; }
   const get = id => parseFloat(document.getElementById(id)?.value||'0');
   const p = {
     valorUSC: get('pfValorUSC'), ajusteLM: get('pfAjusteLM'),
     valorULV: get('pfValorULV'), ajusteLV: get('pfAjusteLV'),
-    meta:     get('pfMetaMensal'),
+    metaMensal: get('pfMetaMensal'),
   };
-  // Save each param with explicit key to avoid key mismatches
-  localStorage.setItem('sppc_valorUSC',   p.valorUSC);
-  localStorage.setItem('sppc_ajusteLM',   p.ajusteLM);
-  localStorage.setItem('sppc_valorULV',   p.valorULV);
-  localStorage.setItem('sppc_ajusteLV',   p.ajusteLV);
-  localStorage.setItem('sppc_metaMensal', p.meta);
-  toast('✓ Parâmetros salvos.');
+  localStorage.setItem('sppc_valorUSC', p.valorUSC);
+  localStorage.setItem('sppc_ajusteLM', p.ajusteLM);
+  localStorage.setItem('sppc_valorULV', p.valorULV);
+  localStorage.setItem('sppc_ajusteLV', p.ajusteLV);
+  localStorage.setItem('sppc_metaMensal', p.metaMensal);
+  // Persist to Firestore for fiscal sync
+  setDoc(doc(db,'config','financeiro'), p).then(()=>toast('✓ Parâmetros salvos e sincronizados.','ok')).catch(e=>toast('Erro: '+e.message,'err'));
   renderAnaliseFinanceira();
 }
 window.saveParamsFinanceiros = saveParamsFinanceiros;
 
 function calcFinanceiro(obrasLista, p){
-  // Desconta USC/ULV já medidos (parciais e gerente)
+  // USC pendente = previsto − soma(uscMedido das medições parciais), cap no previsto
+  // Medição final: obra já tem o.medicao → excluída antes desta função (não entra aqui)
+  // Fonte: apenas o.medicoes[].uscMedido (qualquer perfil que registrar)
   const totalUSC = obrasLista.reduce((s,o)=>{
-    const bruto = parseFloat(o.usc)||0;
-    const medido = o.uscMedidoGerente!=null ? parseFloat(o.uscMedidoGerente)||0
-      : (o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);
-    return s + Math.max(0, bruto-medido);
+    const previsto = parseFloat(o.usc)||0;
+    const acumParcial = (o.medicoes||[])
+      .filter(m=>m.tipo==='parcial')
+      .reduce((a,m)=>a+(parseFloat(m.uscMedido)||0), 0);
+    const jaMedido = Math.min(acumParcial, previsto); // cap no previsto
+    return s + Math.max(0, previsto - jaMedido);
   },0);
   const totalULV = obrasLista.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
   const valLM    = totalUSC * p.valorUSC * (1 + p.ajusteLM/100);
@@ -5644,7 +5688,8 @@ function buildFuturoPorMes(obrasPool, p, nMeses=12){
     const dt = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     const ym = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
     const fim = fimDoMes(ym); const ini = `${ym}-01`;
-    const obMes = obrasPool.filter(o=>!o.cancelado&&!o.conclusao&&(o.tipo==='R1'||o.tipo==='R2')&&o.dataLimite>=ini&&o.dataLimite<=fim);
+    // Exclui obras com medicao final (já medidas não geram custo futuro)
+    const obMes = obrasPool.filter(o=>!o.cancelado&&!o.conclusao&&!o.medicao&&(o.tipo==='R1'||o.tipo==='R2')&&o.dataLimite>=ini&&o.dataLimite<=fim);
     const label = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][dt.getMonth()]+'/'+String(dt.getFullYear()).slice(2);
     meses.push({ ym, label, obMes, calc: calcFinanceiro(obMes,p) });
   }
@@ -5730,6 +5775,13 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
         </div>
       </div>
 
+      <!-- Lista obras saldo devedor (expansível) -->
+      ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
+        <div style="overflow-x:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse;font-size:9px">
+          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
+          <tbody>${devOp.map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+        </table></div></details>`:''}
+
       <!-- Gráfico financeiro 12 meses -->
       <div style="font-size:10px;color:var(--muted);margin-bottom:6px">📊 Projeção Mensal — ${meses.filter(m=>m.calc.qtd>0).length} meses com obras</div>
       <div style="overflow-x:auto">${renderGraficoFinanceiro(meses, nome, cor, p)}</div>
@@ -5783,10 +5835,10 @@ function renderAnaliseFinanceira(){
     <div style="background:var(--surface);border:1px solid var(--border);border-left:4px solid #7c6af7;border-radius:12px;padding:18px;margin-bottom:20px">
       <div style="font-weight:800;font-size:14px;margin-bottom:14px">⚙️ Parâmetros de Cálculo</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px">
-        <div class="fg"><label>Valor Unitário USC (R$/USC)</label><input type="number" id="pfValorUSC" value="${p.valorUSC}" placeholder="0.00" step="0.01" min="0"></div>
-        <div class="fg"><label>Ajuste LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" placeholder="18" step="0.1"></div>
-        <div class="fg"><label>Valor Unitário ULV (R$/ULV)</label><input type="number" id="pfValorULV" value="${p.valorULV}" placeholder="0.00" step="0.01" min="0"></div>
-        <div class="fg"><label>Ajuste LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" placeholder="18" step="0.1"></div>
+        <div class="fg"><label>Valor Unitário USC (R$/USC)</label><input type="number" id="pfValorUSC" value="${p.valorUSC}" ${isGerente?'':' disabled title="Definido pelo gerente"'} placeholder="0.00" step="0.01" min="0"></div>
+        <div class="fg"><label>Ajuste LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
+        <div class="fg"><label>Valor Unitário ULV (R$/ULV)</label><input type="number" id="pfValorULV" value="${p.valorULV}" ${isGerente?'':' disabled'} placeholder="0.00" step="0.01" min="0"></div>
+        <div class="fg"><label>Ajuste LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
         <div class="fg"><label>🎯 Meta Mensal de Custo <span style="color:#F59E0B;font-weight:700">(valor em R$)</span></label>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:12px;color:#F59E0B;font-weight:700">R$</span>
@@ -5795,7 +5847,7 @@ function renderAnaliseFinanceira(){
           <div style="font-size:9px;color:var(--muted)">Ex: se quer limitar custo mensal em R$ 500.000 → digite 500000</div>
         </div>
       </div>
-      <button onclick="saveParamsFinanceiros()" class="btn btn-primary btn-sm">💾 Aplicar e Calcular</button>
+      ${isGerente?`<button onclick="saveParamsFinanceiros()" class="btn btn-primary btn-sm">💾 Salvar e Calcular</button>`:`<div style="font-size:10px;color:#F59E0B">⚙️ Parâmetros definidos pelo gerente</div>`}
       <div style="font-size:10px;color:var(--muted);margin-top:8px">
         LM = USC × Valor USC × (1 + Ajuste LM%) &nbsp;|&nbsp; LV = ULV × Valor ULV × (1 + Ajuste LV%) &nbsp;|&nbsp; 🟡 Linha de meta no gráfico
       </div>
@@ -5829,7 +5881,7 @@ window.renderAnaliseFinanceira = renderAnaliseFinanceira;
 // ══════════════════════════════════════════════════════════════════════
 //  GRÁFICO USC MEDIDO POR MÊS — Análise Financeira
 // ══════════════════════════════════════════════════════════════════════
-function renderGraficoUSCMedido(obrasPool, cor){
+function renderGraficoUSCMedido(obrasPool, cor, containerId){
   const hoje = new Date();
   const meses12 = [];
   for(let i=11;i>=0;i--){
@@ -5838,46 +5890,148 @@ function renderGraficoUSCMedido(obrasPool, cor){
   }
   const mLabel = ym => { const [y,m]=ym.split('-'); return `${m}/${y.slice(2)}`; };
 
-  const uscPorMes = {};
-  meses12.forEach(m=>{ uscPorMes[m]={usc:0,qt:0}; });
-  obrasPool.forEach(o=>{
-    (o.medicoes||[]).forEach(med=>{
-      const mes = (med.data||'').slice(0,7);
-      if(!uscPorMes[mes]) return;
-      uscPorMes[mes].usc += parseFloat(med.uscMedido)||0;
-      uscPorMes[mes].qt++;
-    });
-  });
+  const PROGS = ['Regulatório','PODI','Mono-Tri','Melhoria'];
+  const CORS  = {Regulatório:'#22C55E',PODI:'#7c6af7','Mono-Tri':'#F59E0B',Melhoria:'#3B82F6'};
 
-  const vals = meses12.map(m=>uscPorMes[m].usc);
-  const maxV = Math.max(...vals,1);
-  const colW=56,barH=80,topP=36,botP=24,padL=6;
-  const svgW = padL+meses12.length*colW+padL;
-  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
-  svg+=`<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
-  meses12.forEach((m,i)=>{
-    const usc=uscPorMes[m].usc, qt=uscPorMes[m].qt;
-    const cx=padL+i*colW+colW/2, x=padL+i*colW;
-    const bh=usc>0?Math.max(4,Math.round((usc/maxV)*barH)):0;
-    const by=topP+barH-bh;
-    if(bh>0){
-      svg+=`<rect x="${x+4}" y="${by}" width="${colW-8}" height="${bh}" rx="3" fill="${cor}" opacity="0.85"/>`;
-      svg+=`<text x="${cx}" y="${by-4}" text-anchor="middle" font-size="9" fill="${cor}" font-weight="700">${usc.toFixed(0)}</text>`;
-    }
-    svg+=`<text x="${cx}" y="${topP+barH+14}" text-anchor="middle" font-size="8" fill="#9ca3af">${mLabel(m)}</text>`;
-    if(qt>0) svg+=`<text x="${cx}" y="${topP+barH+23}" text-anchor="middle" font-size="7" fill="${cor}99">${qt}med</text>`;
-  });
-  svg+='</svg>';
-  const totalUSCMed=vals.reduce((s,v)=>s+v,0);
-  return `
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div style="font-size:11px;font-weight:700;color:${cor}">📈 USC Medido por Mês (12 meses)</div>
-        <div style="font-size:12px;font-weight:800;color:${cor}">${totalUSCMed.toFixed(1)} USC total medido</div>
+  // Read prog filter from localStorage (shared with main analise filter)
+  function getProgFiltro(){ return JSON.parse(localStorage.getItem('usc_prog_filtro')||'{}'); }
+
+  // Build data: per programa per mes
+  function buildUscData(pool){
+    const data = {};
+    PROGS.forEach(p=>{ data[p]={}; meses12.forEach(m=>{ data[p][m]={usc:0,qt:0,parcial:0,final:0}; }); });
+    data['_sem']={};
+    meses12.forEach(m=>{ data['_sem'][m]={usc:0,qt:0,parcial:0,final:0}; });
+
+    pool.forEach(o=>{
+      const prog = PROGS.includes(o.programa) ? o.programa : '_sem';
+      (o.medicoes||[]).forEach(med=>{
+        const mes = (med.data||'').slice(0,7);
+        if(!meses12.includes(mes)) return;
+        const usc = parseFloat(med.uscMedido)||0;
+        data[prog][mes].usc += usc;
+        data[prog][mes].qt++;
+        if(med.tipo==='parcial') data[prog][mes].parcial += usc;
+        else                     data[prog][mes].final   += usc;
+      });
+    });
+    return data;
+  }
+
+  function renderChart(pool, filtros){
+    const data = buildUscData(pool);
+    const activePrgs = PROGS.filter(p=>filtros[p]!==false);
+    const includeSem = filtros['_sem']!==false;
+
+    // Aggregate per mes for active progs
+    const totais = meses12.map(m=>{
+      let usc=0,qt=0,parcial=0,final=0;
+      activePrgs.forEach(p=>{ const v=data[p][m]; usc+=v.usc; qt+=v.qt; parcial+=v.parcial; final+=v.final; });
+      if(includeSem){ const v=data['_sem'][m]; usc+=v.usc; qt+=v.qt; }
+      return {m,usc,qt,parcial,final,byProg:activePrgs.map(p=>({p,usc:data[p][m].usc,cor:CORS[p]}))};
+    });
+
+    const maxV = Math.max(...totais.map(t=>t.usc), 1);
+    const colW=56, barH=80, topP=40, botP=28, padL=6;
+    const svgW = padL + meses12.length*colW + padL;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${topP+barH+botP}" style="font-family:'DM Mono',monospace;display:block;overflow:visible">`;
+    svg += `<line x1="${padL}" y1="${topP+barH}" x2="${svgW-padL}" y2="${topP+barH}" stroke="#374151" stroke-width="1"/>`;
+
+    totais.forEach((t,i)=>{
+      const cx = padL+i*colW+colW/2;
+      const x  = padL+i*colW;
+      const bh = t.usc>0 ? Math.max(4, Math.round((t.usc/maxV)*barH)) : 0;
+      const by = topP+barH-bh;
+
+      if(bh>0){
+        // Stack bars by programa
+        let yOff=0;
+        [...t.byProg].reverse().forEach(({p,usc,cor})=>{
+          if(!usc) return;
+          const ph = Math.round((usc/maxV)*barH);
+          svg+=`<rect x="${x+4}" y="${topP+barH-yOff-ph}" width="${colW-8}" height="${ph}" rx="2" fill="${cor}" opacity="0.9" title="${p}: ${usc.toFixed(0)} USC"/>`;
+          yOff+=ph;
+        });
+        if(data['_sem'][t.m].usc>0&&includeSem){
+          const su=data['_sem'][t.m].usc; const sh=Math.round((su/maxV)*barH);
+          svg+=`<rect x="${x+4}" y="${topP+barH-yOff-sh}" width="${colW-8}" height="${sh}" rx="2" fill="#6b7280" opacity="0.7"/>`;
+        }
+        // Label total
+        svg+=`<text x="${cx}" y="${by-4}" text-anchor="middle" font-size="9" fill="${cor}" font-weight="700">${t.usc.toFixed(0)}</text>`;
+      }
+
+      svg+=`<text x="${cx}" y="${topP+barH+14}" text-anchor="middle" font-size="8" fill="#9ca3af">${mLabel(t.m)}</text>`;
+      if(t.qt>0){
+        const parLabel = t.parcial>0 ? `P:${t.parcial.toFixed(0)}` : '';
+        const finLabel = t.final>0   ? `F:${t.final.toFixed(0)}`   : '';
+        svg+=`<text x="${cx}" y="${topP+barH+23}" text-anchor="middle" font-size="7" fill="${cor}aa">${[parLabel,finLabel].filter(Boolean).join('|')}</text>`;
+      }
+    });
+    svg+='</svg>';
+
+    const totalMed = totais.reduce((s,t)=>s+t.usc,0);
+    const totalP   = totais.reduce((s,t)=>s+t.parcial,0);
+    const totalF   = totais.reduce((s,t)=>s+t.final,0);
+    return {svg, totalMed, totalP, totalF};
+  }
+
+  const cid = containerId||('uscChart_'+Math.random().toString(36).slice(2));
+
+  function buildHtml(filtros){
+    const {svg, totalMed, totalP, totalF} = renderChart(obrasPool, filtros);
+    const legendItems = PROGS.filter(p=>{
+      const d=buildUscData(obrasPool);
+      return meses12.some(m=>d[p][m].usc>0);
+    });
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:11px;font-weight:700;color:${cor}">📈 USC Medido por Mês — Parcial (P) + Final (F)</div>
+        <div style="display:flex;gap:12px;font-size:10px;flex-wrap:wrap">
+          <span>Total: <strong style="color:${cor}">${totalMed.toFixed(1)}</strong></span>
+          ${totalP>0?`<span>Parcial: <strong style="color:#7c6af7">${totalP.toFixed(1)}</strong></span>`:''}
+          ${totalF>0?`<span>Final: <strong style="color:#22C55E">${totalF.toFixed(1)}</strong></span>`:''}
+        </div>
       </div>
-      <div style="overflow-x:auto">${svg}</div>
-    </div>`;
+      <!-- Filtro por programa -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;font-size:10px">
+        ${PROGS.map(p=>`<label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" ${filtros[p]!==false?'checked':''} onchange="(()=>{
+            const f=JSON.parse(localStorage.getItem('usc_prog_filtro')||'{}');
+            f['${p}']=this.checked;
+            localStorage.setItem('usc_prog_filtro',JSON.stringify(f));
+            const el=document.getElementById('${cid}');
+            if(el) el.innerHTML=window._buildUscHtml_${cid.replace(/[^a-z0-9]/gi,'_')}(f);
+          })()">
+          <span style="background:${CORS[p]};color:#fff;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700">${p}</span>
+        </label>`).join('')}
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" ${filtros['_sem']!==false?'checked':''} onchange="(()=>{
+            const f=JSON.parse(localStorage.getItem('usc_prog_filtro')||'{}');
+            f['_sem']=this.checked;
+            localStorage.setItem('usc_prog_filtro',JSON.stringify(f));
+            const el=document.getElementById('${cid}');
+            if(el) el.innerHTML=window._buildUscHtml_${cid.replace(/[^a-z0-9]/gi,'_')}(f);
+          })()">
+          <span style="background:#6b7280;color:#fff;padding:1px 7px;border-radius:8px;font-size:9px">Sem programa</span>
+        </label>
+      </div>
+      ${legendItems.length>1?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:9px">
+        ${legendItems.map(p=>`<span>■ <span style="color:${CORS[p]}">${p}</span></span>`).join('')}
+        <span>■ <span style="color:#6b7280">Sem programa</span></span>
+      </div>`:''}
+      <div style="overflow-x:auto">${svg}</div>`;
+  }
+
+  const filtros = getProgFiltro();
+  const fnKey = cid.replace(/[^a-z0-9]/gi,'_');
+  window['_buildUscHtml_'+fnKey] = buildHtml;
+
+  return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+    <div id="${cid}">${buildHtml(filtros)}</div>
+  </div>`;
 }
+
 
 // ══════════════════════════════════════════════════════════════════════
 //  ABA "PROGRAMAS" — PODI e Mono-Tri
