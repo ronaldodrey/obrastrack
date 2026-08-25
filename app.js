@@ -1301,7 +1301,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'sem_conclusao') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
   else if(_filtroRapidoAtivo === 'fisc_sem_cad')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
   else if(_filtroRapidoAtivo === 'fisc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.medicao&&o.tipo!=='ODI');
-  else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medicao);
+  else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!temMedicaoFinal(o));
   else if(_filtroRapidoAtivo === 'conc_sem_fisc') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
   else if(_filtroRapidoAtivo === 'pend_exec')     baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&!o.regularizacaoData);
   else if(_filtroRapidoAtivo === 'pend_ag_conf')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
@@ -3352,6 +3352,11 @@ async function migrarProgramaR1(){
   }
 }
 
+
+// Verifica se obra tem medição FINAL registrada
+function temMedicaoFinal(o){
+  return !!(o.medicoes||[]).some(m=>m.tipo==='final');
+}
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -5700,8 +5705,13 @@ function buildFuturoPorMes(obrasPool, p, nMeses=12){
     const dt = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     const ym = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
     const fim = fimDoMes(ym); const ini = `${ym}-01`;
-    // Exclui obras com medicao final (já medidas não geram custo futuro)
-    const obMes = obrasPool.filter(o=>!o.cancelado&&!o.conclusao&&!o.medicao&&(o.tipo==='R1'||o.tipo==='R2')&&o.dataLimite>=ini&&o.dataLimite<=fim);
+    // Saldo futuro: obras SEM conclusao e SEM medição final, com prazo no mês
+    const obMes = obrasPool.filter(o=>
+      !o.cancelado && !o.conclusao &&
+      !temMedicaoFinal(o) &&
+      (o.tipo==='R1'||o.tipo==='R2') &&
+      o.dataLimite>=ini && o.dataLimite<=fim
+    );
     const label = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][dt.getMonth()]+'/'+String(dt.getFullYear()).slice(2);
     meses.push({ ym, label, obMes, calc: calcFinanceiro(obMes,p) });
   }
@@ -5758,7 +5768,14 @@ function renderGraficoFinanceiro(meses, titulo, cor, p){
 
 function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
   // Saldo Devedor
-  const devOp = obrasPool.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medicao&&(o.tipo==='R1'||o.tipo==='R2'));
+  // devOp: obras concluídas SEM medição final
+  // Usa o array medicoes (não o campo o.medicao que pode ter dado antigo de parciais)
+  const devOp = obrasPool.filter(o=>
+    !o.cancelado && !o.armazenado &&
+    o.conclusao &&
+    !temMedicaoFinal(o) &&
+    (o.tipo==='R1'||o.tipo==='R2')
+  );
   const dev   = calcFinanceiro(devOp, p);
   // Futuro 12 meses
   const meses  = buildFuturoPorMes(obrasPool, p, 12);
