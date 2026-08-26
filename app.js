@@ -200,7 +200,7 @@ async function iniciarApp(){
     ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
     ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
-    [['pgDesligamentos','🔌 Desligamentos']],
+    ['pgDesligamentos','🔌 Desligamentos'],
   ];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
@@ -4233,7 +4233,7 @@ function renderCarteira(){
 
           // 🟢 COM FOLGA (fundo)
           if(hF>0){
-            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hF}" rx="${curY===topPadS+barHS-hTot?'5 5 0 0':'0'}" fill="#22C55E" opacity="0.85"/>`;
+            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hF}" rx="3" fill="#22C55E" opacity="0.85"/>`;
             curY += hF;
           }
           // 🟡 NO PRAZO
@@ -4243,7 +4243,7 @@ function renderCarteira(){
           }
           // 🔴 ATRASADA (topo)
           if(hA>0){
-            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hA}" rx="${hP===0&&hF===0?'5 5 0 0':'0'}" fill="#EF4444" opacity="0.85"/>`;
+            svgConcl += `<rect x="${x+4}" y="${curY}" width="${wS}" height="${hA}" rx="3" fill="#EF4444" opacity="0.85"/>`;
           }
 
           // Label total acima
