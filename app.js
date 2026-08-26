@@ -4352,11 +4352,9 @@ function renderCarteira(){
     </table></div>`;
   }
 
+  html += renderUSCMediaPorPrograma(obras);
   cont.innerHTML = html;
 }
-
-// ══════════════════════════════════════════════════════════════════════
-//  RELATÓRIO DE EMPREITEIRA
 // ══════════════════════════════════════════════════════════════════════
 window.abrirModalRelatorio = function(){
   // Populate empreiteiras
@@ -5717,7 +5715,9 @@ function getParamsFinanceiros(){
     valorULV:        parseFloat(localStorage.getItem('sppc_valorULV')||'0'),
     ajusteLV:        parseFloat(localStorage.getItem('sppc_ajusteLV')||'18'),
     meta:            parseFloat(localStorage.getItem('sppc_metaMensal')||'0'),
-    valorProjetoUSC: parseFloat(localStorage.getItem('sppc_valorProjetoUSC')||'0'),
+    // Valor de projeto por empreiteira (sem ajuste %)
+    valorProjetoCS:  parseFloat(localStorage.getItem('sppc_valorProjetoCS')||'0'),
+    valorProjetoEL:  parseFloat(localStorage.getItem('sppc_valorProjetoEL')||'0'),
   };
 }
 function saveParamsFinanceiros(){
@@ -5733,7 +5733,8 @@ function saveParamsFinanceiros(){
   localStorage.setItem('sppc_valorULV', p.valorULV);
   localStorage.setItem('sppc_ajusteLV', p.ajusteLV);
   localStorage.setItem('sppc_metaMensal', p.metaMensal);
-  localStorage.setItem('sppc_valorProjetoUSC', p.valorProjetoUSC||0);
+  localStorage.setItem('sppc_valorProjetoCS', p.valorProjetoCS||0);
+  localStorage.setItem('sppc_valorProjetoEL', p.valorProjetoEL||0);
   // Persist to Firestore for fiscal sync
   setDoc(doc(db,'config','financeiro'), p).then(()=>toast('✓ Parâmetros salvos e sincronizados.','ok')).catch(e=>toast('Erro: '+e.message,'err'));
   renderAnaliseFinanceira();
@@ -5849,7 +5850,9 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
   const dev   = calcFinanceiro(devOp, p);
   // Futuro 12 meses
     // Projeto: USC imputado × valorUSC sem ajuste (por empreiteira: proporção do pool)
-  const saldoProjeto = (p.valorProjetoUSC||0) * p.valorUSC;
+  // Projeto por empreiteira
+  const isCS = nome.toUpperCase().includes('CS');
+  const saldoProjeto = isCS ? (p.valorProjetoCS||0)*p.valorUSC : (p.valorProjetoEL||0)*p.valorUSC;
 
   const meses  = buildFuturoPorMes(obrasPool, p, 12);
   const futTotal = meses.reduce((s,m)=>s+m.calc.total,0);
@@ -5915,6 +5918,8 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
           </tbody>
         </table>
       </div>
+      <!-- USC medido por mês -->
+      ${renderGraficoUSCMedido(obrasPool,cor)}
     </div>`;
 }
 
@@ -5942,8 +5947,13 @@ function renderAnaliseFinanceira(){
         <div class="fg"><label>Ajuste LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
         <div class="fg"><label>Valor Unitário ULV (R$/ULV)</label><input type="number" id="pfValorULV" value="${p.valorULV}" ${isGerente?'':' disabled'} placeholder="0.00" step="0.01" min="0"></div>
         <div class="fg"><label>Ajuste LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
-        <div class="fg"><label>📐 Valor de Projeto (USC) <span style="font-size:9px;color:var(--muted)">sem ajuste %</span></label>
-          <input type="number" id="pfValorProjetoUSC" value="${p.valorProjetoUSC||0}" ${isGerente?'':' disabled'} placeholder="0" min="0" step="0.1">
+        <div class="fg-grid">
+          <div class="fg"><label>📐 Projeto USC — CS Eletricidade</label>
+            <input type="number" id="pfValorProjetoCS" value="${p.valorProjetoCS||0}" ${isGerente?'':' disabled'} placeholder="0" min="0" step="0.1">
+          </div>
+          <div class="fg"><label>📐 Projeto USC — Eletelsul</label>
+            <input type="number" id="pfValorProjetoEL" value="${p.valorProjetoEL||0}" ${isGerente?'':' disabled'} placeholder="0" min="0" step="0.1">
+          </div>
         </div>
         <div class="fg"><label>🎯 Meta Mensal de Custo <span style="color:#F59E0B;font-weight:700">(valor em R$)</span></label>
           <div style="display:flex;align-items:center;gap:6px">
