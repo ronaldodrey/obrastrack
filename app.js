@@ -200,6 +200,7 @@ async function iniciarApp(){
     ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
     ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
+    [['pgDesligamentos','🔌 Desligamentos']],
   ];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
@@ -257,6 +258,7 @@ window.showPage=function(id){
   if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
   if(id==='pgCarteiraFutura') renderCarteiraFutura();
+  if(id==='pgDesligamentos') renderDesligamentos();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
@@ -3367,7 +3369,8 @@ function renderUSCMediaPorPrograma(pool){
   const CORS = {Regulatório:'#22C55E',PODI:'#7c6af7','Mono-Tri':'#F59E0B',Melhoria:'#3B82F6'};
 
   const rows = EMPS.map(emp=>{
-    const obEmp = pool.filter(o=>o.empreiteira===emp&&!o.cancelado&&(o.tipo==='R1'||o.tipo==='R2'));
+    // Somente obras EM EXECUÇÃO (sem conclusão informada)
+    const obEmp = pool.filter(o=>o.empreiteira===emp&&!o.cancelado&&!o.conclusao&&(o.tipo==='R1'||o.tipo==='R2'));
     const cols = PROGS.map(prog=>{
       const obProg = obEmp.filter(o=>o.programa===prog);
       if(!obProg.length) return `<td style="padding:6px 10px;text-align:center;color:var(--muted)">—</td>`;
@@ -5727,6 +5730,8 @@ function saveParamsFinanceiros(){
     valorUSC: get('pfValorUSC'), ajusteLM: get('pfAjusteLM'),
     valorULV: get('pfValorULV'), ajusteLV: get('pfAjusteLV'),
     metaMensal: get('pfMetaMensal'),
+    valorProjetoCS: get('pfValorProjetoCS'),
+    valorProjetoEL: get('pfValorProjetoEL'),
   };
   localStorage.setItem('sppc_valorUSC', p.valorUSC);
   localStorage.setItem('sppc_ajusteLM', p.ajusteLM);
@@ -6293,3 +6298,198 @@ function renderProgramas(){
     ${renderSecao('🟡 Mono-Tri','#F59E0B',mono)}`;
 }
 window.renderProgramas = renderProgramas;
+
+// ══════════════════════════════════════════════════════════════════════
+//  CRONOGRAMA DE DESLIGAMENTOS — Upload PDF + Análise de Prioridade
+// ══════════════════════════════════════════════════════════════════════
+
+// Parse the SIMO PDF text using Claude API
+async function parseSIMOPdf(base64Data){
+  const prompt = `Analise este PDF de Cronograma de Desligamento da CELESC (SIMO) e extraia os dados em JSON.
+
+Para cada entrada no relatório, extraia:
+- obraNumero: o número OIS (9 dígitos, ex: 400820313)  
+- dataProgram: data do desligamento em formato YYYY-MM-DD (converta de DD/MM/YYYY)
+- inicioHora: hora de início (ex: "13:00")
+- fimHora: hora de término (ex: "18:00")
+- empreiteira: nome da turma/empreiteira do cabeçalho "Turma:" da página (ex: "CS ELETRICIDADE" para turmas CONST. LM TERCEIR - CS ELET, "ELETELSUL" para turmas ELETELSUI)
+- status: "aguarda_programador" se a linha de status contiver "AGUARDA AUT. PROGRAMADOR", "aguarda_execucao" se contiver "AGUARDA EXECUCAO MANUTENCAO"
+- localidade: localidade descrita (primeira linha)
+- responsavel: nome do Resp. Titular
+
+Responda APENAS com JSON array, sem markdown, sem texto adicional. Exemplo de uma entrada:
+[{"obraNumero":"400820313","dataProgram":"2026-08-28","inicioHora":"13:00","fimHora":"18:00","empreiteira":"CS ELETRICIDADE","status":"aguarda_programador","localidade":"HERMELINO ARRUDA FILHO, 396","responsavel":"JOSEMAR HILGERT"}]`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
+        { type: 'text', text: prompt }
+      ]}]
+    })
+  });
+  const data = await response.json();
+  const text = (data.content||[]).map(c=>c.text||'').join('');
+  return JSON.parse(text.replace(/```json?|```/g,'').trim());
+}
+
+window.uploadDesligamentos = async function(){
+  const input = document.getElementById('inputPdfDeslig');
+  if(!input?.files?.[0]){ toast('Selecione um arquivo PDF.','err'); return; }
+  const file = input.files[0];
+  const btn  = document.getElementById('btnUploadDeslig');
+  btn.disabled=true; btn.textContent='Processando PDF...';
+  try{
+    const base64 = await new Promise((res,rej)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result.split(',')[1]);
+      r.onerror=()=>rej(new Error('Falha ao ler arquivo'));
+      r.readAsDataURL(file);
+    });
+    toast('🤖 Extraindo dados com IA...','ok');
+    const entries = await parseSIMOPdf(base64);
+    if(!Array.isArray(entries)||!entries.length) throw new Error('Nenhum dado extraído');
+
+    const hoje = new Date().toISOString().split('T')[0];
+    await setDoc(doc(db,'desligamentos', hoje), {
+      data: hoje,
+      arquivo: file.name,
+      atualizadaEm: serverTimestamp(),
+      entradas: entries,
+      totalEntradas: entries.length,
+    });
+    toast(`✓ ${entries.length} desligamentos importados para ${hoje}.`, 'ok');
+    renderDesligamentos();
+  }catch(e){
+    console.error('[Desligamentos]', e);
+    toast('Erro: '+e.message, 'err');
+  }finally{
+    btn.disabled=false; btn.textContent='📄 Importar PDF';
+  }
+};
+
+function renderDesligamentos(){
+  const cont = document.getElementById('pgDesligamentosContent');
+  if(!cont) return;
+
+  const podeUpload = ['gerente','estagiario'].includes(me.perfil);
+  const uploadBlock = podeUpload ? `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:10px">📄 Importar Cronograma SIMO (PDF)</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="inputPdfDeslig" accept=".pdf" style="font-size:11px">
+        <button id="btnUploadDeslig" onclick="uploadDesligamentos()" class="btn btn-primary btn-sm">📄 Importar PDF</button>
+        <span style="font-size:10px;color:var(--muted)">Atualizado diariamente. O sistema usará IA para extrair os dados.</span>
+      </div>
+    </div>` : '';
+
+  cont.innerHTML = uploadBlock + '<div id="desligSlot"><div style="font-size:11px;color:var(--muted)">Carregando cronograma...</div></div>';
+
+  // Load latest from Firestore
+  getDocs(collection(db,'desligamentos')).then(snap=>{
+    if(snap.empty){ document.getElementById('desligSlot').innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum cronograma importado ainda.</div>'; return; }
+
+    // Sort by date desc, take most recent
+    const docs = snap.docs.sort((a,b)=>b.id.localeCompare(a.id));
+    const latest = docs[0].data();
+    const entradas = (latest.entradas||[]).filter(e=>{
+      // Filter by profile
+      if(me.perfil==='empreiteira') return e.empreiteira?.toUpperCase().includes(me.vinculo?.toUpperCase().split(' ')[0]||'_');
+      return true;
+    });
+
+    // Cross-reference with obras
+    const hoje = new Date().toISOString().split('T')[0];
+    const hoje30 = new Date(); hoje30.setDate(hoje30.getDate()+30);
+    const hoje30str = hoje30.toISOString().split('T')[0];
+
+    function getPrioridade(e){
+      const obraMatch = obras.find(o=>(o.numero||'').toString()===e.obraNumero?.toString());
+      if(!obraMatch) return null;
+      const lim = obraMatch.dataLimite||'';
+      if(lim<hoje) return {nivel:'critica', label:'⚠️ ATRASADA', cor:'#EF4444', o:obraMatch};
+      if(lim<=hoje30str) return {nivel:'urgente', label:'🔴 URGENTE ≤30d', cor:'#F97316', o:obraMatch};
+      return {nivel:'ok', label:'✅ Normal', cor:'#22C55E', o:obraMatch};
+    }
+
+    // Status labels
+    const statusLabel = s => s==='aguarda_programador'
+      ? `<span style="background:#F59E0B;color:#000;padding:1px 8px;border-radius:8px;font-size:9px">⏳ Aguarda Programador</span>`
+      : `<span style="background:#3B82F6;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">🔧 Aguarda Execução</span>`;
+
+    // Priority analysis
+    const comPrioridade = entradas.map(e=>({...e, prio:getPrioridade(e)})).filter(e=>e.prio);
+    const criticas = comPrioridade.filter(e=>e.prio.nivel==='critica').length;
+    const urgentes = comPrioridade.filter(e=>e.prio.nivel==='urgente').length;
+    const normais  = comPrioridade.filter(e=>e.prio.nivel==='ok').length;
+
+    const analise = comPrioridade.length ? `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:10px">📊 Análise de Prioridade — Obras Programadas</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+          <div style="flex:1;min-width:120px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#EF4444">${criticas}</div>
+            <div style="font-size:9px;color:var(--muted)">⚠️ Obras ATRASADAS sendo programadas</div>
+          </div>
+          <div style="flex:1;min-width:120px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.3);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#F97316">${urgentes}</div>
+            <div style="font-size:9px;color:var(--muted)">🔴 Urgentes (vence ≤30d)</div>
+          </div>
+          <div style="flex:1;min-width:120px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:#22C55E">${normais}</div>
+            <div style="font-size:9px;color:var(--muted)">✅ Prazo OK</div>
+          </div>
+        </div>
+        ${normais>criticas+urgentes&&criticas+urgentes>0?`<div style="background:rgba(239,68,68,.08);border:1px solid #EF4444;border-radius:8px;padding:10px;font-size:11px;color:#EF4444;font-weight:700">
+          ⚠️ Atenção: a empreiteira está priorizando mais obras com prazo OK do que obras urgentes/atrasadas!
+        </div>`:''}
+      </div>` : '';
+
+    // Table
+    const rows = entradas.sort((a,b)=>{
+      // Sort: criticas first, then urgentes, then ok
+      const pA = a.prio?.nivel; const pB = b.prio?.nivel;
+      const ord = {critica:0,urgente:1,ok:2,undefined:3};
+      return (ord[pA]||3)-(ord[pB]||3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
+    }).map(e=>{
+      const p = e.prio;
+      return `<tr style="border-bottom:1px solid var(--border);${p?.nivel==='critica'?'background:rgba(239,68,68,.04)':p?.nivel==='urgente'?'background:rgba(249,115,22,.04)':''}">
+        <td style="padding:5px 8px;font-size:10px">${e.dataProgram?fmtTxt(e.dataProgram):'—'} ${e.inicioHora||''}</td>
+        <td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer" ${p?.o?`onclick="openObraModal('${p.o.id}')"`:''}>${e.obraNumero||'—'}</td>
+        <td style="padding:5px 8px;font-size:10px">${e.empreiteira||'—'}</td>
+        <td style="padding:5px 8px">${statusLabel(e.status)}</td>
+        <td style="padding:5px 8px;font-size:9px">${p?`<span style="color:${p.cor};font-weight:700">${p.label}</span>${p.o?`<br><span style="color:var(--muted)">${fmtTxt(p.o.dataLimite)}</span>`:''}`:'<span style="color:var(--muted)">Obra não encontrada</span>'}</td>
+        <td style="padding:5px 8px;font-size:9px;color:var(--muted)">${e.localidade||'—'}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('desligSlot').innerHTML = `
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
+        📅 Última importação: <strong>${fmtTxt(latest.data)}</strong> — ${latest.arquivo||''} — ${entradas.length} entradas
+        ${docs.length>1?`<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">
+          ${docs.map(d=>`<option value="${d.id}">${d.id}</option>`).join('')}
+        </select>`:''}
+      </div>
+      ${analise}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:10px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:6px 8px;text-align:left">Data Prog.</th>
+              <th style="padding:6px 8px;text-align:left">OIS</th>
+              <th style="padding:6px 8px;text-align:left">Empreiteira</th>
+              <th style="padding:6px 8px;text-align:left">Status</th>
+              <th style="padding:6px 8px;text-align:left">Prioridade</th>
+              <th style="padding:6px 8px;text-align:left">Localidade</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).catch(e=>{ document.getElementById('desligSlot').innerHTML=`<div style="color:#EF4444">Erro: ${e.message}</div>`; });
+}
+window.renderDesligamentos = renderDesligamentos;
