@@ -6304,18 +6304,105 @@ window.renderProgramas = renderProgramas;
 //  CRONOGRAMA DE DESLIGAMENTOS — Upload PDF + Análise de Prioridade
 // ══════════════════════════════════════════════════════════════════════
 
-// Parse the SIMO PDF via Vercel proxy (avoids CORS)
-async function parseSIMOPdf(base64Data){
-  const response = await fetch('/api/parse-simo', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pdfBase64: base64Data })
+// ── PDF.js loader (CDN, sem API) ──────────────────────────────────────
+async function loadPdfJs(){
+  if(window.pdfjsLib) return window.pdfjsLib;
+  return new Promise((res,rej)=>{
+    if(document.getElementById('pdfjs-script')){ setTimeout(()=>res(window.pdfjsLib),500); return; }
+    const s=document.createElement('script');
+    s.id='pdfjs-script';
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload=()=>{
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc=
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      res(window.pdfjsLib);
+    };
+    s.onerror=()=>rej(new Error('Falha ao carregar PDF.js'));
+    document.head.appendChild(s);
   });
-  const data = await response.json();
-  if(data.error) throw new Error(data.error);
-  const text = (data.content||[]).map(c=>c.text||'').join('');
-  const clean = text.replace(/```json?|```/g,'').trim();
-  return JSON.parse(clean);
+}
+
+// ── Extrai texto de cada página do PDF ───────────────────────────────
+async function extrairTextoPdf(arrayBuffer){
+  const lib = await loadPdfJs();
+  const pdf = await lib.getDocument({data: arrayBuffer}).promise;
+  const pages = [];
+  for(let i=1;i<=pdf.numPages;i++){
+    const pg   = await pdf.getPage(i);
+    const cont = await pg.getTextContent();
+    // Preserva quebras de linha usando a posição Y dos itens
+    let lastY=null, linhas=[], linhaAtual=[];
+    cont.items.forEach(item=>{
+      const y=Math.round(item.transform[5]);
+      if(lastY!==null && Math.abs(y-lastY)>3){
+        linhas.push(linhaAtual.join(' ')); linhaAtual=[];
+      }
+      if(item.str.trim()) linhaAtual.push(item.str.trim());
+      lastY=y;
+    });
+    if(linhaAtual.length) linhas.push(linhaAtual.join(' '));
+    pages.push(linhas.join('\n'));
+  }
+  return pages;
+}
+
+// ── Parser regex do formato SIMO ─────────────────────────────────────
+function parsePagesSIMO(pages){
+  const entries=[];
+
+  pages.forEach(pageText=>{
+    // Determina empreiteira pelo cabeçalho "Turma :"
+    let empreiteira = '';
+    const turmM = pageText.match(/Turma\s*:?\s*\d+\s+(.+?)(?:\n|$)/i);
+    const turmDesc = turmM ? turmM[1].toUpperCase() : '';
+    if(/CS ELET/i.test(turmDesc))            empreiteira='CS ELETRICIDADE';
+    else if(/ELETELSUI|ELETELSUL/i.test(turmDesc)) empreiteira='ELETELSUL';
+    else empreiteira = turmDesc.replace(/CONST\.?\s*LM\s*TERC\.?\s*/i,'').trim()||'OUTRA';
+
+    const lines = pageText.split('\n');
+    lines.forEach((line,i)=>{
+      // Linha com número OIS (9 dígitos começando com 4) + data DD/MM/YYYY + horas HH:MM
+      const oisM  = line.match(/\b(4\d{8})\b/);
+      const dateM = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      const timeM = line.match(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/);
+      if(!oisM || !dateM) return;
+
+      const obraNumero  = oisM[1];
+      const dataProgram = `${dateM[3]}-${dateM[2]}-${dateM[1]}`;
+      const inicioHora  = timeM ? timeM[1] : '';
+      const fimHora     = timeM ? timeM[2] : '';
+
+      // Status: olha nas próximas 3 linhas
+      const proxLinhas = lines.slice(i,i+4).join(' ').toUpperCase();
+      let status='';
+      if(/AGUARDA AUT[.]?\s*PROGRAMADOR/i.test(proxLinhas))       status='aguarda_programador';
+      else if(/AGUARDA EXECUCAO MANUTENCAO/i.test(proxLinhas))      status='aguarda_execucao';
+
+      // Localidade: pega o texto da coluna Localidade (após o 5º campo numérico)
+      const locM = line.match(/FT\s*-\s*\d+\s+(.+?)\s{2,}/);
+      const localidade = locM ? locM[1].trim() : '';
+
+      // Responsável: última sequência de letras maiúsculas longa na linha
+      const respM = line.match(/([A-Z]{3,}(?:\s+[A-Z]{2,})+)(?:\s+\(|\s+\d|$)/g);
+      const responsavel = respM ? respM[respM.length-1].trim() : '';
+
+      // Evita duplicatas (mesmo OIS + data)
+      if(!entries.some(e=>e.obraNumero===obraNumero&&e.dataProgram===dataProgram)){
+        entries.push({obraNumero, dataProgram, inicioHora, fimHora, empreiteira, status, localidade, responsavel});
+      }
+    });
+  });
+
+  return entries;
+}
+
+// ── Função principal (chamada pelo botão Importar) ────────────────────
+async function parseSIMOPdf(_base64Ignored, arrayBuffer){
+  // Usa PDF.js localmente — sem API, sem CORS
+  const pages = await extrairTextoPdf(arrayBuffer);
+  const entries = parsePagesSIMO(pages);
+  if(!entries.length) throw new Error('Nenhuma obra encontrada. Verifique se o PDF é o Cronograma de Desligamento do SIMO.');
+  return entries;
 }
 
 window.uploadDesligamentos = async function(){
@@ -6331,8 +6418,15 @@ window.uploadDesligamentos = async function(){
       r.onerror=()=>rej(new Error('Falha ao ler arquivo'));
       r.readAsDataURL(file);
     });
-    toast('🤖 Extraindo dados com IA...','ok');
-    const entries = await parseSIMOPdf(base64);
+    toast('📄 Lendo PDF...','ok');
+    // Lê como ArrayBuffer para PDF.js
+    const arrayBuffer = await new Promise((res,rej)=>{
+      const r=new FileReader();
+      r.onload=()=>res(r.result);
+      r.onerror=()=>rej(new Error('Falha ao ler arquivo'));
+      r.readAsArrayBuffer(file);
+    });
+    const entries = await parseSIMOPdf(null, arrayBuffer);
     if(!Array.isArray(entries)||!entries.length) throw new Error('Nenhum dado extraído');
 
     const hoje = new Date().toISOString().split('T')[0];
