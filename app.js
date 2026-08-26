@@ -1429,7 +1429,8 @@ window.openObraModal=function(obraId){
   try{
   const obra=obraId?obras.find(o=>o.id===obraId):null;
   const isEdit=!!obra;
-  document.getElementById('obraModalTit').textContent=isEdit?'Editar Obra':'Nova Obra';
+  document.getElementById('obraModalTit').textContent = isEdit
+    ? `Obra ${obra.numero||obraId}` : 'Nova Obra';
   document.getElementById('obraId').value=obraId||'';
   // reset
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
@@ -6303,38 +6304,18 @@ window.renderProgramas = renderProgramas;
 //  CRONOGRAMA DE DESLIGAMENTOS — Upload PDF + Análise de Prioridade
 // ══════════════════════════════════════════════════════════════════════
 
-// Parse the SIMO PDF text using Claude API
+// Parse the SIMO PDF via Vercel proxy (avoids CORS)
 async function parseSIMOPdf(base64Data){
-  const prompt = `Analise este PDF de Cronograma de Desligamento da CELESC (SIMO) e extraia os dados em JSON.
-
-Para cada entrada no relatório, extraia:
-- obraNumero: o número OIS (9 dígitos, ex: 400820313)  
-- dataProgram: data do desligamento em formato YYYY-MM-DD (converta de DD/MM/YYYY)
-- inicioHora: hora de início (ex: "13:00")
-- fimHora: hora de término (ex: "18:00")
-- empreiteira: nome da turma/empreiteira do cabeçalho "Turma:" da página (ex: "CS ELETRICIDADE" para turmas CONST. LM TERCEIR - CS ELET, "ELETELSUL" para turmas ELETELSUI)
-- status: "aguarda_programador" se a linha de status contiver "AGUARDA AUT. PROGRAMADOR", "aguarda_execucao" se contiver "AGUARDA EXECUCAO MANUTENCAO"
-- localidade: localidade descrita (primeira linha)
-- responsavel: nome do Resp. Titular
-
-Responda APENAS com JSON array, sem markdown, sem texto adicional. Exemplo de uma entrada:
-[{"obraNumero":"400820313","dataProgram":"2026-08-28","inicioHora":"13:00","fimHora":"18:00","empreiteira":"CS ELETRICIDADE","status":"aguarda_programador","localidade":"HERMELINO ARRUDA FILHO, 396","responsavel":"JOSEMAR HILGERT"}]`;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/api/parse-simo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
-      messages: [{ role: 'user', content: [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } },
-        { type: 'text', text: prompt }
-      ]}]
-    })
+    body: JSON.stringify({ pdfBase64: base64Data })
   });
   const data = await response.json();
+  if(data.error) throw new Error(data.error);
   const text = (data.content||[]).map(c=>c.text||'').join('');
-  return JSON.parse(text.replace(/```json?|```/g,'').trim());
+  const clean = text.replace(/```json?|```/g,'').trim();
+  return JSON.parse(clean);
 }
 
 window.uploadDesligamentos = async function(){
