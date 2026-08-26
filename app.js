@@ -6346,54 +6346,82 @@ async function extrairTextoPdf(arrayBuffer){
   return pages;
 }
 
-// ── Parser regex do formato SIMO ─────────────────────────────────────
+// ── Parser SIMO — abordagem por texto plano (funciona em tabelas multi-coluna) ───
 function parsePagesSIMO(pages){
-  const entries=[];
+  const seen = new Set();
+  const allEntries = [];
 
   pages.forEach(pageText=>{
-    // Determina empreiteira pelo cabeçalho "Turma :"
-    let empreiteira = '';
-    const turmM = pageText.match(/Turma\s*:?\s*\d+\s+(.+?)(?:\n|$)/i);
-    const turmDesc = turmM ? turmM[1].toUpperCase() : '';
-    if(/CS ELET/i.test(turmDesc))            empreiteira='CS ELETRICIDADE';
-    else if(/ELETELSUI|ELETELSUL/i.test(turmDesc)) empreiteira='ELETELSUL';
-    else empreiteira = turmDesc.replace(/CONST\.?\s*LM\s*TERC\.?\s*/i,'').trim()||'OUTRA';
+    // Texto plano: une todas as linhas num só bloco para buscas globais
+    const flat = pageText.replace(/\n+/g,' ').replace(/\s+/g,' ');
 
-    const lines = pageText.split('\n');
-    lines.forEach((line,i)=>{
-      // Linha com número OIS (9 dígitos começando com 4) + data DD/MM/YYYY + horas HH:MM
-      const oisM  = line.match(/\b(4\d{8})\b/);
-      const dateM = line.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const timeM = line.match(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/);
-      if(!oisM || !dateM) return;
+    // 1) Determina empreiteira pelo cabeçalho "Turma"
+    let empreiteira = 'OUTRA';
+    if(/CS\s*ELET/i.test(flat))                empreiteira = 'CS ELETRICIDADE';
+    else if(/ELETELSUI|ELETELSUL/i.test(flat))   empreiteira = 'ELETELSUL';
+    else if(/MANUT\.?\s*LM\s*TERC.*CS/i.test(flat)) empreiteira = 'CS ELETRICIDADE';
 
-      const obraNumero  = oisM[1];
-      const dataProgram = `${dateM[3]}-${dateM[2]}-${dateM[1]}`;
-      const inicioHora  = timeM ? timeM[1] : '';
-      const fimHora     = timeM ? timeM[2] : '';
-
-      // Status: olha nas próximas 3 linhas
-      const proxLinhas = lines.slice(i,i+4).join(' ').toUpperCase();
-      let status='';
-      if(/AGUARDA AUT[.]?\s*PROGRAMADOR/i.test(proxLinhas))       status='aguarda_programador';
-      else if(/AGUARDA EXECUCAO MANUTENCAO/i.test(proxLinhas))      status='aguarda_execucao';
-
-      // Localidade: pega o texto da coluna Localidade (após o 5º campo numérico)
-      const locM = line.match(/FT\s*-\s*\d+\s+(.+?)\s{2,}/);
-      const localidade = locM ? locM[1].trim() : '';
-
-      // Responsável: última sequência de letras maiúsculas longa na linha
-      const respM = line.match(/([A-Z]{3,}(?:\s+[A-Z]{2,})+)(?:\s+\(|\s+\d|$)/g);
-      const responsavel = respM ? respM[respM.length-1].trim() : '';
-
-      // Evita duplicatas (mesmo OIS + data)
-      if(!entries.some(e=>e.obraNumero===obraNumero&&e.dataProgram===dataProgram)){
-        entries.push({obraNumero, dataProgram, inicioHora, fimHora, empreiteira, status, localidade, responsavel});
+    // 2) Extrai todos os OIS (9 dígitos começando com 4, mas NÃO precedido de 000)
+    //    Exclui padrões como 000400820313 (Docto SAP)
+    const flatClean = flat.replace(/000(4\d{8})/g,'___$1___'); // marca docto SAP
+    const oisSet = new Set();
+    const oisAll = [];
+    for(const m of flatClean.matchAll(/(?<![0-9_])(4\d{8})(?![0-9_])/g)){
+      if(!flatClean.slice(Math.max(0,m.index-4),m.index).includes('_')){
+        oisAll.push(m[1]);
+        oisSet.add(m[1]);
       }
+    }
+    // Ordena OIS pela posição de aparecimento (mesma ordem que datas)
+    const oisUniq = [...new Set(oisAll)];
+
+    // 3) Extrai todas as datas DD/MM/YYYY
+    const datas = [];
+    for(const m of flat.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)){
+      if(parseInt(m[3])>=2024) // só anos válidos
+        datas.push(`${m[3]}-${m[2]}-${m[1]}`);
+    }
+
+    // 4) Extrai todos os pares de hora (HH:MM HH:MM)
+    const horas = [];
+    for(const m of flat.matchAll(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/g))
+      horas.push({ini:m[1], fim:m[2]});
+
+    // 5) Detecta blocos de status: cada status pertence a um OIS na mesma ordem
+    //    Estratégia: divide o texto em segmentos por OIS e verifica o status em cada segmento
+    oisUniq.forEach((ois, idx)=>{
+      const oisPos = flat.indexOf(ois);
+      if(oisPos<0) return;
+      // Segmento vai deste OIS até o próximo
+      const nextOis = idx+1 < oisUniq.length ? oisUniq[idx+1] : null;
+      const nextPos = nextOis ? flat.indexOf(nextOis) : flat.length;
+      // Expansão: pega contexto antes e depois
+      const seg = flat.slice(Math.max(0, oisPos-50), Math.min(flat.length, nextPos+300));
+
+      let status = '';
+      if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))    status='aguarda_programador';
+      else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg)) status='aguarda_execucao';
+
+      const dataProgram = datas[idx] || '';
+      const hora = horas[idx] || {};
+      const key = ois+dataProgram;
+      if(!dataProgram||seen.has(key)) return;
+      seen.add(key);
+
+      allEntries.push({
+        obraNumero:  ois,
+        dataProgram,
+        inicioHora:  hora.ini||'',
+        fimHora:     hora.fim||'',
+        empreiteira,
+        status,
+        localidade:  '',
+        responsavel: ''
+      });
     });
   });
 
-  return entries;
+  return allEntries;
 }
 
 // ── Função principal (chamada pelo botão Importar) ────────────────────
@@ -6430,14 +6458,18 @@ window.uploadDesligamentos = async function(){
     if(!Array.isArray(entries)||!entries.length) throw new Error('Nenhum dado extraído');
 
     const hoje = new Date().toISOString().split('T')[0];
-    await setDoc(doc(db,'desligamentos', hoje), {
+    const agora = new Date();
+    const horaStr = String(agora.getHours()).padStart(2,'0')+':'+String(agora.getMinutes()).padStart(2,'0');
+    const docKey = hoje+'_'+String(agora.getHours()).padStart(2,'0')+String(agora.getMinutes()).padStart(2,'0');
+    await setDoc(doc(db,'desligamentos', docKey), {
       data: hoje,
+      hora: horaStr,
       arquivo: file.name,
       atualizadaEm: serverTimestamp(),
       entradas: entries,
       totalEntradas: entries.length,
     });
-    toast(`✓ ${entries.length} desligamentos importados para ${hoje}.`, 'ok');
+    toast(`✓ ${entries.length} desligamentos importados — ${hoje} às ${horaStr}.`, 'ok');
     renderDesligamentos();
   }catch(e){
     console.error('[Desligamentos]', e);
@@ -6544,7 +6576,7 @@ function renderDesligamentos(){
 
     document.getElementById('desligSlot').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
-        📅 Última importação: <strong>${fmtTxt(latest.data)}</strong> — ${latest.arquivo||''} — ${entradas.length} entradas
+        📅 Última importação: <strong>${fmtTxt(latest.data)}</strong>${latest.hora?' às <strong>'+latest.hora+'</strong>':''} — ${latest.arquivo||''} — ${entradas.length} entradas
         ${docs.length>1?`<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">
           ${docs.map(d=>`<option value="${d.id}">${d.id}</option>`).join('')}
         </select>`:''}
