@@ -199,6 +199,7 @@ async function iniciarApp(){
     ['pgObras','🏗️ Obras'],
     ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
+    ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
   ];
   // Otimização tabs
   const isEmpComOtim = me.perfil==='empreiteira' && EMP_COM_OTIMIZACAO.some(e=>me.vinculo?.toUpperCase().includes(e.split(' ')[0]));
@@ -255,6 +256,7 @@ window.showPage=function(id){
   if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
+  if(id==='pgCarteiraFutura') renderCarteiraFutura();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
 };
@@ -3357,6 +3359,64 @@ async function migrarProgramaR1(){
 function temMedicaoFinal(o){
   return !!(o.medicoes||[]).some(m=>m.tipo==='final');
 }
+
+// ── USC Média por Programa por Empreiteira — inserido em renderCarteira ──
+function renderUSCMediaPorPrograma(pool){
+  const EMPS = ['CS ELETRICIDADE','ELETELSUL'];
+  const PROGS = ['Regulatório','PODI','Mono-Tri','Melhoria'];
+  const CORS = {Regulatório:'#22C55E',PODI:'#7c6af7','Mono-Tri':'#F59E0B',Melhoria:'#3B82F6'};
+
+  const rows = EMPS.map(emp=>{
+    const obEmp = pool.filter(o=>o.empreiteira===emp&&!o.cancelado&&(o.tipo==='R1'||o.tipo==='R2'));
+    const cols = PROGS.map(prog=>{
+      const obProg = obEmp.filter(o=>o.programa===prog);
+      if(!obProg.length) return `<td style="padding:6px 10px;text-align:center;color:var(--muted)">—</td>`;
+      const totalUSC = obProg.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+      const media = totalUSC/obProg.length;
+      return `<td style="padding:6px 10px;text-align:center">
+        <div style="font-weight:700;color:${CORS[prog]}">${media.toFixed(1)}</div>
+        <div style="font-size:9px;color:var(--muted)">${obProg.length} obras</div>
+      </td>`;
+    }).join('');
+    const totUSC = obEmp.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const mediaGeral = obEmp.length>0 ? (totUSC/obEmp.length).toFixed(1) : '—';
+    return `<tr>
+      <td style="padding:6px 10px;font-weight:700">${emp}</td>
+      ${cols}
+      <td style="padding:6px 10px;text-align:center;font-weight:700">${mediaGeral} <span style="font-size:9px;color:var(--muted)">(${obEmp.length}ob)</span></td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-top:20px">
+      <div style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;margin-bottom:12px">📊 USC Média por Obra — por Empreiteira e Programa</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:7px 10px;text-align:left">Empreiteira</th>
+            ${PROGS.map(p=>`<th style="padding:7px 10px;text-align:center;color:${CORS[p]}">${p}</th>`).join('')}
+            <th style="padding:7px 10px;text-align:center">Geral</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+
+function renderCarteiraFutura(){
+  const cont=document.getElementById('pgCarteiraFuturaContent');
+  if(!cont) return;
+  cont.innerHTML=`
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📅 Carteira de Obras Futura</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:8px">Em desenvolvimento</div>
+      <div style="font-size:12px;color:var(--muted)">Aguardando base de dados do cliente para otimizar a abertura de obras futuras.</div>
+    </div>`;
+}
+window.renderCarteiraFutura = renderCarteiraFutura;
+
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
   'Conclusão','Fiscalização','Kaffa (último)','Tipo Kaffa','Medição','Tipo Med.','USC','ULV',
@@ -5555,6 +5615,7 @@ function renderAberturaObras(){
         <th style="padding:5px 8px;text-align:right;color:${cor}88">R2 Obras</th>
         <th style="padding:5px 8px;text-align:right;color:${cor}88">R2 USC</th>
         <th style="padding:5px 8px;text-align:right;font-weight:700">Total USC</th>
+        <th style="padding:5px 8px;text-align:right;color:#22C55E">ULV Med.</th>
       </tr></thead>
       <tbody>${totaisMes.filter(t=>t.qtd>0).map(t=>`
         <tr style="border-bottom:1px solid var(--border)">
@@ -5651,11 +5712,12 @@ async function loadParamsFinanceiros(){
 
 function getParamsFinanceiros(){
   return {
-    valorUSC:  parseFloat(localStorage.getItem('sppc_valorUSC')||'0'),
-    ajusteLM:  parseFloat(localStorage.getItem('sppc_ajusteLM')||'18'),
-    valorULV:  parseFloat(localStorage.getItem('sppc_valorULV')||'0'),
-    ajusteLV:  parseFloat(localStorage.getItem('sppc_ajusteLV')||'18'),
-    meta:      parseFloat(localStorage.getItem('sppc_metaMensal')||'0'),
+    valorUSC:        parseFloat(localStorage.getItem('sppc_valorUSC')||'0'),
+    ajusteLM:        parseFloat(localStorage.getItem('sppc_ajusteLM')||'18'),
+    valorULV:        parseFloat(localStorage.getItem('sppc_valorULV')||'0'),
+    ajusteLV:        parseFloat(localStorage.getItem('sppc_ajusteLV')||'18'),
+    meta:            parseFloat(localStorage.getItem('sppc_metaMensal')||'0'),
+    valorProjetoUSC: parseFloat(localStorage.getItem('sppc_valorProjetoUSC')||'0'),
   };
 }
 function saveParamsFinanceiros(){
@@ -5671,6 +5733,7 @@ function saveParamsFinanceiros(){
   localStorage.setItem('sppc_valorULV', p.valorULV);
   localStorage.setItem('sppc_ajusteLV', p.ajusteLV);
   localStorage.setItem('sppc_metaMensal', p.metaMensal);
+  localStorage.setItem('sppc_valorProjetoUSC', p.valorProjetoUSC||0);
   // Persist to Firestore for fiscal sync
   setDoc(doc(db,'config','financeiro'), p).then(()=>toast('✓ Parâmetros salvos e sincronizados.','ok')).catch(e=>toast('Erro: '+e.message,'err'));
   renderAnaliseFinanceira();
@@ -5700,20 +5763,24 @@ function fimDoMes(anoMes){ const [y,m]=anoMes.split('-'); return `${y}-${m}-${ne
 
 function buildFuturoPorMes(obrasPool, p, nMeses=12){
   const hoje = new Date();
+  const iniMesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}-01`;
   const meses = [];
   for(let i=0;i<nMeses;i++){
     const dt = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     const ym = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
     const fim = fimDoMes(ym); const ini = `${ym}-01`;
-    // Saldo futuro: obras SEM conclusao e SEM medição final, com prazo no mês
-    const obMes = obrasPool.filter(o=>
-      !o.cancelado && !o.conclusao &&
-      !temMedicaoFinal(o) &&
-      (o.tipo==='R1'||o.tipo==='R2') &&
-      o.dataLimite>=ini && o.dataLimite<=fim
-    );
+    // Mês atual (i=0): inclui obras ATRASADAS (prazo vencido) + obras do mês corrente
+    // Demais meses: apenas obras com prazo naquele mês
+    const obMes = obrasPool.filter(o=>{
+      if(o.cancelado||o.conclusao||temMedicaoFinal(o)) return false;
+      if(o.tipo!=='R1'&&o.tipo!=='R2') return false;
+      if(!o.dataLimite) return false;
+      if(i===0) return o.dataLimite<=fim; // mês atual + atrasadas
+      return o.dataLimite>=ini && o.dataLimite<=fim;
+    });
+    const atrasadas = i===0 ? obMes.filter(o=>o.dataLimite<iniMesAtual).length : 0;
     const label = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][dt.getMonth()]+'/'+String(dt.getFullYear()).slice(2);
-    meses.push({ ym, label, obMes, calc: calcFinanceiro(obMes,p) });
+    meses.push({ ym, label: i===0&&atrasadas>0?`${label}*`:label, obMes, calc: calcFinanceiro(obMes,p), atrasadas });
   }
   return meses;
 }
@@ -5746,13 +5813,16 @@ function renderGraficoFinanceiro(meses, titulo, cor, p){
     const bh = val>0 ? Math.max(4, Math.round((val/maxVal)*barH)) : 0;
     const by = topP+barH-bh;
     const overMeta = p.meta>0 && val>p.meta;
+    const temAtrasadas = m.atrasadas>0;
     const barCor = overMeta ? '#EF4444' : cor;
+    const barCor2 = temAtrasadas && !overMeta ? cor : barCor; // kept same, asterisk shows in label
     if(bh>0){
       svg+=`<rect x="${x+4}" y="${by}" width="${colW-8}" height="${bh}" rx="3" fill="${barCor}" opacity="0.85"/>`;
       svg+=`<text x="${cx}" y="${by-4}" text-anchor="middle" font-size="8" fill="${barCor}" font-weight="700">${brlFmt(val).replace('R$','R$ ')}</text>`;
     }
     // LM e LV separados abaixo
-    svg+=`<text x="${cx}" y="${topP+barH+14}" text-anchor="middle" font-size="7.5" fill="#9ca3af">${m.label}</text>`;
+    svg+=`<text x="${cx}" y="${topP+barH+14}" text-anchor="middle" font-size="7.5" fill="${m.atrasadas>0?'#EF4444':'#9ca3af'}" font-weight="${m.atrasadas>0?'700':'400'}">${m.label}</text>`;
+    if(m.atrasadas>0) svg+=`<text x="${cx}" y="${topP+barH+23}" text-anchor="middle" font-size="7" fill="#EF4444">${m.atrasadas} atr.</text>`;
     if(m.calc.qtd>0) svg+=`<text x="${cx}" y="${topP+barH+24}" text-anchor="middle" font-size="7" fill="${barCor}aa">${m.calc.qtd}obs</text>`;
   });
 
@@ -5778,6 +5848,9 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
   );
   const dev   = calcFinanceiro(devOp, p);
   // Futuro 12 meses
+    // Projeto: USC imputado × valorUSC sem ajuste (por empreiteira: proporção do pool)
+  const saldoProjeto = (p.valorProjetoUSC||0) * p.valorUSC;
+
   const meses  = buildFuturoPorMes(obrasPool, p, 12);
   const futTotal = meses.reduce((s,m)=>s+m.calc.total,0);
 
@@ -5869,6 +5942,9 @@ function renderAnaliseFinanceira(){
         <div class="fg"><label>Ajuste LM (%)</label><input type="number" id="pfAjusteLM" value="${p.ajusteLM}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
         <div class="fg"><label>Valor Unitário ULV (R$/ULV)</label><input type="number" id="pfValorULV" value="${p.valorULV}" ${isGerente?'':' disabled'} placeholder="0.00" step="0.01" min="0"></div>
         <div class="fg"><label>Ajuste LV (%)</label><input type="number" id="pfAjusteLV" value="${p.ajusteLV}" ${isGerente?'':' disabled'} placeholder="18" step="0.1"></div>
+        <div class="fg"><label>📐 Valor de Projeto (USC) <span style="font-size:9px;color:var(--muted)">sem ajuste %</span></label>
+          <input type="number" id="pfValorProjetoUSC" value="${p.valorProjetoUSC||0}" ${isGerente?'':' disabled'} placeholder="0" min="0" step="0.1">
+        </div>
         <div class="fg"><label>🎯 Meta Mensal de Custo <span style="color:#F59E0B;font-weight:700">(valor em R$)</span></label>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:12px;color:#F59E0B;font-weight:700">R$</span>
@@ -6082,16 +6158,23 @@ window.saveProgramaMeta = function(){
 function calcProgressoParcial(obra){
   const uscPrev = parseFloat(obra.usc)||0;
   if(uscPrev===0) return {pct:0, medido:0, prev:0};
-  const medido = (obra.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0),0);
+  // Medição FINAL = 100% medido (previsto completo)
+  if(temMedicaoFinal(obra)) return {pct:100, medido:uscPrev, prev:uscPrev, final:true};
+  // Parciais acumuladas, cap no previsto
+  const acum = (obra.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((s,m)=>s+(parseFloat(m.uscMedido)||0),0);
+  const medido = Math.min(acum, uscPrev);
   return { pct: Math.round((medido/uscPrev)*100), medido, prev: uscPrev };
 }
 
-function calcMetaEsperada(meta){
+function calcMetaEsperada(meta, obra){
   if(!meta.pct) return 0;
   const hoje = new Date();
-  const anoInicio = hoje.getFullYear();
-  const mesInicio = hoje.getMonth(); // 0-indexed
-  const meses = mesInicio+1; // meses desde Jan
+  // Conta a partir do mês de ABERTURA da obra
+  const aberturaStr = obra?.dataAbertura;
+  const abertura = aberturaStr ? new Date(aberturaStr+'T00:00:00') : hoje;
+  const meses = Math.max(0,
+    (hoje.getFullYear()-abertura.getFullYear())*12 + (hoje.getMonth()-abertura.getMonth())
+  );
   if(meta.period==='mensal')     return Math.min(100, meta.pct * meses);
   if(meta.period==='trimestral') return Math.min(100, meta.pct * Math.ceil(meses/3));
   if(meta.period==='semestral')  return Math.min(100, meta.pct * Math.ceil(meses/6));
@@ -6101,7 +6184,7 @@ function calcMetaEsperada(meta){
 
 function renderCardPrograma(obra, meta){
   const prog = calcProgressoParcial(obra);
-  const esperado = calcMetaEsperada(meta);
+  const esperado = calcMetaEsperada(meta, obra);
   const cor = prog.pct >= esperado ? '#22C55E' : prog.pct >= esperado*0.7 ? '#F59E0B' : '#EF4444';
   const corMeta = '#F59E0B';
 
