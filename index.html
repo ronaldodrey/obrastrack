@@ -722,6 +722,24 @@
       <div class="fg"><label>Motivo da Paralização</label>
         <textarea id="oMotivoParalisada" rows="2" placeholder="Descreva o motivo da paralização..."></textarea>
       </div>
+      <div style="margin-top:12px;padding:10px;background:rgba(220,38,38,.05);border-radius:8px;border:1px solid rgba(220,38,38,.2)">
+        <div style="font-size:11px;font-weight:700;color:#DC2626;margin-bottom:8px">📋 Retorno da Central CELESC</div>
+        <div class="fg-grid">
+          <div class="fg">
+            <label>Resposta da Central</label>
+            <select id="oParalAceite" onchange="toggleParalAceite()">
+              <option value="">— aguardando resposta —</option>
+              <option value="aceita">✓ Justificativa Aceita</option>
+              <option value="nao_aceita">✗ Justificativa Não Aceita</option>
+            </select>
+          </div>
+          <div class="fg" id="fgParalAceiteAte" style="display:none">
+            <label>Aceita até (prazo da Central)</label>
+            <input type="date" id="oParalAceiteAte">
+          </div>
+        </div>
+        <div id="paralisacaoAlertaVencimento" style="display:none;margin-top:8px;padding:8px;background:rgba(239,68,68,.1);border-radius:6px;font-size:10px;color:#EF4444;font-weight:700"></div>
+      </div>
     </div>
   </div>
   <div class="modal-section" id="secCancelamento">
