@@ -98,13 +98,17 @@ const STATUS_DEF = {
 
 function statusOf(o){
   if(o.cancelado)    return 'Cancelada';
-  if(o.paralisada)   return 'Obra Paralisada';
+  if(o.paralisada){
+    const _h=(new Date()).toISOString().split('T')[0];
+    if(o.paralAceiteAte && o.paralAceiteAte<_h) return 'Paral. Expirada';
+    return 'Obra Paralisada';
+  }
   if(o.armazenado)   return 'Encerrada';
   if(o.medida280)    return 'Aguard. Armazenamento';
   // Fix #7: medidas só avançam o status SE a fiscalização já foi confirmada
   if(o.conclusao && !o.fiscalizacao) return 'Aguard. Fiscalização'; // persiste até fiscal confirmar
   if(o.medida230)    return 'Aguard. Medida 280';
-  if(o.medida70)     return 'Aguard. Medida 230';
+  if(o.medida70&&o.conclusao) return 'Aguard. Medida 230'; // conclusão obrigatória para Ag. Medida 230
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
   if(o.medicao)      return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
   if(o.fiscalizacao && !o.dataCadastro){
@@ -1510,6 +1514,18 @@ window.openObraModal=function(obraId){
     // Mostra botão de devolução de pendência para fiscal quando empreiteira já regularizou
     setTimeout(()=>atualizarVisibilidadeDevoPend(obra), 50);
     setChk('oCancelado',obra.cancelado); setChk('oParalisada',obra.paralisada);
+    if(obra.paralisada){
+      set('oParalAceite', obra.paralAceite||'');
+      set('oParalAceiteAte', obra.paralAceiteAte||'');
+      if(typeof toggleParalAceite==='function') toggleParalAceite();
+      // Alert if acceptance expired
+      const aceiteAte = obra.paralAceiteAte||'';
+      const alertEl = document.getElementById('paralisacaoAlertaVencimento');
+      if(alertEl && aceiteAte && aceiteAte < hojeStr()){
+        alertEl.style.display='block';
+        alertEl.textContent='⚠️ Prazo de aceite da Central venceu em '+fmtTxt(aceiteAte)+'. Necessária nova confirmação!';
+      } else if(alertEl){ alertEl.style.display='none'; }
+    }
     // Restore USC/ULV medido — visível para fiscal/fiscal_adm/gerente
     const uscMedEl=document.getElementById('oUSCMedidoGerente');
     const ulvMedEl=document.getElementById('oULVMedidoGerente');
@@ -6369,7 +6385,7 @@ async function parseSIMODocx(arrayBuffer){
       dataProgram,
       inicioHora:  tm?.[1]||'',
       fimHora:     tm?.[2]||'',
-      empreiteira: '',   // preenchido via cruzamento com obras no renderDesligamentos
+      empreiteira: empAtPos(pos),
       status
     });
   });
@@ -6541,6 +6557,9 @@ window.renderDesligamentos = renderDesligamentos;
 
 // ── Renderiza os dados de uma importação ──────────────────────────────────
 function _renderDesligSlot(latest, allDocIds){
+    const _hoje = new Date().toISOString().split('T')[0];
+    const _hoje30 = new Date(); _hoje30.setDate(_hoje30.getDate()+30);
+    const _hoje30str = _hoje30.toISOString().split('T')[0];
     const docs = allDocIds||[latest.data];
     // Filter by profile — empreiteira sees only matching obras
     const entradas = (latest.entradas||[]).filter(e=>{
@@ -6556,11 +6575,15 @@ function _renderDesligSlot(latest, allDocIds){
     // Cross-reference with obras
 
     function getPrioridade(e){
-      const obraMatch = obras.find(o=>(o.numero||'').toString().trim()===e.obraNumero?.toString().trim());
+      const numStr = e.obraNumero?.toString().trim()||'';
+      const obraMatch = obras.find(o=>{
+        const n=(o.numero||'').toString().trim();
+        return n===numStr || n===String(parseInt(numStr,10));
+      });
       if(!obraMatch) return null;
       const lim = obraMatch.dataLimite||'';
-      if(lim<hoje) return {nivel:'critica', label:'⚠️ ATRASADA', cor:'#EF4444', o:obraMatch};
-      if(lim<=hoje30str) return {nivel:'urgente', label:'🔴 URGENTE ≤30d', cor:'#F97316', o:obraMatch};
+      if(lim<_hoje) return {nivel:'critica', label:'⚠️ ATRASADA', cor:'#EF4444', o:obraMatch};
+      if(lim<=_hoje30str) return {nivel:'urgente', label:'🔴 URGENTE ≤30d', cor:'#F97316', o:obraMatch};
       return {nivel:'ok', label:'✅ Normal', cor:'#22C55E', o:obraMatch};
     }
 
@@ -6658,4 +6681,9 @@ function _renderDesligSlot(latest, allDocIds){
           </table>
         </div>
       </div>`;
-}
+}window.toggleParalAceite = function(){
+  const val = document.getElementById('oParalAceite')?.value;
+  const fg = document.getElementById('fgParalAceiteAte');
+  if(fg) fg.style.display = val==='aceita' ? 'flex' : 'none';
+};
+
