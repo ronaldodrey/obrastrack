@@ -116,7 +116,12 @@ function statusOf(o){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
   }
-  if(o.kaffa)        return 'Aguard. Medição';
+  if(o.kaffa){
+    // Se já tem medição parcial (sem conclusão) → obra ainda em execução, não aguardando medição
+    const temParcial = (o.medicoes||[]).some(m=>m.tipo==='parcial');
+    if(temParcial && !o.conclusao) return 'Em Execução';
+    return 'Aguard. Medição';
+  }
   if(o.fiscalizacao) return 'Aguardando Kaffa';
   if(o.impedimento)  return 'Prob. Executivo – Celesc';
   if(o.dataLimite && hoje()>parseD(o.dataLimite)) return 'Atrasada';
@@ -6353,11 +6358,21 @@ async function parseSIMODocx(arrayBuffer){
   const datPos = [...fullText.matchAll(/(\d{2})\/(\d{2})\/(20\d{2})/g)]
     .map(m=>({pos:m.index, iso:`${m[3]}-${m[2]}-${m[1]}`}));
 
-  // Detecta empreiteira pelo cabeçalho de Turma mais próximo ANTES de cada OIS
+  // Detecta empreiteira: busca a ÚLTIMA turma no texto antes da posição
   function empAtPos(pos){
-    const tail = fullText.slice(0, pos).slice(-3000);
-    if(/CS\s*ELET|C\s*S\s*ELET|MANUT.*CS/i.test(tail)) return 'CS ELETRICIDADE';
-    if(/ELETELS[UI]?/i.test(tail))                       return 'ELETELSUL';
+    const before = fullText.slice(0, pos);
+    // Encontra a última ocorrência de cada tipo de turma
+    const lastCS  = Math.max(
+      before.lastIndexOf('CS ELET'), before.lastIndexOf('C S ELET'),
+      before.toUpperCase().lastIndexOf('MANUT. LM TERC. C S')
+    );
+    const lastEL = Math.max(
+      before.toUpperCase().lastIndexOf('ELETELSUI'),
+      before.toUpperCase().lastIndexOf('ELETELSUL')
+    );
+    if(lastCS<0 && lastEL<0) return '';
+    if(lastCS > lastEL) return 'CS ELETRICIDADE';
+    if(lastEL > lastCS) return 'ELETELSUL';
     return '';
   }
 
@@ -6605,7 +6620,9 @@ function _renderDesligSlot(latest, allDocIds){
     };
 
     // Priority analysis
-    const comPrioridade = entradas.map(e=>({...e, prio:getPrioridade(e)})).filter(e=>e.prio);
+    // Mapeia prio uma única vez e reutiliza
+    const entradasPrio = entradas.map(e=>({...e, prio:getPrioridade(e)}));
+    const comPrioridade = entradasPrio.filter(e=>e.prio);
     // Enriquece empreiteira vazia com dados da obra cruzada
     comPrioridade.forEach(e=>{ if(!e.empreiteira && e.prio?.o) e.empreiteira=e.prio.o.empreiteira||''; });
     const criticas = comPrioridade.filter(e=>e.prio.nivel==='critica').length;
@@ -6645,14 +6662,18 @@ function _renderDesligSlot(latest, allDocIds){
         </div>`:''}
       </div>` : '';
 
-    const rows = entradas.sort((a,b)=>{
+    // Mapeia prio em TODAS as entradas (não só em comPrioridade)
+    const rows = entradasPrio.sort((a,b)=>{
       const pA=a.prio?.nivel; const pB=b.prio?.nivel;
       const ord={critica:0,urgente:1,ok:2};
       return (ord[pA]??3)-(ord[pB]??3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
     }).map(e=>{
       const p=e.prio;
       // Enriquece empreiteira vazia via obra
-      const empDisplay = e.empreiteira || p?.o?.empreiteira || '—';
+      // Empreiteira: usa dados do arquivo → fallback para obra cruzada → fallback turma
+      const empDisplay = (e.empreiteira && e.empreiteira!=='') 
+        ? e.empreiteira 
+        : (p?.o?.empreiteira || '—');
       const rowBg = p?.nivel==='critica'
         ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
         : p?.nivel==='urgente'
