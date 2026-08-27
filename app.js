@@ -6357,8 +6357,9 @@ async function parseSIMODocx(arrayBuffer){
     // Status: janela ao redor do OIS
     const seg = fullText.slice(Math.max(0,pos-80), Math.min(fullText.length, pos+WINDOW));
     let status='';
-    if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))    status='aguarda_programador';
-    else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg)) status='aguarda_execucao';
+    if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))          status='aguarda_programador';
+    else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg))     status='aguarda_execucao';
+    else if(/AGUARDA\s+VISTO|SD.*AGUARDANDO\s+VISTO|AGUARDA.*CHEFIA/i.test(seg)) status='aguarda_visto';
 
     // Horas HH:MM HH:MM
     const tm = seg.match(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/);
@@ -6441,6 +6442,7 @@ async function parseSIMOExcel(arrayBuffer){
         const cs=rows[ci].join(' ');
         if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(cs)){status='aguarda_programador';break;}
         if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(cs)){status='aguarda_execucao';break;}
+        if(/AGUARDA\s+VISTO|SD.*AGUARDANDO|AGUARDA.*CHEFIA/i.test(cs)){status='aguarda_visto';break;}
       }
 
       oisFound.forEach(ois=>{
@@ -6499,6 +6501,18 @@ window.uploadDesligamentos = async function(){
   }
 };
 
+// ── Carrega importação específica (seletor de datas) ─────────────────────
+window.loadDesligData = async function(docId){
+  if(!docId) return;
+  const slot = document.getElementById('desligSlot');
+  if(slot) slot.innerHTML='<div style="font-size:11px;color:var(--muted)">Carregando...</div>';
+  try{
+    const snap = await getDoc(doc(db,'desligamentos',docId));
+    if(!snap.exists()){ toast('Importação não encontrada.','err'); return; }
+    _renderDesligSlot(snap.data());
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
 function renderDesligamentos(){
   const cont = document.getElementById('pgDesligamentosContent');
   if(!cont) return;
@@ -6519,13 +6533,23 @@ function renderDesligamentos(){
   // Load latest from Firestore
   getDocs(collection(db,'desligamentos')).then(snap=>{
     if(snap.empty){ document.getElementById('desligSlot').innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum cronograma importado ainda.</div>'; return; }
+    const snapDocs = snap.docs.sort((a,b)=>b.id.localeCompare(a.id));
+    _renderDesligSlot(snapDocs[0].data(), snapDocs.map(d=>d.id));
+  }).catch(e=>{ document.getElementById('desligSlot').innerHTML=`<div style="color:#EF4444">Erro: ${e.message}</div>`; });
+}
+window.renderDesligamentos = renderDesligamentos;
 
-    // Sort by date desc, take most recent
-    const docs = snap.docs.sort((a,b)=>b.id.localeCompare(a.id));
-    const latest = docs[0].data();
+// ── Renderiza os dados de uma importação ──────────────────────────────────
+function _renderDesligSlot(latest, allDocIds){
+    const docs = allDocIds||[latest.data];
+    // Filter by profile — empreiteira sees only matching obras
     const entradas = (latest.entradas||[]).filter(e=>{
-      // Filter by profile
-      if(me.perfil==='empreiteira') return e.empreiteira?.toUpperCase().includes(me.vinculo?.toUpperCase().split(' ')[0]||'_');
+      if(me.perfil==='empreiteira'){
+        // Match via empreiteira field OR via obra cruzada
+        const empMatch = (e.empreiteira||'').toUpperCase().includes((me.vinculo||'').toUpperCase().split(' ')[0]);
+        const obraEmpMatch = obras.find(o=>o.numero?.toString()===e.obraNumero?.toString())?.empreiteira?.toUpperCase()===me.vinculo?.toUpperCase();
+        return empMatch || obraEmpMatch;
+      }
       return true;
     });
 
@@ -6544,9 +6568,12 @@ function renderDesligamentos(){
     }
 
     // Status labels
-    const statusLabel = s => s==='aguarda_programador'
-      ? `<span style="background:#F59E0B;color:#000;padding:1px 8px;border-radius:8px;font-size:9px">⏳ Aguarda Programador</span>`
-      : `<span style="background:#3B82F6;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">🔧 Aguarda Execução</span>`;
+    const statusLabel = s => {
+      if(s==='aguarda_programador') return `<span style="background:#F59E0B;color:#000;padding:1px 8px;border-radius:8px;font-size:9px">⏳ Ag. Programador</span>`;
+      if(s==='aguarda_execucao')    return `<span style="background:#3B82F6;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">🔧 Ag. Execução</span>`;
+      if(s==='aguarda_visto')       return `<span style="background:#7c6af7;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">👤 Ag. Visto Chefia</span>`;
+      return `<span style="background:#6b7280;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">${s||'—'}</span>`;
+    };
 
     // Priority analysis
     const comPrioridade = entradas.map(e=>({...e, prio:getPrioridade(e)})).filter(e=>e.prio);
@@ -6555,6 +6582,16 @@ function renderDesligamentos(){
     const criticas = comPrioridade.filter(e=>e.prio.nivel==='critica').length;
     const urgentes = comPrioridade.filter(e=>e.prio.nivel==='urgente').length;
     const normais  = comPrioridade.filter(e=>e.prio.nivel==='ok').length;
+
+    // Alerta de visto da chefia (aguarda aprovação do gerente)
+    const comVisto = entradas.filter(e=>e.status==='aguarda_visto');
+    const vistoAlert = (comVisto.length&&me.perfil==='gerente') ? `
+      <div style="background:rgba(124,106,247,.08);border:1px solid #7c6af7;border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;font-size:12px;color:#7c6af7">👤 ${comVisto.length} desligamento(s) aguardando seu visto/aprovação:</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+          ${comVisto.map(e=>`<span style="background:var(--surface);border:1px solid #7c6af7;border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer" ${e.prio?.o?'onclick="openObraModal(''+e.prio.o.id+'')"':''}>${e.obraNumero} — ${fmtTxt(e.dataProgram)}</span>`).join('')}
+        </div>
+      </div>` : '';
 
     const analise = comPrioridade.length ? `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
@@ -6587,9 +6624,11 @@ function renderDesligamentos(){
     }).map(e=>{
       const p = e.prio;
       const rowBg = p?.nivel==='critica'
-        ? 'background:rgba(239,68,68,.10);border-left:3px solid #EF4444'
+        ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
         : p?.nivel==='urgente'
-        ? 'background:rgba(249,115,22,.08);border-left:3px solid #F97316'
+        ? 'background:rgba(249,115,22,.10);border-left:4px solid #F97316'
+        : e.status==='aguarda_visto'
+        ? 'background:rgba(124,106,247,.08);border-left:4px solid #7c6af7'
         : '';
       return `<tr style="border-bottom:1px solid var(--border);${rowBg}">
         <td style="padding:5px 8px;font-size:10px">${e.dataProgram?fmtTxt(e.dataProgram):'—'} ${e.inicioHora||''}</td>
@@ -6604,10 +6643,11 @@ function renderDesligamentos(){
     document.getElementById('desligSlot').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
         📅 Última importação: <strong>${fmtTxt(latest.data)}</strong>${latest.hora?' às <strong>'+latest.hora+'</strong>':''} — ${latest.arquivo||''} — ${entradas.length} entradas
-        ${docs.length>1?`<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">
-          ${docs.map(d=>`<option value="${d.id}">${d.id}</option>`).join('')}
+        ${(allDocIds||[]).length>1?`<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">
+          ${(allDocIds||[]).map(id=>`<option value="${id}">${id}</option>`).join('')}
         </select>`:''}
       </div>
+      ${vistoAlert}
       ${analise}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
         <div style="overflow-x:auto">
@@ -6618,12 +6658,9 @@ function renderDesligamentos(){
               <th style="padding:6px 8px;text-align:left">Empreiteira</th>
               <th style="padding:6px 8px;text-align:left">Status</th>
               <th style="padding:6px 8px;text-align:left">Prioridade</th>
-              <th style="padding:6px 8px;text-align:left">Localidade</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
       </div>`;
-  }).catch(e=>{ document.getElementById('desligSlot').innerHTML=`<div style="color:#EF4444">Erro: ${e.message}</div>`; });
 }
-window.renderDesligamentos = renderDesligamentos;
