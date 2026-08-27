@@ -6554,9 +6554,6 @@ function _renderDesligSlot(latest, allDocIds){
     });
 
     // Cross-reference with obras
-    const hoje = new Date().toISOString().split('T')[0];
-    const hoje30 = new Date(); hoje30.setDate(hoje30.getDate()+30);
-    const hoje30str = hoje30.toISOString().split('T')[0];
 
     function getPrioridade(e){
       const obraMatch = obras.find(o=>(o.numero||'').toString().trim()===e.obraNumero?.toString().trim());
@@ -6585,13 +6582,14 @@ function _renderDesligSlot(latest, allDocIds){
 
     // Alerta de visto da chefia (aguarda aprovação do gerente)
     const comVisto = entradas.filter(e=>e.status==='aguarda_visto');
-    const vistoAlert = (comVisto.length&&me.perfil==='gerente') ? `
-      <div style="background:rgba(124,106,247,.08);border:1px solid #7c6af7;border-radius:8px;padding:12px;margin-bottom:12px">
-        <div style="font-weight:700;font-size:12px;color:#7c6af7">👤 ${comVisto.length} desligamento(s) aguardando seu visto/aprovação:</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-          ${comVisto.map(e=>`<span style="background:var(--surface);border:1px solid #7c6af7;border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer" ${e.prio?.o?'onclick="openObraModal(''+e.prio.o.id+'')"':''}>${e.obraNumero} — ${fmtTxt(e.dataProgram)}</span>`).join('')}
-        </div>
-      </div>` : '';
+    const vistoAlert = (comVisto.length&&me.perfil==='gerente') ? (
+      '<div style="background:rgba(124,106,247,.08);border:1px solid #7c6af7;border-radius:8px;padding:12px;margin-bottom:12px">'
+      +'<div style="font-weight:700;font-size:12px;color:#7c6af7">👤 '+comVisto.length+' desligamento(s) aguardando seu visto/aprovação:</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">'
+      +comVisto.map(function(e){ return '<span style="background:var(--surface);border:1px solid #7c6af7;border-radius:6px;padding:3px 10px;font-size:10px">'
+        +e.obraNumero+' — '+fmtTxt(e.dataProgram)+'</span>'; }).join('')
+      +'</div></div>'
+    ) : '';
 
     const analise = comPrioridade.length ? `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
@@ -6615,14 +6613,14 @@ function _renderDesligSlot(latest, allDocIds){
         </div>`:''}
       </div>` : '';
 
-    // Table
     const rows = entradas.sort((a,b)=>{
-      // Sort: criticas first, then urgentes, then ok
-      const pA = a.prio?.nivel; const pB = b.prio?.nivel;
-      const ord = {critica:0,urgente:1,ok:2,undefined:3};
-      return (ord[pA]||3)-(ord[pB]||3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
+      const pA=a.prio?.nivel; const pB=b.prio?.nivel;
+      const ord={critica:0,urgente:1,ok:2};
+      return (ord[pA]??3)-(ord[pB]??3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
     }).map(e=>{
-      const p = e.prio;
+      const p=e.prio;
+      // Enriquece empreiteira vazia via obra
+      const empDisplay = e.empreiteira || p?.o?.empreiteira || '—';
       const rowBg = p?.nivel==='critica'
         ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
         : p?.nivel==='urgente'
@@ -6631,21 +6629,18 @@ function _renderDesligSlot(latest, allDocIds){
         ? 'background:rgba(124,106,247,.08);border-left:4px solid #7c6af7'
         : '';
       return `<tr style="border-bottom:1px solid var(--border);${rowBg}">
-        <td style="padding:5px 8px;font-size:10px">${e.dataProgram?fmtTxt(e.dataProgram):'—'} ${e.inicioHora||''}</td>
-        <td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer" ${p?.o?`onclick="openObraModal('${p.o.id}')"`:''}>${e.obraNumero||'—'}</td>
-        <td style="padding:5px 8px;font-size:10px">${e.empreiteira||'—'}</td>
+        <td style="padding:5px 8px;font-size:10px;white-space:nowrap">${e.dataProgram?fmtTxt(e.dataProgram):' — '}${e.inicioHora?' '+e.inicioHora:''}</td>
+        <td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer" ${p?.o?'onclick="openObraModal(\''+p.o.id+'\')"':''}>${e.obraNumero||'—'}</td>
+        <td style="padding:5px 8px;font-size:10px">${empDisplay}</td>
         <td style="padding:5px 8px">${statusLabel(e.status)}</td>
-        <td style="padding:5px 8px;font-size:9px">${p?`<span style="color:${p.cor};font-weight:700">${p.label}</span>${p.o?`<br><span style="color:var(--muted)">${fmtTxt(p.o.dataLimite)}</span>`:''}`:'<span style="color:var(--muted)">Obra não encontrada</span>'}</td>
-        <td style="padding:5px 8px;font-size:9px;color:var(--muted)">${e.localidade||'—'}</td>
+        <td style="padding:5px 8px;font-size:9px">${p?'<span style="color:'+p.cor+';font-weight:700">'+p.label+'</span>'+(p.o?'<br><span style="color:var(--muted)">'+fmtTxt(p.o.dataLimite)+'</span>':''):'<span style="color:var(--muted)">Obra não encontrada</span>'}</td>
       </tr>`;
     }).join('');
 
     document.getElementById('desligSlot').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
         📅 Última importação: <strong>${fmtTxt(latest.data)}</strong>${latest.hora?' às <strong>'+latest.hora+'</strong>':''} — ${latest.arquivo||''} — ${entradas.length} entradas
-        ${(allDocIds||[]).length>1?`<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">
-          ${(allDocIds||[]).map(id=>`<option value="${id}">${id}</option>`).join('')}
-        </select>`:''}
+        ${(allDocIds||[]).length>1?'<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">'+((allDocIds||[]).map(id=>'<option value="'+id+'">'+id+'</option>').join(''))+'</select>':''}
       </div>
       ${vistoAlert}
       ${analise}
