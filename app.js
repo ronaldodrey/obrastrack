@@ -6304,157 +6304,100 @@ window.renderProgramas = renderProgramas;
 //  CRONOGRAMA DE DESLIGAMENTOS — Upload PDF + Análise de Prioridade
 // ══════════════════════════════════════════════════════════════════════
 
-// ── PDF.js loader (CDN, sem API) ──────────────────────────────────────
-async function loadPdfJs(){
-  if(window.pdfjsLib) return window.pdfjsLib;
+// ── SheetJS loader (para Excel) ────────────────────────────────────────
+async function loadSheetJS(){
+  if(window.XLSX) return window.XLSX;
   return new Promise((res,rej)=>{
-    if(document.getElementById('pdfjs-script')){ setTimeout(()=>res(window.pdfjsLib),500); return; }
+    if(document.getElementById('sheetjs-script')){ setTimeout(()=>res(window.XLSX),600); return; }
     const s=document.createElement('script');
-    s.id='pdfjs-script';
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    s.onload=()=>{
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc=
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      res(window.pdfjsLib);
-    };
-    s.onerror=()=>rej(new Error('Falha ao carregar PDF.js'));
+    s.id='sheetjs-script';
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=()=>res(window.XLSX);
+    s.onerror=()=>rej(new Error('Falha ao carregar SheetJS'));
     document.head.appendChild(s);
   });
 }
 
-// ── Extrai texto de cada página do PDF ───────────────────────────────
-async function extrairTextoPdf(arrayBuffer){
-  const lib = await loadPdfJs();
-  const pdf = await lib.getDocument({data: arrayBuffer}).promise;
-  const pages = [];
-  for(let i=1;i<=pdf.numPages;i++){
-    const pg   = await pdf.getPage(i);
-    const cont = await pg.getTextContent();
-    // Preserva quebras de linha usando a posição Y dos itens
-    let lastY=null, linhas=[], linhaAtual=[];
-    cont.items.forEach(item=>{
-      const y=Math.round(item.transform[5]);
-      if(lastY!==null && Math.abs(y-lastY)>3){
-        linhas.push(linhaAtual.join(' ')); linhaAtual=[];
-      }
-      if(item.str.trim()) linhaAtual.push(item.str.trim());
-      lastY=y;
-    });
-    if(linhaAtual.length) linhas.push(linhaAtual.join(' '));
-    pages.push(linhas.join('\n'));
+// ── Parser Excel SIMO ────────────────────────────────────────────────────
+async function parseSIMOExcel(arrayBuffer){
+  const XLSX = await loadSheetJS();
+  const wb   = XLSX.read(arrayBuffer, {type:'array', cellDates:true});
+
+  const entries=[], seen=new Set();
+
+  function getEmp(text){
+    const t=text.toUpperCase();
+    if(/CS\s*ELET|C\s*S\s*ELET/.test(t)) return 'CS ELETRICIDADE';
+    if(/ELETELS[UI]?/.test(t))             return 'ELETELSUL';
+    return '';
   }
-  return pages;
-}
 
-// ── Parser SIMO — abordagem por texto plano (funciona em tabelas multi-coluna) ───
-function parsePagesSIMO(pages){
-  const seen = new Set();
-  const allEntries = [];
+  wb.SheetNames.forEach(shName=>{
+    const ws  = wb.Sheets[shName];
+    const rows = XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
 
-  pages.forEach(pageText=>{
-    // Texto plano: une todas as linhas num só bloco para buscas globais
-    const flat = pageText.replace(/\n+/g,' ').replace(/\s+/g,' ');
+    // Empreiteira: escaneia todo o texto da aba
+    const flatAll = rows.flat().join(' ');
+    let emp = getEmp(flatAll);
 
-    // 1) Determina empreiteira pelo cabeçalho "Turma"
-    let empreiteira = 'OUTRA';
-    if(/CS\s*ELET/i.test(flat))                empreiteira = 'CS ELETRICIDADE';
-    else if(/ELETELSUI|ELETELSUL/i.test(flat))   empreiteira = 'ELETELSUL';
-    else if(/MANUT\.?\s*LM\s*TERC.*CS/i.test(flat)) empreiteira = 'CS ELETRICIDADE';
+    rows.forEach((row,i)=>{
+      const rowStr = row.join(' ');
 
-    // 2) Extrai todos os OIS (9 dígitos começando com 4, mas NÃO precedido de 000)
-    //    Exclui padrões como 000400820313 (Docto SAP)
-    const flatClean = flat.replace(/000(4\d{8})/g,'___$1___'); // marca docto SAP
-    const oisSet = new Set();
-    const oisAll = [];
-    for(const m of flatClean.matchAll(/(?<![0-9_])(4\d{8})(?![0-9_])/g)){
-      if(!flatClean.slice(Math.max(0,m.index-4),m.index).includes('_')){
-        oisAll.push(m[1]);
-        oisSet.add(m[1]);
+      // OIS: 9 dígitos na faixa 400-409 (exclui telefones como 499...)
+      const oisFound = [...new Set([...rowStr.matchAll(/(?<![0-9])(40[0-9]\d{6})(?![0-9])/g)].map(m=>m[1]))];
+      if(!oisFound.length) return;
+
+      // Data: busca DD/MM/YYYY nas próximas 3 linhas
+      let dataProgram='';
+      for(let ci=i;ci<=Math.min(i+2,rows.length-1);ci++){
+        const cs=rows[ci].join(' ');
+        const dm=cs.match(/(\d{2})\/(\d{2})\/(20\d{2})/);
+        if(dm){ dataProgram=`${dm[3]}-${dm[2]}-${dm[1]}`; break; }
+        // Excel pode retornar data como YYYY-MM-DD (serializado) — inverte dia/mês
+        const iso=cs.match(/(20\d{2})-(\d{2})-(\d{2})/);
+        if(iso){ dataProgram=`${iso[1]}-${iso[3]}-${iso[2]}`; break; } // inverte dia/mês
       }
-    }
-    // Ordena OIS pela posição de aparecimento (mesma ordem que datas)
-    const oisUniq = [...new Set(oisAll)];
+      if(!dataProgram) return;
 
-    // 3) Extrai todas as datas DD/MM/YYYY
-    const datas = [];
-    for(const m of flat.matchAll(/(\d{2})\/(\d{2})\/(\d{4})/g)){
-      if(parseInt(m[3])>=2024) // só anos válidos
-        datas.push(`${m[3]}-${m[2]}-${m[1]}`);
-    }
+      // Horas
+      const tm=rowStr.match(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/);
 
-    // 4) Extrai todos os pares de hora (HH:MM HH:MM)
-    const horas = [];
-    for(const m of flat.matchAll(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/g))
-      horas.push({ini:m[1], fim:m[2]});
+      // Status: busca nas próximas 3 linhas
+      let status='';
+      for(let ci=i;ci<=Math.min(i+2,rows.length-1);ci++){
+        const cs=rows[ci].join(' ');
+        if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(cs)){status='aguarda_programador';break;}
+        if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(cs)){status='aguarda_execucao';break;}
+      }
 
-    // 5) Detecta blocos de status: cada status pertence a um OIS na mesma ordem
-    //    Estratégia: divide o texto em segmentos por OIS e verifica o status em cada segmento
-    oisUniq.forEach((ois, idx)=>{
-      const oisPos = flat.indexOf(ois);
-      if(oisPos<0) return;
-      // Segmento vai deste OIS até o próximo
-      const nextOis = idx+1 < oisUniq.length ? oisUniq[idx+1] : null;
-      const nextPos = nextOis ? flat.indexOf(nextOis) : flat.length;
-      // Expansão: pega contexto antes e depois
-      const seg = flat.slice(Math.max(0, oisPos-50), Math.min(flat.length, nextPos+300));
-
-      let status = '';
-      if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))    status='aguarda_programador';
-      else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg)) status='aguarda_execucao';
-
-      const dataProgram = datas[idx] || '';
-      const hora = horas[idx] || {};
-      const key = ois+dataProgram;
-      if(!dataProgram||seen.has(key)) return;
-      seen.add(key);
-
-      allEntries.push({
-        obraNumero:  ois,
-        dataProgram,
-        inicioHora:  hora.ini||'',
-        fimHora:     hora.fim||'',
-        empreiteira,
-        status,
-        localidade:  '',
-        responsavel: ''
+      oisFound.forEach(ois=>{
+        const key=ois+dataProgram;
+        if(seen.has(key)) return;
+        seen.add(key);
+        entries.push({obraNumero:ois, dataProgram, inicioHora:tm?.[1]||'', fimHora:tm?.[2]||'', empreiteira:emp, status});
       });
     });
   });
 
-  return allEntries;
-}
-
-// ── Função principal (chamada pelo botão Importar) ────────────────────
-async function parseSIMOPdf(_base64Ignored, arrayBuffer){
-  // Usa PDF.js localmente — sem API, sem CORS
-  const pages = await extrairTextoPdf(arrayBuffer);
-  const entries = parsePagesSIMO(pages);
-  if(!entries.length) throw new Error('Nenhuma obra encontrada. Verifique se o PDF é o Cronograma de Desligamento do SIMO.');
   return entries;
 }
 
 window.uploadDesligamentos = async function(){
   const input = document.getElementById('inputPdfDeslig');
-  if(!input?.files?.[0]){ toast('Selecione um arquivo PDF.','err'); return; }
+  if(!input?.files?.[0]){ toast('Selecione um arquivo .xlsx.','err'); return; }
   const file = input.files[0];
   const btn  = document.getElementById('btnUploadDeslig');
-  btn.disabled=true; btn.textContent='Processando PDF...';
+  btn.disabled=true; btn.textContent='Processando...';
   try{
-    const base64 = await new Promise((res,rej)=>{
-      const r=new FileReader();
-      r.onload=()=>res(r.result.split(',')[1]);
-      r.onerror=()=>rej(new Error('Falha ao ler arquivo'));
-      r.readAsDataURL(file);
-    });
-    toast('📄 Lendo PDF...','ok');
-    // Lê como ArrayBuffer para PDF.js
     const arrayBuffer = await new Promise((res,rej)=>{
       const r=new FileReader();
       r.onload=()=>res(r.result);
       r.onerror=()=>rej(new Error('Falha ao ler arquivo'));
       r.readAsArrayBuffer(file);
     });
-    const entries = await parseSIMOPdf(null, arrayBuffer);
+    toast('📊 Lendo Excel...','ok');
+    const isExcel = file.name.match(/\.xlsx?$/i);
+    const entries = isExcel ? await parseSIMOExcel(arrayBuffer) : await parseSIMOPdf(null, arrayBuffer);
     if(!Array.isArray(entries)||!entries.length) throw new Error('Nenhum dado extraído');
 
     const hoje = new Date().toISOString().split('T')[0];
@@ -6488,9 +6431,9 @@ function renderDesligamentos(){
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px">📄 Importar Cronograma SIMO (PDF)</div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="inputPdfDeslig" accept=".pdf" style="font-size:11px">
+        <input type="file" id="inputPdfDeslig" accept=".xlsx,.xls,.pdf" style="font-size:11px">
         <button id="btnUploadDeslig" onclick="uploadDesligamentos()" class="btn btn-primary btn-sm">📄 Importar PDF</button>
-        <span style="font-size:10px;color:var(--muted)">Atualizado diariamente. O sistema usará IA para extrair os dados.</span>
+        <span style="font-size:10px;color:var(--muted)">Formato recomendado: Excel (.xlsx) exportado do SIMO. Também aceita PDF.</span>
       </div>
     </div>` : '';
 
@@ -6515,7 +6458,7 @@ function renderDesligamentos(){
     const hoje30str = hoje30.toISOString().split('T')[0];
 
     function getPrioridade(e){
-      const obraMatch = obras.find(o=>(o.numero||'').toString()===e.obraNumero?.toString());
+      const obraMatch = obras.find(o=>(o.numero||'').toString().trim()===e.obraNumero?.toString().trim());
       if(!obraMatch) return null;
       const lim = obraMatch.dataLimite||'';
       if(lim<hoje) return {nivel:'critica', label:'⚠️ ATRASADA', cor:'#EF4444', o:obraMatch};
@@ -6530,6 +6473,8 @@ function renderDesligamentos(){
 
     // Priority analysis
     const comPrioridade = entradas.map(e=>({...e, prio:getPrioridade(e)})).filter(e=>e.prio);
+    // Enriquece empreiteira vazia com dados da obra cruzada
+    comPrioridade.forEach(e=>{ if(!e.empreiteira && e.prio?.o) e.empreiteira=e.prio.o.empreiteira||''; });
     const criticas = comPrioridade.filter(e=>e.prio.nivel==='critica').length;
     const urgentes = comPrioridade.filter(e=>e.prio.nivel==='urgente').length;
     const normais  = comPrioridade.filter(e=>e.prio.nivel==='ok').length;
@@ -6564,7 +6509,12 @@ function renderDesligamentos(){
       return (ord[pA]||3)-(ord[pB]||3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
     }).map(e=>{
       const p = e.prio;
-      return `<tr style="border-bottom:1px solid var(--border);${p?.nivel==='critica'?'background:rgba(239,68,68,.04)':p?.nivel==='urgente'?'background:rgba(249,115,22,.04)':''}">
+      const rowBg = p?.nivel==='critica'
+        ? 'background:rgba(239,68,68,.10);border-left:3px solid #EF4444'
+        : p?.nivel==='urgente'
+        ? 'background:rgba(249,115,22,.08);border-left:3px solid #F97316'
+        : '';
+      return `<tr style="border-bottom:1px solid var(--border);${rowBg}">
         <td style="padding:5px 8px;font-size:10px">${e.dataProgram?fmtTxt(e.dataProgram):'—'} ${e.inicioHora||''}</td>
         <td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer" ${p?.o?`onclick="openObraModal('${p.o.id}')"`:''}>${e.obraNumero||'—'}</td>
         <td style="padding:5px 8px;font-size:10px">${e.empreiteira||'—'}</td>
