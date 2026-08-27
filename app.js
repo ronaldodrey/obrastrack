@@ -6304,6 +6304,79 @@ window.renderProgramas = renderProgramas;
 //  CRONOGRAMA DE DESLIGAMENTOS — Upload PDF + Análise de Prioridade
 // ══════════════════════════════════════════════════════════════════════
 
+// ── Mammoth.js loader (para Word .docx) ──────────────────────────────────
+async function loadMammoth(){
+  if(window.mammoth) return window.mammoth;
+  return new Promise((res,rej)=>{
+    if(document.getElementById('mammoth-script')){ setTimeout(()=>res(window.mammoth),600); return; }
+    const s=document.createElement('script');
+    s.id='mammoth-script';
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+    s.onload=()=>res(window.mammoth);
+    s.onerror=()=>rej(new Error('Falha ao carregar Mammoth.js'));
+    document.head.appendChild(s);
+  });
+}
+
+// ── Parser SIMO Word (.docx) ─────────────────────────────────────────────
+// Abordagem: extrai texto plano e usa matching por proximidade (posição no texto)
+async function parseSIMODocx(arrayBuffer){
+  const mammoth = await loadMammoth();
+  const result  = await mammoth.extractRawText({arrayBuffer});
+  const fullText = result.value;
+
+  const entries=[], seen=new Set();
+  const WINDOW = 300; // chars ao redor do OIS para buscar data/status
+
+  // Posições de todos os OIS (40X dígitos, 9 chars, faixa construtoras CELESC)
+  const oisPos = [...fullText.matchAll(/(?<![0-9])(40[0-9]\d{6})(?![0-9])/g)]
+    .map(m=>({pos:m.index, ois:m[1]}));
+
+  // Posições de todas as datas DD/MM/YYYY
+  const datPos = [...fullText.matchAll(/(\d{2})\/(\d{2})\/(20\d{2})/g)]
+    .map(m=>({pos:m.index, iso:`${m[3]}-${m[2]}-${m[1]}`}));
+
+  oisPos.forEach(({pos, ois})=>{
+    // Data mais próxima dentro de WINDOW chars
+    const near = datPos
+      .filter(d=>Math.abs(d.pos-pos)<=WINDOW)
+      .sort((a,b)=>Math.abs(a.pos-pos)-Math.abs(b.pos-pos));
+
+    if(!near.length){
+      // Fallback: próxima data após o OIS
+      const after = datPos.filter(d=>d.pos>pos).sort((a,b)=>a.pos-b.pos);
+      if(after.length) near.push(after[0]);
+    }
+    if(!near.length) return;
+
+    const dataProgram = near[0].iso;
+    const key = ois+dataProgram;
+    if(seen.has(key)) return;
+    seen.add(key);
+
+    // Status: janela ao redor do OIS
+    const seg = fullText.slice(Math.max(0,pos-80), Math.min(fullText.length, pos+WINDOW));
+    let status='';
+    if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))    status='aguarda_programador';
+    else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg)) status='aguarda_execucao';
+
+    // Horas HH:MM HH:MM
+    const tm = seg.match(/(\d{2}:\d{2})\s+(\d{2}:\d{2})/);
+
+    entries.push({
+      obraNumero:  ois,
+      dataProgram,
+      inicioHora:  tm?.[1]||'',
+      fimHora:     tm?.[2]||'',
+      empreiteira: '',   // preenchido via cruzamento com obras no renderDesligamentos
+      status
+    });
+  });
+
+  if(!entries.length) throw new Error('Nenhuma obra encontrada no documento Word.');
+  return entries;
+}
+
 // ── SheetJS loader (para Excel) ────────────────────────────────────────
 async function loadSheetJS(){
   if(window.XLSX) return window.XLSX;
@@ -6397,7 +6470,11 @@ window.uploadDesligamentos = async function(){
     });
     toast('📊 Lendo Excel...','ok');
     const isExcel = file.name.match(/\.xlsx?$/i);
-    const entries = isExcel ? await parseSIMOExcel(arrayBuffer) : await parseSIMOPdf(null, arrayBuffer);
+    const isWord  = file.name.match(/\.docx?$/i);
+    let entries;
+    if(isExcel)      entries = await parseSIMOExcel(arrayBuffer);
+    else if(isWord)  entries = await parseSIMODocx(arrayBuffer);
+    else             entries = await parseSIMOPdf(null, arrayBuffer);
     if(!Array.isArray(entries)||!entries.length) throw new Error('Nenhum dado extraído');
 
     const hoje = new Date().toISOString().split('T')[0];
@@ -6431,9 +6508,9 @@ function renderDesligamentos(){
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px">📄 Importar Cronograma SIMO (PDF)</div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="inputPdfDeslig" accept=".xlsx,.xls,.pdf" style="font-size:11px">
+        <input type="file" id="inputPdfDeslig" accept=".xlsx,.xls,.docx,.pdf" style="font-size:11px">
         <button id="btnUploadDeslig" onclick="uploadDesligamentos()" class="btn btn-primary btn-sm">📄 Importar PDF</button>
-        <span style="font-size:10px;color:var(--muted)">Formato recomendado: Excel (.xlsx) exportado do SIMO. Também aceita PDF.</span>
+        <span style="font-size:10px;color:var(--muted)">Formatos: Excel (.xlsx), Word (.docx) ou PDF. Empreiteira identificada automaticamente pelo OIS.</span>
       </div>
     </div>` : '';
 
