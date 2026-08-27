@@ -110,7 +110,8 @@ function statusOf(o){
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70&&o.conclusao) return 'Aguard. Medida 230'; // conclusão obrigatória para Ag. Medida 230
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
-  if(o.medicao)      return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
+  // Medição (final) só avança status se obra já concluída pela empreiteira
+  if(o.medicao&&o.conclusao) return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
@@ -6351,6 +6352,14 @@ async function parseSIMODocx(arrayBuffer){
   // Posições de todas as datas DD/MM/YYYY
   const datPos = [...fullText.matchAll(/(\d{2})\/(\d{2})\/(20\d{2})/g)]
     .map(m=>({pos:m.index, iso:`${m[3]}-${m[2]}-${m[1]}`}));
+
+  // Detecta empreiteira pelo cabeçalho de Turma mais próximo ANTES de cada OIS
+  function empAtPos(pos){
+    const tail = fullText.slice(0, pos).slice(-3000);
+    if(/CS\s*ELET|C\s*S\s*ELET|MANUT.*CS/i.test(tail)) return 'CS ELETRICIDADE';
+    if(/ELETELS[UI]?/i.test(tail))                       return 'ELETELSUL';
+    return '';
+  }
 
   oisPos.forEach(({pos, ois})=>{
     // Data mais próxima dentro de WINDOW chars
