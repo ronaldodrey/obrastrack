@@ -117,9 +117,12 @@ function statusOf(o){
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa){
-    // Se já tem medição parcial (sem conclusão) → obra ainda em execução, não aguardando medição
-    const temParcial = (o.medicoes||[]).some(m=>m.tipo==='parcial');
-    if(temParcial && !o.conclusao) return 'Em Execução';
+    // Se já tem medição parcial registrada (qualquer capitalização) e sem conclusão → Em Execução
+    const temMedParcial = (o.medicoes||[]).some(m=>(m.tipo||'').toLowerCase()==='parcial');
+    // Também: se só tem kaffa parcial (sem kafka final) e sem conclusão → Em Execução
+    const kafkaFinal = (o.kaffaEntries||[]).some(k=>(k.tipo||'').toLowerCase()==='final');
+    const soConcluída = o.conclusao;
+    if((temMedParcial || !kafkaFinal) && !soConcluída) return 'Em Execução';
     return 'Aguard. Medição';
   }
   if(o.fiscalizacao) return 'Aguardando Kaffa';
@@ -6571,6 +6574,11 @@ function renderDesligamentos(){
   cont.innerHTML = uploadBlock + '<div id="desligSlot"><div style="font-size:11px;color:var(--muted)">Carregando cronograma...</div></div>';
 
   // Load latest from Firestore
+  // Se obras ainda não carregou, aguarda 800ms
+  if(!obras||obras.length===0){
+    setTimeout(renderDesligamentos, 800);
+    return;
+  }
   getDocs(collection(db,'desligamentos')).then(snap=>{
     if(snap.empty){ document.getElementById('desligSlot').innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum cronograma importado ainda.</div>'; return; }
     const snapDocs = snap.docs.sort((a,b)=>b.id.localeCompare(a.id));
@@ -6670,10 +6678,9 @@ function _renderDesligSlot(latest, allDocIds){
     }).map(e=>{
       const p=e.prio;
       // Enriquece empreiteira vazia via obra
-      // Empreiteira: usa dados do arquivo → fallback para obra cruzada → fallback turma
-      const empDisplay = (e.empreiteira && e.empreiteira!=='') 
-        ? e.empreiteira 
-        : (p?.o?.empreiteira || '—');
+      // Empreiteira: SEMPRE usa a da obra no sistema (mais confiável)
+      // O arquivo só serve para saber qual obra e o dia programado
+      const empDisplay = p?.o?.empreiteira || e.empreiteira || '—';
       const rowBg = p?.nivel==='critica'
         ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
         : p?.nivel==='urgente'
