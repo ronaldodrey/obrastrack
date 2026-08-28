@@ -205,7 +205,7 @@ async function iniciarApp(){
   popularSelectEmpreiteiras();
 
   // pgAbertura e pgAnalise somente para gerente e fiscais
-  const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm';
+  const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='empreiteira';
   const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
@@ -576,7 +576,8 @@ function tabelaResumoEmpreiteiras(list){
     const minhas = list.filter(o=>o.empreiteira===e.nome);
     const pend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida).length;
     const agConf = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length;
-    const aguardKaffa = minhas.filter(o=>o.conclusao&&!o.kaffa).length;
+    const aguardKaffa = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.kaffa).length;
+    const fiscSemKaffa = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.kaffa).length;
     const impedimentos = minhas.filter(o=>o.impedimento&&!o.conclusao).length;
     const atrasadas = minhas.filter(o=>statusOf(o)==='Atrasada').length;
     const c = gc(e.nome);
@@ -586,6 +587,7 @@ function tabelaResumoEmpreiteiras(list){
         <strong>${e.nome}</strong></span></td>
       <td style="text-align:center">${minhas.length}</td>
       <td style="text-align:center;color:${aguardKaffa>0?'var(--accent3)':'var(--muted)'}">${aguardKaffa}</td>
+      <td style="text-align:center;${fiscSemKaffa>0?'color:#EF4444;font-weight:700':'color:var(--muted)'}">${fiscSemKaffa||'—'}</td>
       <td style="text-align:center;color:${pend>0?'var(--accent2)':'var(--muted)'}">${pend}${agConf>0?` <span style="font-size:9px;color:#F59E0B">(${agConf} reg.)</span>`:''}</td>
       <td style="text-align:center;color:${impedimentos>0?'var(--red)':'var(--muted)'}">${impedimentos}</td>
       <td style="text-align:center;color:${atrasadas>0?'var(--red)':'var(--muted)'}">${atrasadas}</td>
@@ -595,6 +597,7 @@ function tabelaResumoEmpreiteiras(list){
   return `<div class="tbl-wrap" style="max-height:none"><table>
     <thead><tr>
       <th>Empreiteira</th><th style="text-align:center">Total</th><th style="text-align:center">Aguard. Kaffa</th>
+      <th style="text-align:center;color:#EF4444">Fisc. s/ Kaffa ⚠️</th>
       <th style="text-align:center">Pendências</th><th style="text-align:center">Impedimentos</th>
       <th style="text-align:center">Atrasadas</th><th></th>
     </tr></thead>
@@ -622,6 +625,7 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
     ${kpiCard('Para Fiscalizar',paraFisc.length,'aguardando vistoria','#EAB308')}
     ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
+    ${kpiCard('Fisc. s/ Kaffa',list.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscal===meuNome&&o.fiscalizacao&&!o.kaffa).length,'após fisc. — urgente','#EF4444')}
     ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
     ${kpiCard('Ag. Conf. Pend.',agConfPend.length,'regularizadas p/ conferir','#F59E0B')}
     ${kpiCard('Cadastro Urgente',cadUrgente.length,'+7d sem enviar','#EF4444')}
@@ -630,6 +634,15 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
     ${kpiCard('Tempo Médio Cadastro',tempoCad!==null?tempoCad+'d':'—','fiscalização→cadastro','#f5c542')}
   </div>`;
+  // Cadastro urgente para fiscal — suas obras
+  if(cadUrgente.length){
+    html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:8px">📋 Cadastro Urgente Pendente (+7d após fiscalização) — ${cadUrgente.length} obra(s)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        ${cadUrgente.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''}">${o.numero}</span>`).join('')}
+      </div>
+    </div>`;
+  }
   html += renderMonitorPrazos(minhas);
   html += '<div class="sect-title" style="margin-bottom:12px">Pendências por Empreiteira</div>';
   html += pendenciaRankingPorEmpreiteira(minhas);
@@ -645,7 +658,8 @@ function renderDashFiscal(list, meuNome){
 function renderDashEmpreiteira(minhas){
   const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
   const ulvTotal = minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-  const aguardKaffa = minhas.filter(o=>o.conclusao&&!(o.kaffaEntries||[]).some(k=>k.tipo==='final')); // aguarda kaffa FINAL
+  // Aguarda Kaffa: empreiteira informou conclusão mas ainda não registrou kaffa
+  const aguardKaffa = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.kaffa);
   const aguardMed = minhas.filter(o=>o.kaffa&&!o.medicao);
   const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
   const tempoKaffa = avgDiffConclusaoKaffaFinal(minhas); // só kaffa FINAL conta para este KPI
@@ -666,8 +680,10 @@ function renderDashEmpreiteira(minhas){
     ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
     ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
     ${kpiCard('Aguard. Kaffa',aguardKaffa.length,'concluídas sem kaffa','#A855F7')}
+    ${kpiCard('Fisc. s/ Kaffa',minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.kaffa).length,'após fiscalização — urgente','#EF4444')}
     ${kpiCard('Aguard. Medição',aguardMed.length,'kaffa sem medição','#6366F1')}
     ${kpiCard('Com Pendência',comPend.length,'não resolvidas','#F97316')}
+    ${kpiCard('Paralisadas',minhas.filter(o=>o.paralisada).length,'obras paralisadas','#DC2626')}
     ${kpiCard('Tempo Médio Kaffa',tempoKaffa!==null?tempoKaffa+'d':'—','conclusão→kaffa','#a3e635')}
     ${kpiCard('Tempo Médio Regulariz.',tempoReg!==null?tempoReg+'d':'—','pendência→regularização','#fb7185')}
   </div>`;
@@ -5982,7 +5998,9 @@ function renderAnaliseFinanceira(){
     return pool.filter(o=>!o.programa ? progFiltros['_semProg']!==false : progFiltros[o.programa]!==false);
   }
   const isGerente = me.perfil==='gerente'; // controla campos editáveis
-  const obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+  // Empreiteira vê apenas suas obras
+  let obrasRDtodas = obras.filter(o=>(o.tipo==='R1'||o.tipo==='R2')&&!o.cancelado);
+  if(me.perfil==='empreiteira') obrasRDtodas=obrasRDtodas.filter(o=>o.empreiteira?.toUpperCase()===(me.vinculo||'').toUpperCase());
   const obrasRD = obrasComFiltro(obrasRDtodas);
   const cores = {'CS ELETRICIDADE':'#3B82F6', 'ELETELSUL':'#22C55E', 'Geral':'#7c6af7'};
 
