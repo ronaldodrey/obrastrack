@@ -6608,7 +6608,8 @@ function _renderDesligSlot(latest, allDocIds){
     const _hoje = new Date().toISOString().split('T')[0];
     const _hoje30 = new Date(); _hoje30.setDate(_hoje30.getDate()+30);
     const _hoje30str = _hoje30.toISOString().split('T')[0];
-    const docs = allDocIds||[l      // Filter by profile — empreiteira sees only matching obras
+    const docs = allDocIds||[latest.data];
+    // Filter by profile — empreiteira sees only matching obras
     const entradas = (latest.entradas||[]).filter(e=>{
       if(me.perfil==='empreiteira'){
         const obraEmp = obras.find(o=>o.numero?.toString()===e.obraNumero?.toString())?.empreiteira?.toUpperCase()||'';
@@ -6708,7 +6709,7 @@ function _renderDesligSlot(latest, allDocIds){
           : '';
         return '<tr style="border-bottom:1px solid var(--border);'+rowBg+'">'
           +'<td style="padding:5px 8px;font-size:10px;white-space:nowrap">'+(e.dataProgram?fmtTxt(e.dataProgram):'—')+(e.inicioHora?' '+e.inicioHora:'')+'</td>'
-          +'<td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer"'+(p?.o?' onclick="openObraModal(''+p.o.id+'')"':'')+'>'+e.obraNumero+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer"'+(p?.o?' onclick="openObraModal(\'+p.o.id+\')"':'')+'>'+e.obraNumero+'</td>'
           +'<td style="padding:5px 8px;font-size:10px">'+empDisplay+'</td>'
           +'<td style="padding:5px 8px">'+statusLabel(e.status)+'</td>'
           +'<td style="padding:5px 8px;font-size:9px">'+(p?'<span style="color:'+p.cor+';font-weight:700">'+p.label+'</span>'+(p.o?'<br><span style="color:var(--muted)">'+fmtTxt(p.o.dataLimite)+'</span>':''):'<span style="color:var(--muted)">Obra não encontrada</span>')+'</td>'
@@ -6732,30 +6733,17 @@ function _renderDesligSlot(latest, allDocIds){
         +'<tbody>'+rows+'</tbody></table></div></div>';
     }
 
-   ${makeTable(entradasRD,'🔵 Obras RD (R1+R2)','#7c6af7')}
-      ${entradasODI.length?makeTable(entradasODI,'⚡ Obras ODI','#F59E0B'):''}
-      ${semTipo.length?makeTable(semTipo,'❓ Não identificadas','#6b7280'):''}
-    \`;document.getElementById('desligSlot').innerHTML = `
+    document.getElementById('desligSlot').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
         📅 Última importação: <strong>${fmtTxt(latest.data)}</strong>${latest.hora?' às <strong>'+latest.hora+'</strong>':''} — ${latest.arquivo||''} — ${entradas.length} entradas
-        ${(allDocIds||[]).length>1?'<button style="font-size:10px;margin-left:8px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer" onclick="this.nextSibling.style.display=this.nextSibling.style.display==='none'?'inline-block':'none'">📋 Histórico ▾</button><select style="font-size:10px;margin-left:4px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);display:none" onchange="this.value&&loadDesligData(this.value)">'+((allDocIds||[]).map(id=>'<option value="'+id+'">'+id+'</option>').join(''))+'</select>':''}
+        ${(allDocIds||[]).length>1?'<details style="display:inline;margin-left:8px"><summary style="display:inline;cursor:pointer;font-size:10px;color:var(--accent)">📋 Histórico</summary><br><select style="font-size:10px;margin-top:4px" onchange="this.value&&loadDesligData(this.value)">'+allDocIds.map(id=>'<option>'+id+'</option>').join('')+'</select></details>':''}
       </div>
       ${vistoAlert}
       ${analise}
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:10px">
-            <thead><tr style="background:var(--surface2)">
-              <th style="padding:6px 8px;text-align:left">Data Prog.</th>
-              <th style="padding:6px 8px;text-align:left">OIS</th>
-              <th style="padding:6px 8px;text-align:left">Empreiteira</th>
-              <th style="padding:6px 8px;text-align:left">Status</th>
-              <th style="padding:6px 8px;text-align:left">Prioridade</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>`;
+      ${makeTable(entradasRD,'🔵 Obras RD (R1+R2)','#7c6af7')}
+      ${entradasODI.length?makeTable(entradasODI,'⚡ Obras ODI','#F59E0B'):''}
+      ${semTipo.length?makeTable(semTipo,'❓ Obras não identificadas','#6b7280'):''}
+    `;
 }window.toggleParalAceite = function(){
   const val = document.getElementById('oParalAceite')?.value;
   const fg = document.getElementById('fgParalAceiteAte');
