@@ -487,6 +487,22 @@ function renderDashGerente(list, listAll){
   </div>`;
 
   // Tabela resumo por fiscal
+  // Cadastro urgente por fiscal
+  const obsCadUrg = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
+  if(obsCadUrg.length){
+    const byFiscal={};
+    obsCadUrg.forEach(o=>{ const f=o.fiscal||'Sem Fiscal'; if(!byFiscal[f]) byFiscal[f]=[]; byFiscal[f].push(o); });
+    html+=`<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">📋 Cadastro Urgente Pendente (+7d após fiscalização)</div>
+      ${Object.entries(byFiscal).map(([fisc,obs])=>`
+        <div style="margin-bottom:8px">
+          <div style="font-size:11px;font-weight:700;margin-bottom:4px">👤 ${fisc} — ${obs.length} obra(s)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            ${obs.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="aplicarFiltro('status','Encaminhar Cadastro Urgente')" title="${o.cidade||''}">${o.numero}</span>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }
   html += '<div class="sect-title" style="margin-bottom:10px">Painel de Fiscais</div>';
   html += tabelaResumoFiscais(list);
   // ── Painel de Programas ─────────────────────────────────────────────
@@ -1316,7 +1332,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'sem_medida230') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo === 'med230_sem280') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida230&&!o.medida280);
   else if(_filtroRapidoAtivo === 'sem_conclusao') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&!o.conclusao);
-  else if(_filtroRapidoAtivo === 'fisc_sem_cad')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
+  else if(_filtroRapidoAtivo === 'fisc_sem_cad')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro&&(()=>{const d=diff(o.fiscalizacao,(new Date()).toISOString().split('T')[0]);return d!==null&&d>7;})());
   else if(_filtroRapidoAtivo === 'fisc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.medicao&&o.tipo!=='ODI');
   else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!temMedicaoFinal(o));
   else if(_filtroRapidoAtivo === 'conc_sem_fisc') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
@@ -6592,18 +6608,14 @@ function _renderDesligSlot(latest, allDocIds){
     const _hoje = new Date().toISOString().split('T')[0];
     const _hoje30 = new Date(); _hoje30.setDate(_hoje30.getDate()+30);
     const _hoje30str = _hoje30.toISOString().split('T')[0];
-    const docs = allDocIds||[latest.data];
-    // Filter by profile — empreiteira sees only matching obras
+    const docs = allDocIds||[l      // Filter by profile — empreiteira sees only matching obras
     const entradas = (latest.entradas||[]).filter(e=>{
       if(me.perfil==='empreiteira'){
-        // Match via empreiteira field OR via obra cruzada
-        const empMatch = (e.empreiteira||'').toUpperCase().includes((me.vinculo||'').toUpperCase().split(' ')[0]);
-        const obraEmpMatch = obras.find(o=>o.numero?.toString()===e.obraNumero?.toString())?.empreiteira?.toUpperCase()===me.vinculo?.toUpperCase();
-        return empMatch || obraEmpMatch;
+        const obraEmp = obras.find(o=>o.numero?.toString()===e.obraNumero?.toString())?.empreiteira?.toUpperCase()||'';
+        return obraEmp === (me.vinculo||'').toUpperCase();
       }
       return true;
     });
-
     // Cross-reference with obras
 
     function getPrioridade(e){
@@ -6628,9 +6640,17 @@ function _renderDesligSlot(latest, allDocIds){
     };
 
     // Priority analysis
-    // Mapeia prio uma única vez e reutiliza
-    const entradasPrio = entradas.map(e=>({...e, prio:getPrioridade(e)}));
-    const comPrioridade = entradasPrio.filter(e=>e.prio);
+    // Mapeia prio + tipo da obra (R1/R2 = RD, ODI, outros)
+    const entradasPrio = entradas.map(e=>{
+      const prio = getPrioridade(e);
+      const tipo = prio?.o?.tipo || '';
+      return {...e, prio, tipo};
+    });
+    // Separa RD (R1+R2) de ODI — análise de prioridade só para RD
+    const entradasRD  = entradasPrio.filter(e=>e.tipo==='R1'||e.tipo==='R2');
+    const entradasODI = entradasPrio.filter(e=>e.tipo==='ODI');
+    const semTipo     = entradasPrio.filter(e=>!e.tipo);
+    const comPrioridade = entradasRD.filter(e=>e.prio); // análise só RD
     // Enriquece empreiteira vazia com dados da obra cruzada
     comPrioridade.forEach(e=>{ if(!e.empreiteira && e.prio?.o) e.empreiteira=e.prio.o.empreiteira||''; });
     const criticas = comPrioridade.filter(e=>e.prio.nivel==='critica').length;
@@ -6671,36 +6691,54 @@ function _renderDesligSlot(latest, allDocIds){
       </div>` : '';
 
     // Mapeia prio em TODAS as entradas (não só em comPrioridade)
-    const rows = entradasPrio.sort((a,b)=>{
-      const pA=a.prio?.nivel; const pB=b.prio?.nivel;
-      const ord={critica:0,urgente:1,ok:2};
-      return (ord[pA]??3)-(ord[pB]??3) || (a.dataProgram||'').localeCompare(b.dataProgram||'');
-    }).map(e=>{
-      const p=e.prio;
-      // Enriquece empreiteira vazia via obra
-      // Empreiteira: SEMPRE usa a da obra no sistema (mais confiável)
-      // O arquivo só serve para saber qual obra e o dia programado
-      const empDisplay = p?.o?.empreiteira || e.empreiteira || '—';
-      const rowBg = p?.nivel==='critica'
-        ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
-        : p?.nivel==='urgente'
-        ? 'background:rgba(249,115,22,.10);border-left:4px solid #F97316'
-        : e.status==='aguarda_visto'
-        ? 'background:rgba(124,106,247,.08);border-left:4px solid #7c6af7'
-        : '';
-      return `<tr style="border-bottom:1px solid var(--border);${rowBg}">
-        <td style="padding:5px 8px;font-size:10px;white-space:nowrap">${e.dataProgram?fmtTxt(e.dataProgram):' — '}${e.inicioHora?' '+e.inicioHora:''}</td>
-        <td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer" ${p?.o?'onclick="openObraModal(\''+p.o.id+'\')"':''}>${e.obraNumero||'—'}</td>
-        <td style="padding:5px 8px;font-size:10px">${empDisplay}</td>
-        <td style="padding:5px 8px">${statusLabel(e.status)}</td>
-        <td style="padding:5px 8px;font-size:9px">${p?'<span style="color:'+p.cor+';font-weight:700">'+p.label+'</span>'+(p.o?'<br><span style="color:var(--muted)">'+fmtTxt(p.o.dataLimite)+'</span>':''):'<span style="color:var(--muted)">Obra não encontrada</span>'}</td>
-      </tr>`;
-    }).join('');
+    function makeRows(lista){
+      return lista.sort((a,b)=>{
+        const pA=a.prio?.nivel; const pB=b.prio?.nivel;
+        const ord={critica:0,urgente:1,ok:2};
+        return (ord[pA]??3)-(ord[pB]??3)||(a.dataProgram||'').localeCompare(b.dataProgram||'');
+      }).map(e=>{
+        const p=e.prio;
+        const empDisplay = p?.o?.empreiteira || '';
+        const rowBg = p?.nivel==='critica'
+          ? 'background:rgba(239,68,68,.12);border-left:4px solid #EF4444'
+          : p?.nivel==='urgente'
+          ? 'background:rgba(249,115,22,.10);border-left:4px solid #F97316'
+          : e.status==='aguarda_visto'
+          ? 'background:rgba(124,106,247,.08);border-left:4px solid #7c6af7'
+          : '';
+        return '<tr style="border-bottom:1px solid var(--border);'+rowBg+'">'
+          +'<td style="padding:5px 8px;font-size:10px;white-space:nowrap">'+(e.dataProgram?fmtTxt(e.dataProgram):'—')+(e.inicioHora?' '+e.inicioHora:'')+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer"'+(p?.o?' onclick="openObraModal(''+p.o.id+'')"':'')+'>'+e.obraNumero+'</td>'
+          +'<td style="padding:5px 8px;font-size:10px">'+empDisplay+'</td>'
+          +'<td style="padding:5px 8px">'+statusLabel(e.status)+'</td>'
+          +'<td style="padding:5px 8px;font-size:9px">'+(p?'<span style="color:'+p.cor+';font-weight:700">'+p.label+'</span>'+(p.o?'<br><span style="color:var(--muted)">'+fmtTxt(p.o.dataLimite)+'</span>':''):'<span style="color:var(--muted)">Obra não encontrada</span>')+'</td>'
+          +'</tr>';
+      }).join('');
+    }
 
-    document.getElementById('desligSlot').innerHTML = `
+    function makeTable(lista, titulo, cor){
+      if(!lista.length) return '';
+      const rows = makeRows(lista);
+      return '<div style="margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:'+cor+';margin-bottom:6px">'+titulo+' ('+lista.length+')</div>'
+        +'<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="overflow-x:auto">'
+        +'<table style="width:100%;border-collapse:collapse;font-size:10px">'
+        +'<thead><tr style="background:var(--surface2)">'
+        +'<th style="padding:6px 8px;text-align:left">Data Prog.</th>'
+        +'<th style="padding:6px 8px;text-align:left">OIS</th>'
+        +'<th style="padding:6px 8px;text-align:left">Empreiteira</th>'
+        +'<th style="padding:6px 8px;text-align:left">Status</th>'
+        +'<th style="padding:6px 8px;text-align:left">Prioridade</th>'
+        +'</tr></thead>'
+        +'<tbody>'+rows+'</tbody></table></div></div>';
+    }
+
+   ${makeTable(entradasRD,'🔵 Obras RD (R1+R2)','#7c6af7')}
+      ${entradasODI.length?makeTable(entradasODI,'⚡ Obras ODI','#F59E0B'):''}
+      ${semTipo.length?makeTable(semTipo,'❓ Não identificadas','#6b7280'):''}
+    \`;document.getElementById('desligSlot').innerHTML = `
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px">
         📅 Última importação: <strong>${fmtTxt(latest.data)}</strong>${latest.hora?' às <strong>'+latest.hora+'</strong>':''} — ${latest.arquivo||''} — ${entradas.length} entradas
-        ${(allDocIds||[]).length>1?'<select style="font-size:10px;margin-left:8px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface)" onchange="this.value&&loadDesligData(this.value)">'+((allDocIds||[]).map(id=>'<option value="'+id+'">'+id+'</option>').join(''))+'</select>':''}
+        ${(allDocIds||[]).length>1?'<button style="font-size:10px;margin-left:8px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer" onclick="this.nextSibling.style.display=this.nextSibling.style.display==='none'?'inline-block':'none'">📋 Histórico ▾</button><select style="font-size:10px;margin-left:4px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface);display:none" onchange="this.value&&loadDesligData(this.value)">'+((allDocIds||[]).map(id=>'<option value="'+id+'">'+id+'</option>').join(''))+'</select>':''}
       </div>
       ${vistoAlert}
       ${analise}
