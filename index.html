@@ -537,24 +537,8 @@
     <div class="modal-section-title">🔍 Fiscalização</div>
     <!-- Dados do transformador — leitura para fiscal/gerente quando empreiteira já informou -->
     <div id="secTransfView" style="display:none;margin-bottom:14px;padding:12px;background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:8px">
-      <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🔩 Dados do Transformador (informado pela empreiteira)</div>
-      <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px">INSTALADO</div>
-      <div class="fg-grid">
-        <div class="fg"><label>Placas</label><input type="text" id="oPlacasView" disabled></div>
-        <div class="fg"><label>Potência (kVA)</label><input type="text" id="oPotenciaView" disabled></div>
-        <div class="fg"><label>Nº SAP</label><input type="text" id="oSAPView" disabled></div>
-        <div class="fg"><label>Nº Série</label><input type="text" id="oSerieView" disabled></div>
-        <div class="fg"><label>Fabricante</label><input type="text" id="oFabricanteView" disabled></div>
-      </div>
-      <div id="secRetiradoView" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(239,68,68,.3)">
-        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">⬇️ RETIRADO</div>
-        <div class="fg-grid">
-          <div class="fg"><label>Potência Ret. (kVA)</label><input type="text" id="oPotenciaRetView" disabled></div>
-          <div class="fg"><label>Nº SAP Ret.</label><input type="text" id="oSAPRetView" disabled></div>
-          <div class="fg"><label>Nº Série Ret.</label><input type="text" id="oSerieRetView" disabled></div>
-          <div class="fg"><label>Fabricante Ret.</label><input type="text" id="oFabricanteRetView" disabled></div>
-        </div>
-      </div>
+      <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">🔩 Equipamentos — informado pela empreiteira (visualização)</div>
+      <div id="secTransfViewBody"></div>
     </div>
     <div class="fg"><label>Data de Fiscalização</label><input type="date" id="oFiscalizacao"></div>
     <!-- Locais de Trabalho — cadastrados pelo fiscal -->
