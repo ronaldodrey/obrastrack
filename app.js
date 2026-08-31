@@ -6509,7 +6509,7 @@ async function parseSIMODocx(arrayBuffer){
     return '';
   }
 
-  oisPos.forEach(({pos, ois})=>{
+  oisPos.forEach(({pos, ois}, oisIdx)=>{
     // Data mais próxima dentro de WINDOW chars
     const near = datPos
       .filter(d=>Math.abs(d.pos-pos)<=WINDOW)
@@ -6756,6 +6756,7 @@ function _renderDesligSlot(latest, allDocIds){
       'aguarda_visto':       {label:'👤 Ag. Visto Chefia',bg:'#7c6af7', cor:'#fff'},
     };
     window._desl_docId = (allDocIds||[])[0]||'';
+    var latestDocId = window._desl_docId; // alias for template literals
     const podeEditar = ['gerente','estagiario','fiscal','fiscal_adm'].includes(me.perfil);
     function statusLabel(s, eIdx){
       const opt = STATUS_OPTS[s]||{label:s||'—',bg:'#6b7280',cor:'#fff'};
