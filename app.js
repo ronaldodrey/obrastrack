@@ -204,13 +204,15 @@ async function iniciarApp(){
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
 
-  // pgAbertura e pgAnalise somente para gerente e fiscais
+  // pgAbertura: somente gerente | pgAnalise: gerente, fiscais e empreiteira
+  const canSeeAbertura   = me.perfil==='gerente';
   const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='empreiteira';
   const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
-    ...(canSeeFinanceiro?[['pgAbertura','📊 Abertura de Obras'],['pgAnalise','💰 Análise Financeira']]:[]),
+    ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
+    ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
     ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
     ['pgDesligamentos','🔌 Desligamentos'],
@@ -1353,6 +1355,8 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!temMedicaoFinal(o));
   else if(_filtroRapidoAtivo === 'conc_sem_fisc') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
   else if(_filtroRapidoAtivo === 'pend_exec')     baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&!o.regularizacaoData);
+  else if(_filtroRapidoAtivo === 'conc_sem_kaffa') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.kaffa);
+  else if(_filtroRapidoAtivo === 'fisc_sem_kaffa') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.kaffa);
   else if(_filtroRapidoAtivo === 'pend_ag_conf')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
@@ -2570,7 +2574,14 @@ async function marcarEnviado(chave){
 // ── FUNÇÃO GENÉRICA: 1 único template para todos os tipos ──────────
 // O template no EmailJS usa apenas: {{to_email}}, {{cc_email}}, {{assunto}}, {{mensagem}}
 async function enviarEmail(assunto, mensagem, toEmail, ccEmail){
-  if(!emailJSAtivo()) { console.warn('[SPPC Email] EmailJS inativo — e-mail não enviado.'); return; }
+  if(!emailJSAtivo()){
+    console.warn('[SPPC Email] EmailJS inativo — e-mail não enviado. Verifique emailjs-config.js');
+    // Verifica causa específica
+    if(typeof emailjs === 'undefined') console.warn('[SPPC Email] → biblioteca EmailJS não carregada no HTML');
+    else if(!EMAILJS_CONFIG?.publicKey||EMAILJS_CONFIG.publicKey.startsWith('COLE_AQUI')) console.warn('[SPPC Email] → publicKey não configurada em emailjs-config.js');
+    else if(!EMAILJS_CONFIG?.tplGeral||EMAILJS_CONFIG.tplGeral.startsWith('COLE_AQUI')) console.warn('[SPPC Email] → tplGeral não configurado em emailjs-config.js');
+    return;
+  }
   const tpl = EMAILJS_CONFIG.tplGeral;
   if(!tpl || tpl.startsWith('COLE_AQUI')) { console.warn('[SPPC Email] Template não configurado.'); return; }
   if(!toEmail) { console.warn('[SPPC Email] Sem destinatário — e-mail ignorado.'); return; }
@@ -2599,7 +2610,16 @@ async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
   const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
   if(!fiscal?.email){
     console.warn('[Email Kaffa] Fiscal não encontrado ou sem email. fiscal vinculo=',obra.fiscal,'users=',users.map(u=>u.vinculo+'('+u.perfil+')'));
-    toast('⚠️ Email não enviado: fiscal sem email cadastrado.','warn');
+    // Tenta fallback: email do gerente como destinatário
+    const gerEmail = EMAILJS_CONFIG?.emailGerente;
+    if(gerEmail){
+      await enviarEmail(
+        `SPPC ARLAG – Kaffa sem fiscal | Obra ${obra.numero}`,
+        `Atenção: kaffa registrado na obra ${obra.numero} (${obra.cidade}) mas o fiscal ${obra.fiscal||'—'} não possui email cadastrado. Registre o email do fiscal no painel de usuários.`,
+        gerEmail, ''
+      );
+    }
+    toast('⚠️ Email ao fiscal não enviado (sem email cadastrado). Notificação enviada ao gerente.','warn');
     return;
   }
   console.log('[Email Kaffa] Enviando para fiscal:', fiscal.email);
