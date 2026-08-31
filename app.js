@@ -1686,8 +1686,12 @@ window.openObraModal=function(obraId){
     if(p !== 'fiscal')      showSec('secExec');
     // #5 fiscal vê dados da empreiteira (placas, SAP, série, fabricante) sempre em modo edição
     // Dados do transformador: mostra para fiscal/gerente apenas quando empreiteira já preencheu
-    if((p === 'fiscal' || p === 'fiscal_adm' || p === 'gerente') && isEdit && (obra?.placas || obra?.sap || obra?.potencia)){
+    // Mostra equipamentos para fiscal/gerente: verifica campos antigos E novos arrays
+    const temEquipNovo = (obra?.equipamentosInstalados||[]).length>0 || (obra?.equipamentosRetirados||[]).length>0;
+    const temEquipAntigo = obra?.placas || obra?.sap || obra?.potencia;
+    if((p==='fiscal'||p==='fiscal_adm'||p==='gerente') && isEdit && (temEquipNovo||temEquipAntigo)){
       showSec('secTransfView');
+      renderEquipView(obra); // popula com todos os equipamentos
     }
     if(p === 'empreiteira') showSec('secImpedimento');
 
@@ -3497,6 +3501,78 @@ function renderCarteiraFutura(){
     </div>`;
 }
 window.renderCarteiraFutura = renderCarteiraFutura;
+
+
+// ── Atualiza status de um desligamento individualmente ─────────────────────
+window.atualizarStatusDesl = async function(idx, novoStatus){
+  const docId = window._desl_docId||'';
+  if(!docId){ toast('ID do documento não encontrado.','err'); return; }
+  try{
+    const snap = await getDoc(doc(db,'desligamentos',docId));
+    if(!snap.exists()){ toast('Documento não encontrado.','err'); return; }
+    const data = snap.data();
+    const entradas = [...(data.entradas||[])];
+    if(idx<0||idx>=entradas.length){ toast('Entrada não encontrada.','err'); return; }
+    entradas[idx] = {...entradas[idx], status: novoStatus};
+    await updateDoc(doc(db,'desligamentos',docId),{entradas, atualizadaEm:serverTimestamp()});
+    toast('✓ Status atualizado.','ok');
+    // Re-render após 300ms
+    setTimeout(()=>{ if(typeof renderDesligamentos==='function') renderDesligamentos(); }, 300);
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
+// ── renderEquipView: mostra equipamentos ao fiscal/gerente (read-only) ──────
+function renderEquipView(obra){
+  const cont = document.getElementById('secTransfViewBody');
+  if(!cont) return;
+
+  const equipsInst = obra?.equipamentosInstalados||[];
+  const equipsRet  = obra?.equipamentosRetirados||[];
+
+  // Migra campos antigos se não houver array
+  const instalados = equipsInst.length>0 ? equipsInst : (obra?.placas||obra?.sap ? [{
+    placas:obra.placas||'—', potencia:obra.potencia||'—', sap:obra.sap||'—',
+    serie:obra.serie||'—', fabricante:obra.fabricante||'—', dataTransf:obra.dataTransf||'—'
+  }] : []);
+  const retirados  = equipsRet.length>0 ? equipsRet : (obra?.potenciaRet||obra?.sapRet ? [{
+    potencia:obra.potenciaRet||'—', sap:obra.sapRet||'—',
+    serie:obra.serieRet||'—', fabricante:obra.fabricanteRet||'—'
+  }] : []);
+
+  let html = '';
+  if(instalados.length){
+    html += '<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:6px">⚡ Instalados ('+instalados.length+')</div>';
+    instalados.forEach((e,i)=>{
+      html += `<div style="background:var(--surface2);border-radius:6px;padding:8px;margin-bottom:6px;font-size:10px">
+        <div style="font-weight:700;margin-bottom:4px">Transformador ${i+1}</div>
+        <div class="fg-grid">
+          <div><span style="color:var(--muted)">Placas:</span> ${e.placas||'—'}</div>
+          <div><span style="color:var(--muted)">Potência:</span> ${e.potencia||'—'} kVA</div>
+          <div><span style="color:var(--muted)">SAP:</span> ${e.sap||'—'}</div>
+          <div><span style="color:var(--muted)">Série:</span> ${e.serie||'—'}</div>
+          <div><span style="color:var(--muted)">Fabricante:</span> ${e.fabricante||'—'}</div>
+          ${e.dataTransf?`<div><span style="color:var(--muted)">Data Transf.:</span> ${fmtTxt(e.dataTransf)}</div>`:''}
+        </div>
+      </div>`;
+    });
+  }
+  if(retirados.length){
+    html += '<div style="font-size:10px;font-weight:700;color:#EF4444;margin:8px 0 6px">⬇️ Retirados ('+retirados.length+')</div>';
+    retirados.forEach((e,i)=>{
+      html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:8px;margin-bottom:6px;font-size:10px">
+        <div style="font-weight:700;margin-bottom:4px;color:#EF4444">Retirado ${i+1}</div>
+        <div class="fg-grid">
+          <div><span style="color:var(--muted)">Potência:</span> ${e.potencia||'—'} kVA</div>
+          <div><span style="color:var(--muted)">SAP:</span> ${e.sap||'—'}</div>
+          <div><span style="color:var(--muted)">Série:</span> ${e.serie||'—'}</div>
+          <div><span style="color:var(--muted)">Fabricante:</span> ${e.fabricante||'—'}</div>
+        </div>
+      </div>`;
+    });
+  }
+  if(!html) html = '<div style="font-size:10px;color:var(--muted)">Nenhum equipamento informado ainda.</div>';
+  cont.innerHTML = html;
+}
 
 // ══ EXPORTAR EXCEL ════════════════════════════════════
 const XLSX_EXPORT_HEADERS=['Status','Nº','Tipo','Cidade','Empreiteira','Fiscal','Abertura','Prazo','Data Limite',
@@ -6451,11 +6527,13 @@ async function parseSIMODocx(arrayBuffer){
     if(seen.has(key)) return;
     seen.add(key);
 
-    // Status: janela ao redor do OIS
-    const seg = fullText.slice(Math.max(0,pos-80), Math.min(fullText.length, pos+WINDOW));
+    // Status: janela do OIS até o próximo OIS (evita pegar status da obra seguinte)
+    const nextOisPos2 = oisIdx+1 < oisPos.length ? oisPos[oisIdx+1].pos : pos+WINDOW;
+    const seg = fullText.slice(Math.max(0,pos-30), nextOisPos2);
     let status='';
-    if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))          status='aguarda_programador';
-    else if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg))     status='aguarda_execucao';
+    // EXECUCAO verificado ANTES de PROGRAMADOR para evitar match da linha seguinte
+    if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(seg))                     status='aguarda_execucao';
+    else if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(seg))                  status='aguarda_programador';
     else if(/AGUARDA\s+VISTO|SD.*AGUARDANDO\s+VISTO|AGUARDA.*CHEFIA/i.test(seg)) status='aguarda_visto';
 
     // Horas HH:MM HH:MM
@@ -6537,8 +6615,9 @@ async function parseSIMOExcel(arrayBuffer){
       let status='';
       for(let ci=i;ci<=Math.min(i+2,rows.length-1);ci++){
         const cs=rows[ci].join(' ');
-        if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(cs)){status='aguarda_programador';break;}
+        // Verifica EXECUCAO primeiro (evita match falso da linha seguinte)
         if(/AGUARDA\s+EXECUCAO\s+MANUTENCAO/i.test(cs)){status='aguarda_execucao';break;}
+        if(/AGUARDA\s+AUT[.\s]+PROGRAMADOR/i.test(cs)){status='aguarda_programador';break;}
         if(/AGUARDA\s+VISTO|SD.*AGUARDANDO|AGUARDA.*CHEFIA/i.test(cs)){status='aguarda_visto';break;}
       }
 
@@ -6671,13 +6750,21 @@ function _renderDesligSlot(latest, allDocIds){
     }
 
     // Status labels
-    const statusLabel = s => {
-      if(s==='aguarda_programador') return `<span style="background:#F59E0B;color:#000;padding:1px 8px;border-radius:8px;font-size:9px">⏳ Ag. Programador</span>`;
-      if(s==='aguarda_execucao')    return `<span style="background:#3B82F6;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">🔧 Ag. Execução</span>`;
-      if(s==='aguarda_visto')       return `<span style="background:#7c6af7;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">👤 Ag. Visto Chefia</span>`;
-      return `<span style="background:#6b7280;color:#fff;padding:1px 8px;border-radius:8px;font-size:9px">${s||'—'}</span>`;
+    const STATUS_OPTS = {
+      'aguarda_programador': {label:'⏳ Ag. Programador', bg:'#F59E0B', cor:'#000'},
+      'aguarda_execucao':    {label:'🔧 Ag. Execução',   bg:'#3B82F6', cor:'#fff'},
+      'aguarda_visto':       {label:'👤 Ag. Visto Chefia',bg:'#7c6af7', cor:'#fff'},
     };
-
+    window._desl_docId = (allDocIds||[])[0]||'';
+    const podeEditar = ['gerente','estagiario','fiscal','fiscal_adm'].includes(me.perfil);
+    function statusLabel(s, eIdx){
+      const opt = STATUS_OPTS[s]||{label:s||'—',bg:'#6b7280',cor:'#fff'};
+      const st = 'padding:2px 8px;border-radius:8px;font-size:9px;background:'+opt.bg+';color:'+opt.cor+';border:none';
+      if(!podeEditar) return '<span style="'+st+'">'+opt.label+'</span>';
+      let sel = '<select style="'+st+';cursor:pointer;font-weight:600" title="Alterar status" onchange="window.atualizarStatusDesl('+eIdx+',this.value)">';
+      Object.entries(STATUS_OPTS).forEach(function(kv){ sel+='<option value="'+kv[0]+'"'+(kv[0]===s?' selected':'')+'>'+kv[1].label+'</option>'; });
+      return sel+'</select>';
+    }
     // Priority analysis
     // Mapeia prio + tipo da obra (R1/R2 = RD, ODI, outros)
     const entradasPrio = entradas.map(e=>{
@@ -6730,7 +6817,8 @@ function _renderDesligSlot(latest, allDocIds){
       </div>` : '';
 
     // Mapeia prio em TODAS as entradas (não só em comPrioridade)
-    function makeRows(lista){
+    function makeRows(lista, docId){
+      latestDocId = docId||latestDocId;
       return lista.sort((a,b)=>{
         const pA=a.prio?.nivel; const pB=b.prio?.nivel;
         const ord={critica:0,urgente:1,ok:2};
@@ -6749,7 +6837,7 @@ function _renderDesligSlot(latest, allDocIds){
           +'<td style="padding:5px 8px;font-size:10px;white-space:nowrap">'+(e.dataProgram?fmtTxt(e.dataProgram):'—')+(e.inicioHora?' '+e.inicioHora:'')+'</td>'
           +'<td style="padding:5px 8px;font-size:10px;font-weight:600;color:var(--accent);cursor:pointer"'+(p?.o?' onclick="openObraModal(\'+p.o.id+\')"':'')+'>'+e.obraNumero+'</td>'
           +'<td style="padding:5px 8px;font-size:10px">'+empDisplay+'</td>'
-          +'<td style="padding:5px 8px">'+statusLabel(e.status)+'</td>'
+          +'<td style="padding:5px 8px">'+statusLabel(e.status, entradasPrio.indexOf(e))+'</td>'
           +'<td style="padding:5px 8px;font-size:9px">'+(p?'<span style="color:'+p.cor+';font-weight:700">'+p.label+'</span>'+(p.o?'<br><span style="color:var(--muted)">'+fmtTxt(p.o.dataLimite)+'</span>':''):'<span style="color:var(--muted)">Obra não encontrada</span>')+'</td>'
           +'</tr>';
       }).join('');
@@ -6757,7 +6845,7 @@ function _renderDesligSlot(latest, allDocIds){
 
     function makeTable(lista, titulo, cor){
       if(!lista.length) return '';
-      const rows = makeRows(lista);
+      const rows = makeRows(lista, latestDocId);
       return '<div style="margin-bottom:16px"><div style="font-weight:700;font-size:12px;color:'+cor+';margin-bottom:6px">'+titulo+' ('+lista.length+')</div>'
         +'<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="overflow-x:auto">'
         +'<table style="width:100%;border-collapse:collapse;font-size:10px">'
