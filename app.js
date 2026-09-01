@@ -141,10 +141,22 @@ function statusSecundario(o){
   return '';
 }
 
+function statusDesligamento(o){
+  // Verifica se obra tem desligamento programado no mapa de desligamentos importados
+  const desl = window._deslMap && window._deslMap[(o.numero||'').toString()];
+  if(!desl) return '';
+  const statusCor = desl.status==='aguarda_execucao' ? '#22C55E' : '#F59E0B';
+  const statusLabel = desl.status==='aguarda_execucao' ? '🔧 Desl. Ag. Execução'
+    : desl.status==='aguarda_visto' ? '👤 Desl. Ag. Visto'
+    : '⏳ Desl. Ag. Programador';
+  const dataLabel = desl.dataProgram ? ' — '+fmtTxt(desl.dataProgram)+(desl.inicioHora?' '+desl.inicioHora:'') : '';
+  return `<span class="st" style="color:${statusCor};background:${statusCor}22;border-color:${statusCor}55;margin-left:4px;font-weight:700" title="Desligamento programado${dataLabel}"><span style="background:${statusCor}"></span>${statusLabel}${dataLabel}</span>`;
+}
+
 function statusHtml(o){
   const s=statusOf(o), d=STATUS_DEF[s]||{cor:'#888',bg:'rgba(128,128,128,.15)'};
   return `<span class="st" style="color:${d.cor};background:${d.bg};border-color:${d.cor}44">
-    <span style="background:${d.cor}"></span>${s}</span>${statusSecundario(o)}`;
+    <span style="background:${d.cor}"></span>${s}</span>${statusSecundario(o)}${statusDesligamento(o)}`;
 }
 
 
@@ -1433,13 +1445,19 @@ function renderObras(){
       :fmt(o.kaffa);
     // Row background color based on status
     const isChkMode = !!window._bulkMode; // qualquer modo de lote ativo
+    const temDesl = !!(window._deslMap && window._deslMap[(o.numero||'').toString()]);
+    const deslStatus = temDesl ? window._deslMap[(o.numero||'').toString()].status : '';
     const rowBg = o.processoCancelamento && !o.cancelado
       ? 'background:rgba(168,85,247,.08);border-left:2px solid #A855F7;'
       : (o.pendencia&&!o.pendenciaResolvida)
         ? 'background:rgba(249,115,22,.07);'
         : (statusOf(o)==='Atrasada'||statusOf(o)==='Encaminhar Cadastro Urgente')
           ? 'background:rgba(239,68,68,.07);'
-          : '';
+          : temDesl && deslStatus==='aguarda_execucao'
+            ? 'background:rgba(34,197,94,.07);border-left:3px solid #22C55E;'
+            : temDesl
+              ? 'background:rgba(245,158,11,.06);border-left:3px solid #F59E0B;'
+              : '';
     const procCancBadge = o.processoCancelamento && !o.cancelado
       ? '<span style="font-size:8px;background:rgba(168,85,247,.2);color:#A855F7;border:1px solid rgba(168,85,247,.4);padding:1px 5px;border-radius:4px;margin-left:4px">⏸ CANC.</span>'
       : '';
@@ -2250,7 +2268,8 @@ window.saveObra=async function(){
         sapRet: g('oSAPRet')||null,
         serieRet: g('oSerieRet')||null,
         fabricanteRet: g('oFabricanteRet')||null,
-        paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada'),
+        paralisada:gChk('oParalisada'), motivoParalisada:g('oMotivoParalisada')||null,
+        paralAceite:g('oParalAceite')||null, paralAceiteAte:g('oParalAceiteAte')||null,
         processoCancelamento:gChk('oProcessoCancelamento'),
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
         atualizadaEm:serverTimestamp()
@@ -3013,6 +3032,7 @@ window.exportCSVFiltrado = function() {
 
 // ══ SISTEMA DE OPERAÇÕES EM LOTE (UNIFICADO) ═══════════════════════
 window._bulkMode = null; // 'medidas'|'fisc'|'medicao'|'kaffa'|'conclusao'
+window._deslMap = {};   // {obraNumero: {dataProgram, status, inicioHora}} — atualizado ao carregar desligamentos
 window._bulkMedidasMode = false; // legado — mantido para compatibilidade
 
 const BULK_CONFIG = {
@@ -6797,6 +6817,16 @@ function _renderDesligSlot(latest, allDocIds){
       return sel+'</select>';
     }
     // Priority analysis
+    // Atualiza mapa global de desligamentos (para sinalizar na aba Obras)
+    window._deslMap = {};
+    (latest.entradas||[]).forEach(e=>{
+      if(e.obraNumero) window._deslMap[e.obraNumero] = {
+        dataProgram: e.dataProgram, status: e.status, inicioHora: e.inicioHora||''
+      };
+    });
+    // Força re-render da aba Obras se estiver ativa
+    if(document.getElementById('pgObras')?.style.display!=='none') renderObras();
+
     // Mapeia prio + tipo da obra (R1/R2 = RD, ODI, outros)
     const entradasPrio = entradas.map(e=>{
       const prio = getPrioridade(e);
