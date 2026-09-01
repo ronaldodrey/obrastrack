@@ -1257,7 +1257,16 @@ function buildTableHeader(){
   // Colunas fixas (frozen/congeladas)
   const stickyStyle = 'position:sticky;z-index:2;background:var(--surface)';
   // Coluna de checkbox no modo lote
-  const chkTh = window._bulkMode ? `<th style="width:32px;padding:4px 8px;text-align:center"><input type="checkbox" id="chkTodos" onchange="document.querySelectorAll('.chk-obra').forEach(c=>c.checked=this.checked);const n=document.querySelectorAll('.chk-obra:checked').length;const el=document.getElementById('bulkCount');if(el)el.textContent=n+' obra(s) selecionada(s)';" title="Selecionar todas"></th>` : '';
+  const chkTh = window._bulkMode ? `<th style="width:32px;padding:4px 8px;text-align:center"><input type="checkbox" id="chkTodos" onchange="
+  if(!window._bulkSelecionados) window._bulkSelecionados=new Set();
+  document.querySelectorAll('.chk-obra').forEach(c=>{
+    c.checked=this.checked;
+    if(this.checked) window._bulkSelecionados.add(c.dataset.id);
+    else window._bulkSelecionados.delete(c.dataset.id);
+  });
+  const el=document.getElementById('bulkCount');
+  if(el) el.textContent=window._bulkSelecionados.size+' obra(s) selecionada(s)';
+" title="Selecionar todas"></th>` : '';
   const frozen1 = (window._bulkMode?'':'')+`<th style="${stickyStyle};left:0;min-width:120px" title="Status atual da obra">Status</th>`;
   const frozen2 = `<th style="${stickyStyle};left:120px;min-width:100px;cursor:pointer" onclick="window.sortObras('numero')" title="Número da obra — clique para ordenar">Nº <span style="font-size:8px;opacity:.6">${sortIcon('numero')}</span></th>`;
 
@@ -1392,6 +1401,11 @@ function renderObras(){
     resumo.textContent = ativos>0
       ? `Mostrando ${list.length} de ${total} obras — ${ativos} filtro(s) ativo(s)`
       : `${total} obras no total`;
+  // Atualiza contador de selecionadas (persiste entre filtros)
+  if(window._bulkMode && window._bulkSelecionados && window._bulkSelecionados.size > 0){
+    const bulkEl = document.getElementById('bulkCount');
+    if(bulkEl) bulkEl.textContent = window._bulkSelecionados.size + ' obra(s) selecionada(s)';
+  }
   }
   const body = document.getElementById('obrasBody');
   if(!list.length){
@@ -1433,7 +1447,15 @@ function renderObras(){
     return `<tr style="${rowBg}">
       <td class="col-chk" style="display:${isChkMode?'table-cell':'none'};width:32px;padding:4px 8px;text-align:center">
         <input type="checkbox" class="chk-obra" data-id="${o.id}"
-          onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obra(s) selecionada(s)'; })()">
+          ${(window._bulkSelecionados&&window._bulkSelecionados.has(o.id))?'checked':''}
+          onchange="(()=>{
+            if(!window._bulkSelecionados) window._bulkSelecionados=new Set();
+            if(this.checked) window._bulkSelecionados.add(this.dataset.id);
+            else window._bulkSelecionados.delete(this.dataset.id);
+            const n=window._bulkSelecionados.size;
+            const el=document.getElementById('bulkCount');
+            if(el) el.textContent=n+' obra(s) selecionada(s)';
+          })()">
       </td>
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
       <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong></td>
@@ -3006,6 +3028,7 @@ window.abrirBulk = function(modo){
   if(window._bulkMode === modo){ fecharBulk(); return; } // toggle
   window._bulkMode = modo;
   window._bulkMedidasMode = (modo==='medidas'); // legado
+  window._bulkSelecionados = new Set(); // persiste seleção entre filtros
   const cfg = BULK_CONFIG[modo];
   // Esconde todos os campos específicos
   ['bulkCamposMedidas','bulkCamposKaffa'].forEach(id=>{
@@ -3023,6 +3046,7 @@ window.abrirBulk = function(modo){
 function fecharBulk(){
   window._bulkMode = null;
   window._bulkMedidasMode = false;
+  window._bulkSelecionados = new Set(); // limpa seleção
   document.getElementById('bulkBar').style.display = 'none';
   window.renderObras();
 }
@@ -3030,7 +3054,13 @@ window.fecharBulk = fecharBulk;
 window.abrirBulkMedidas = ()=>window.abrirBulk('medidas'); // legado
 window.fecharBulkMedidas = fecharBulk; // legado
 
-function bulkSelecionadas(){ return [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id); }
+function bulkSelecionadas(){
+  // Usa a Set persistente (mantém seleção mesmo após filtros mudarem)
+  if(window._bulkSelecionados && window._bulkSelecionados.size > 0)
+    return [...window._bulkSelecionados];
+  // Fallback: lê do DOM (caso Set não esteja inicializada)
+  return [...document.querySelectorAll('.chk-obra:checked')].map(el=>el.dataset.id);
+}
 
 window.confirmarBulk = async function(){
   const modo = window._bulkMode;
