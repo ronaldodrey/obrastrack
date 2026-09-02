@@ -3562,9 +3562,9 @@ function renderCarteiraFutura(){
       <button id="cfTabCliente" onclick="cfSetAba('cliente')"
         style="padding:6px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:700;font-size:13px;
         background:var(--accent);color:#fff">📋 Obras Cliente</button>
-      <button id="cfTabMelhoria" onclick="cfSetAba('melhoria')"
-        style="padding:6px 20px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:13px;
-        background:var(--surface);color:var(--muted)" disabled title="Em breve">🔧 Obras Melhoria</button>
+      <button id="cfTabMelhoria" onclick="toast('Obras Melhoria será implementado na próxima fase.','warn')"
+        style="padding:6px 20px;border-radius:8px;border:1px solid var(--border);cursor:not-allowed;font-size:13px;
+        background:var(--surface);color:var(--muted);opacity:.5" title="Em breve — próxima fase">🔧 Obras Melhoria</button>
     </div>
 
     <div id="cfAbaCliente">
@@ -3848,7 +3848,13 @@ function cfFilaRow(o, idx){
     <td style="padding:6px;text-align:center;font-family:monospace">${o.equipRef||o.equipRefAlt||'—'}${o.equipRefAlt&&!o.equipRef?'<span title="Equip. alternativo" style="color:#F59E0B;font-size:9px"> ⚠️alt</span>':''}</td>
     <td style="padding:6px;text-align:right">${parseFloat(o.usc||0).toFixed(1)}</td>
     <td style="padding:6px;text-align:center">${o.prazoExec||'—'}d</td>
-    <td style="padding:6px;text-align:center;white-space:nowrap;font-size:9px;color:var(--muted)">${o.dataEntrada?fmtTxt(o.dataEntrada):'—'}</td>
+    <td style="padding:6px;text-align:center;white-space:nowrap;font-size:9px;color:var(--muted)">${o.dataEntrada?(()=>{
+      // Re-parse dates that might be stored in US format (M/D/YY)
+      const s=String(o.dataEntrada);
+      const us=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if(us){ const y=us[3].length===2?'20'+us[3]:us[3]; return fmtTxt(y+'-'+us[1].padStart(2,'0')+'-'+us[2].padStart(2,'0')); }
+      return fmtTxt(s);
+    })():'—'}</td>
     <td style="padding:6px;text-align:center">${cfStatusBadge(o)}</td>
     <td style="padding:6px;text-align:center;white-space:nowrap">
       ${o.status==='bloqueada'
@@ -4008,19 +4014,19 @@ window.cfUploadExcel = async function(input){
   const dataRows = rows.slice(headerRow+1).filter(r=>r[0]&&String(r[0]).trim());
   if(!dataRows.length){ toast('Nenhuma obra encontrada no Excel.','err'); return; }
 
-  // Converte e ordena por data de entrada (mais antiga primeiro)
-  const obras = dataRows.map(r=>{
-    let dataRaw = r[2]||'';
-    let dataEntrada='';
-    if(dataRaw instanceof Date){ dataEntrada=dataRaw.toISOString().split('T')[0]; }
-    else{
-      const s=String(dataRaw);
-      const dm=s.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      const iso=s.match(/(\d{4})-(\d{2})-(\d{2})/);
-      if(dm)  dataEntrada=`${dm[3]}-${dm[2]}-${dm[1]}`;
-      else if(iso) dataEntrada=`${iso[1]}-${iso[2]}-${iso[3]}`;
-      else dataEntrada=s.slice(0,10);
+ // Converte e ordena por data de entrada (mais antiga primeiro)
+    function parseCfDate(raw){
+      if(!raw) return '';
+      if(raw instanceof Date) return raw.toISOString().split('T')[0];
+      const s=String(raw).trim();
+      const iso=s.match(/^(\d{4})-(\d{2})-(\d{2})/);  if(iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+      const br=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);  if(br)  return `${br[3]}-${br[2]}-${br[1]}`;
+      const us=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if(us){ const y=us[3].length===2?'20'+us[3]:us[3]; return `${y}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`; }
+      return s.slice(0,10);
     }
+    const obras = dataRows.map(r=>{
+      const dataEntrada = parseCfDate(r[2]);
     return{
       nota:String(r[0]).trim(),
       municipio:String(r[1]||'').toUpperCase().trim(),
@@ -4117,13 +4123,13 @@ window.cfConfirmarAbrirObra = async function(id){
     });
   } else {
     // Navega para Obras e abre modal
-    navegarPara('pgObras');
+    window.showPage('pgObras');
     setTimeout(()=>{
-      if(typeof openNewObraModal==='function') openNewObraModal({
+      if(typeof window.openNewObraModal==='function') window.openNewObraModal({
         numero:o.nota, tipo, cidade:o.municipio,
         uscPrevisto:o.usc, equipamentoRef:o.equipRef
       });
-    },500);
+    },600);
   }
   cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
   toast(`✓ Obra ${o.nota} marcada como aberta. Tipo: ${tipo}`,'ok');
