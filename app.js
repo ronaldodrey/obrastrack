@@ -98,6 +98,8 @@ const STATUS_DEF = {
 
 function statusOf(o){
   if(o.cancelado)    return 'Cancelada';
+  // Problema executivo: status permanente (empreiteira sinaliza impedimento)
+  if(o.impedimento)  return 'Prob. Executivo – Celesc';
   if(o.paralisada){
     const _h=(new Date()).toISOString().split('T')[0];
     if(o.paralAceiteAte && o.paralAceiteAte<_h) return 'Paral. Expirada';
@@ -126,7 +128,6 @@ function statusOf(o){
     return 'Aguard. Medição';
   }
   if(o.fiscalizacao) return 'Aguardando Kaffa';
-  if(o.impedimento)  return 'Prob. Executivo – Celesc';
   if(o.dataLimite && hoje()>parseD(o.dataLimite)) return 'Atrasada';
   return 'Em Execução';
 }
@@ -1376,6 +1377,8 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'conc_sem_med')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!temMedicaoFinal(o));
   else if(_filtroRapidoAtivo === 'conc_sem_fisc') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
   else if(_filtroRapidoAtivo === 'pend_exec')     baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&!o.regularizacaoData);
+  else if(_filtroRapidoAtivo === 'paral_expirada')  baseList = baseList.filter(o=>o.paralisada&&o.paralAceiteAte&&o.paralAceiteAte<(new Date()).toISOString().split('T')[0]);
+  else if(_filtroRapidoAtivo === 'prob_executivo')  baseList = baseList.filter(o=>o.impedimento&&!o.cancelado&&!o.armazenado);
   else if(_filtroRapidoAtivo === 'conc_sem_kaffa') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.kaffa);
   else if(_filtroRapidoAtivo === 'fisc_sem_kaffa') baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.kaffa);
   else if(_filtroRapidoAtivo === 'pend_ag_conf')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
@@ -3644,8 +3647,13 @@ window.cfSaveConfig = async function(){
   const cfg = {
     limiteObras:    parseInt(g('cfLimObras'))||35,
     limiteUSC:      parseFloat(g('cfLimUSC'))||5000,
-    raioProx:       parseFloat(g('cfRaioProx'))||10,
-    pesoDistancia:  parseFloat(g('cfPesoDist'))||40,
+    raioProx:          parseFloat(g('cfRaioProx'))||10,
+    alfaProximidade:   parseFloat(g('cfAlfa'))||0.6,
+    limiteUscMesCS:    parseFloat(g('cfLimUscMesCS'))||2000,
+    limiteNotasMesCS:  parseFloat(g('cfLimNotasMesCS'))||25,
+    limiteUscMesEL:    parseFloat(g('cfLimUscMesEL'))||2000,
+    limiteNotasMesEL:  parseFloat(g('cfLimNotasMesEL'))||22,
+    pesoDistancia:     parseFloat(g('cfPesoDist'))||40,
     pesoEquilibrio: parseFloat(g('cfPesoEq'))||40,
     pesoDesligamento: parseFloat(g('cfPesoDesl'))||20,
     metaObrasCS:    parseFloat(g('cfMetaObrasCS'))||150,
@@ -3724,13 +3732,43 @@ function cfRenderConfig(){
 
       <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
         <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Proximidade</legend>
-        <div class="fg">
+        <div class="fg" style="margin-bottom:6px">
           <label style="font-size:10px">Raio (km)</label>
           <input type="number" id="cfRaioProx" value="${c.raioProx||10}" min="1" max="100" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Peso obra mais próxima (α)</label>
+          <input type="number" id="cfAlfa" value="${c.alfaProximidade||0.6}" min="0" max="1" step="0.1" style="font-size:12px">
+          <small style="font-size:9px;color:var(--muted)">0=só mediana · 1=só mínima</small>
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Capacidade Mensal — CS</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">USC máx/mês (obras ativas vencendo)</label>
+          <input type="number" id="cfLimUscMesCS" value="${c.limiteUscMesCS||2000}" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Notas máx/mês (obras ativas vencendo)</label>
+          <input type="number" id="cfLimNotasMesCS" value="${c.limiteNotasMesCS||25}" style="font-size:12px">
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Capacidade Mensal — Eletelsul</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">USC máx/mês (obras ativas vencendo)</label>
+          <input type="number" id="cfLimUscMesEL" value="${c.limiteUscMesEL||2000}" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Notas máx/mês (obras ativas vencendo)</label>
+          <input type="number" id="cfLimNotasMesEL" value="${c.limiteNotasMesEL||22}" style="font-size:12px">
         </div>
       </fieldset>
     </div>
     <button class="btn btn-primary btn-sm" onclick="cfSaveConfig()">💾 Salvar Configurações</button>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px">💡 Calibre USC/mês e Notas/mês gradualmente — meta: ≥75% da capacidade ocupada sem ultrapassar 125%</div>
   `;
 }
 
@@ -3861,7 +3899,16 @@ function cfFilaRow(o, idx){
     ondragleave="cfDragLeave(event)">
     <td style="padding:6px;text-align:center;color:var(--muted);cursor:grab">☰</td>
     <td style="padding:6px;text-align:center;font-weight:700;color:var(--muted)">${idx+1}</td>
-    <td style="padding:6px;font-weight:700;color:var(--accent)">${o.nota}</td>
+    <td style="padding:6px">
+      <div style="font-weight:700;color:var(--accent);cursor:pointer" ${o.scoreJSON?`onclick="cfMostrarScore('${o.id}')"`:''}>${o.nota}</div>
+      ${o.empreiteiraRec?(()=>{
+        const scores = o.scoreJSON?JSON.parse(o.scoreJSON):[];
+        const best = scores[0]||{};
+        const cor = o.adiar?'#6b7280':o.empreiteiraRec.includes('CS')?'#3B82F6':'#F59E0B';
+        const label = o.adiar?'⏸ Adiar':('✅ '+o.empreiteiraRec.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel'));
+        return `<div style="font-size:8px;color:${cor};font-weight:700;margin-top:2px">${label} (${best.total||0}pts)</div>`;
+      })():''}
+    </td>
     <td style="padding:6px">${o.municipio||'—'}</td>
     <td style="padding:6px;text-align:center;font-family:monospace">${o.equipRef||o.equipRefAlt||'—'}${o.equipRefAlt&&!o.equipRef?'<span title="Equip. alternativo" style="color:#F59E0B;font-size:9px"> ⚠️alt</span>':''}</td>
     <td style="padding:6px;text-align:right">${parseFloat(o.usc||0).toFixed(1)}</td>
@@ -3882,6 +3929,7 @@ function cfFilaRow(o, idx){
         const mes=dataEst.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
         return `<div style="font-size:8px;color:#6366F1;margin-top:2px" title="Previsão de abertura na rodada ${o.rodadaEstimada}">📅 Prev: ${mes}</div>`;
       })():''}
+      ${o.bundlingRefNota?`<div style="font-size:8px;color:#10B981;margin-top:2px" title="Próxima a obra ${o.bundlingRefNota} — ${o.bundlingDist}km">🔗 Bundle c/ ${o.bundlingRefNota} (${o.bundlingDist}km)</div>`:''}
     </td>
     <td style="padding:6px;text-align:center;white-space:nowrap">
       ${o.status==='bloqueada'
@@ -3960,6 +4008,61 @@ window.cfLimparTudo = async function(){
   }catch(e){ toast('Erro: '+e.message,'err'); }
 };
 
+
+// ── Score detail modal ──────────────────────────────────────────────────────
+window.cfMostrarScore = function(id){
+  const o = _cfObras.find(o=>o.id===id);
+  if(!o||!o.scoreJSON) return;
+  const scores = JSON.parse(o.scoreJSON);
+
+  const rows = scores.map(s=>{
+    const zonaCor = s.zona==='livre'?'#22C55E':s.zona==='suave'?'#F59E0B':'#EF4444';
+    const zonaLabel = s.zona==='livre'?'✅ Livre':s.zona==='suave'?'⚠️ Suave':'🚫 Bloqueada';
+    const mesLabel = s.mesVenc?s.mesVenc.replace(/(\d{4})-(\d{2})/,'$2/$1'):'—';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 8px;font-weight:700">${s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:18px;font-weight:900;color:var(--accent)">${s.total}</td>
+      <td style="padding:6px 8px;text-align:center">${s.dist}</td>
+      <td style="padding:6px 8px;text-align:center">${s.eq}</td>
+      <td style="padding:6px 8px;text-align:center">${s.desl}</td>
+      <td style="padding:6px 8px;text-align:center">${mesLabel}</td>
+      <td style="padding:6px 8px;text-align:center;color:${zonaCor};font-weight:700">${zonaLabel}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:10px">${s.uscVenc||0} USC · ${s.notasVenc||0} notas</td>
+    </tr>`;
+  }).join('');
+
+  const prazo = parseInt(o.prazoExec)||120;
+  const hoje = new Date();
+  const venc = new Date(hoje.getTime()+prazo*24*3600*1000);
+  const mesVenc = venc.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+
+  const html=`<div id="cfScoreModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border-radius:16px;padding:24px;width:min(700px,96vw);max-height:90vh;overflow-y:auto">
+      <div style="font-weight:900;font-size:15px;margin-bottom:4px">📊 Análise de Score — Obra ${o.nota}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px">${o.municipio||'—'} · USC: ${o.usc} · Prazo: ${prazo}d → vence ${mesVenc}</div>
+      ${o.motivo?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px;padding:8px;background:var(--surface2);border-radius:8px">💡 ${o.motivo}</div>`:''}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:6px 8px;text-align:left">Empreiteira</th>
+            <th style="padding:6px 8px;text-align:center">Total</th>
+            <th style="padding:6px 8px;text-align:center">Dist.</th>
+            <th style="padding:6px 8px;text-align:center">Equil.</th>
+            <th style="padding:6px 8px;text-align:center">Desl.</th>
+            <th style="padding:6px 8px;text-align:center">Mês venc.</th>
+            <th style="padding:6px 8px;text-align:center">Zona</th>
+            <th style="padding:6px 8px;text-align:center">Carga mês</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="text-align:right;margin-top:16px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('cfScoreModal').remove()">Fechar</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+};
 window.cfBloquear = async function(id){
   const motivo = prompt('Motivo do bloqueio (opcional):');
   if(motivo===null) return; // cancelado
@@ -4120,6 +4223,195 @@ window.cfUploadExcel = async function(input){
 };
 
 // ── Executar seleção (placeholder — Fase 2) ──────────────────────
+
+
+// ── Otimização 2: Candidatos a Bundling (obras próximas não selecionadas) ────
+function cfCalcularBundling(selecionadas, excluidas, configCf){
+  const raio  = configCf.raioProx||10;
+  const candidatos = [];
+
+  selecionadas.forEach(sel=>{
+    const gpsSel = getEquipGPS(sel.equipRef)||(sel.equipRefAlt?getEquipGPS(sel.equipRefAlt):null);
+    if(!gpsSel) return;
+
+    excluidas.forEach(exc=>{
+      if(exc.bundlingRef) return; // já tem candidato
+      const gpsExc = getEquipGPS(exc.equipRef)||(exc.equipRefAlt?getEquipGPS(exc.equipRefAlt):null);
+      if(!gpsExc) return;
+      const dist = haversine(gpsSel.lat,gpsSel.lng,gpsExc.lat,gpsExc.lng);
+      if(dist<=raio){
+        candidatos.push({
+          idExcluida: exc.id, notaExcluida: exc.nota,
+          idSelecionada: sel.id, notaSelecionada: sel.nota,
+          distKm: dist.toFixed(1)
+        });
+        exc.bundlingDist = dist;
+        exc.bundlingRefNota = sel.nota;
+      }
+    });
+  });
+
+  return candidatos;
+}
+
+// ── Carteira Futura — Motor de Score por Empreiteira ──────────────────────
+
+// Haversine distance em km entre dois pontos GPS
+function haversine(lat1,lng1,lat2,lng2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Busca GPS de um equipamento na Base Equipamentos (window.equipDB)
+function getEquipGPS(equipRef){
+  if(!equipRef||!window.equipDB) return null;
+  const ref = String(equipRef).trim();
+  const eq = window.equipDB.find(e=>String(e.codigo||e.numero||e.equip||'').trim()===ref
+    || String(e.id||'').trim()===ref);
+  if(!eq) return null;
+  const lat = parseFloat(eq.lat||eq.latitude||eq.LAT||0);
+  const lng = parseFloat(eq.lng||eq.longitude||eq.long||eq.LNG||0);
+  return (lat&&lng) ? {lat,lng} : null;
+}
+
+// Multiplicador de carga futura (dual: USC + notas)
+function calcMultiplicadorCarga(emp, mesVencimento, configCf){
+  // obras ativas dessa empreiteira vencendo no mês M
+  const [ano,mes] = mesVencimento.split('-').map(Number);
+  // Programas grandes excluídos da análise de capacidade mensal:
+  // PODI e Mono-Tri consomem muito USC e distorceriam os limites
+  const PROGRAMAS_EXCLUIR_CAPACIDADE = ['PODI','Mono-Tri'];
+
+  const ativas = obras.filter(o=>{
+    if((o.empreiteira||'').toUpperCase()!==emp.toUpperCase()) return false;
+    if(o.armazenado||o.cancelado) return false; // já concluída
+    if(!o.dataLimite) return false;
+    if(PROGRAMAS_EXCLUIR_CAPACIDADE.includes(o.programa)) return false; // exclui obras grandes
+    const [oa,om] = o.dataLimite.split('-').map(Number);
+    return oa===ano && om===mes;
+  });
+  const uscVenc   = ativas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const notasVenc = ativas.length;
+
+  const isCS = emp.toUpperCase().includes('CS');
+  const limUSC   = isCS ? (configCf.limiteUscMesCS||2000)   : (configCf.limiteUscMesEL||2000);
+  const limNotas = isCS ? (configCf.limiteNotasMesCS||25)   : (configCf.limiteNotasMesEL||22);
+
+  const ratioUSC   = limUSC   > 0 ? uscVenc   / limUSC   : 0;
+  const ratioNotas = limNotas > 0 ? notasVenc / limNotas  : 0;
+  const ratioMax   = Math.max(ratioUSC, ratioNotas); // pior dos dois eixos
+
+  let mult;
+  if(ratioMax < 0.75)        mult = 1.0;
+  else if(ratioMax <= 1.25)  mult = 1 - (ratioMax - 0.75) / 0.5;
+  else                        mult = 0.0;
+
+  return {
+    mult: Math.max(0, Math.min(1, mult)),
+    uscVenc, notasVenc, ratioUSC, ratioNotas,
+    zona: ratioMax<0.75?'livre':ratioMax<=1.25?'suave':'bloqueada'
+  };
+}
+
+// Score de distância híbrido (mínima + mediana ponderadas)
+function calcScoreDist(gpsCandidata, emp, raio, alfa){
+  if(!gpsCandidata) return 0.3; // sem GPS, score neutro
+  const obrasEmp = obras.filter(o=>(o.empreiteira||'').toUpperCase()===emp.toUpperCase()
+    && !o.armazenado && !o.cancelado);
+  const dists = obrasEmp.map(o=>{
+    const gps = getEquipGPS(o.equipamentoRef||o.equipRef);
+    if(!gps) return null;
+    return haversine(gpsCandidata.lat,gpsCandidata.lng,gps.lat,gps.lng);
+  }).filter(d=>d!==null).sort((a,b)=>a-b);
+  if(!dists.length) return 0.2;
+  const dMin = dists[0];
+  const dMed = dists[Math.floor(dists.length/2)];
+  const dMinN  = Math.min(dMin/raio, 1);
+  const dMedN  = Math.min(dMed/raio, 1);
+  return alfa*(1-dMinN) + (1-alfa)*(1-dMedN);
+}
+
+// Score de equilíbrio (carga atual vs meta)
+function calcScoreEquil(emp, metaObras){
+  const ativas = obras.filter(o=>(o.empreiteira||'').toUpperCase()===emp.toUpperCase()
+    && !o.armazenado && !o.cancelado).length;
+  return Math.max(0, 1 - ativas/metaObras);
+}
+
+// Score de desligamento (chave de abertura compartilhada)
+function calcScoreDesl(equipRef, emp){
+  const desl = window._deslMap || {};
+  for(const oNum of Object.keys(desl)){
+    const entry = desl[oNum];
+    if((entry.empreiteira||'').toUpperCase()===emp.toUpperCase()){
+      // Busca GPS do desligamento e compara chave
+      const obraDesl = obras.find(o=>o.numero?.toString()===oNum);
+      if(obraDesl && (obraDesl.equipamentoRef||'').toString()===equipRef?.toString()) return 1.0;
+    }
+  }
+  // Verifica também nos desligamentos importados pelo equipRef
+  for(const [oNum, entry] of Object.entries(desl)){
+    if((entry.equipRef||'').toString()===equipRef?.toString()) return 0.5; // mesmo trecho, bonus parcial
+  }
+  return 0;
+}
+
+// Score total por empreiteira para uma obra candidata
+function calcScoreEmpreiteira(obracf, emp, configCf){
+  const raio  = configCf.raioProx||10;
+  const alfa  = configCf.alfaProximidade||0.6;
+  const pDist = (configCf.pesoDistancia||40)/100;
+  const pEq   = (configCf.pesoEquilibrio||40)/100;
+  const pDesl = (configCf.pesoDesligamento||20)/100;
+  const isCS  = emp.toUpperCase().includes('CS');
+  const meta  = isCS ? (configCf.metaObrasCS||150) : (configCf.metaObrasEL||130);
+
+  // Calcula mês de vencimento da obra
+  const hoje = new Date();
+  const prazo = parseInt(obracf.prazoExec)||120;
+  const venc  = new Date(hoje.getTime() + prazo*24*3600*1000);
+  const mesVenc = `${venc.getFullYear()}-${String(venc.getMonth()+1).padStart(2,'0')}`;
+
+  const gps    = getEquipGPS(obracf.equipRef) || (obracf.equipRefAlt ? getEquipGPS(obracf.equipRefAlt) : null);
+  const sDist  = calcScoreDist(gps, emp, raio, alfa);
+  const sEq    = calcScoreEquil(emp, meta);
+  const sDesl  = calcScoreDesl(obracf.equipRef, emp);
+  const carga  = calcMultiplicadorCarga(emp, mesVenc, configCf);
+
+  const scoreBruto = pDist*sDist + pEq*sEq + pDesl*sDesl;
+  const scoreFinal = scoreBruto * carga.mult;
+
+  return {
+    emp, scoreFinal: Math.round(scoreFinal*100),
+    detalhes: {
+      dist:  Math.round(sDist*pDist*100),
+      equil: Math.round(sEq*pEq*100),
+      desl:  Math.round(sDesl*pDesl*100),
+    },
+    carga, mesVenc
+  };
+}
+
+// Recomenda empreiteira para uma obra da fila
+function cfRecomendarEmpreiteira(obracf, configCf){
+  const empreiteiras = ['CS ELETRICIDADE','ELETELSUL'];
+  const scores = empreiteiras.map(e=>calcScoreEmpreiteira(obracf,e,configCf));
+  scores.sort((a,b)=>b.scoreFinal-a.scoreFinal);
+
+  const melhor = scores[0];
+  const adiar  = scores.every(s=>s.carga.zona==='bloqueada');
+
+  return {
+    recomendada: adiar ? null : melhor.emp,
+    adiar,
+    scores,
+    motivo: adiar
+      ? 'Ambas empreiteiras sobrecarregadas no mês de vencimento'
+      : `Maior score: dist+${melhor.detalhes.dist} eq+${melhor.detalhes.equil} desl+${melhor.detalhes.desl}`
+  };
+}
+
 window.cfRunSelecao = async function(){
   await cfLoadConfig();
   const limObras = parseInt(_cfConfig.limiteObras)||35;
@@ -4166,26 +4458,62 @@ window.cfRunSelecao = async function(){
     rodadaNum++;
   }
 
+  // ── Calcula score e recomendação por empreiteira ───────────────────
+  toast('⏳ Calculando scores e recomendações...','ok');
+  selRodada1.forEach(o=>{
+    if(!o.forcado){
+      const rec = cfRecomendarEmpreiteira(o, _cfConfig);
+      o.empreiteiraRec = rec.recomendada;
+      o.adiar          = rec.adiar;
+      o.scoreJSON      = JSON.stringify(rec.scores.map(s=>({
+        emp:s.emp, total:s.scoreFinal,
+        dist:s.detalhes.dist, eq:s.detalhes.equil, desl:s.detalhes.desl,
+        zona:s.carga.zona, uscVenc:s.carga.uscVenc, notasVenc:s.carga.notasVenc,
+        mesVenc:s.mesVenc
+      })));
+      o.motivo = rec.motivo;
+    }
+  });
+
   // ── Atualiza Firestore em batch ───────────────────────────────────
-  toast('⏳ Calculando e salvando seleção...','ok');
+  toast('⏳ Salvando seleção...','ok');
   const allToUpdate = [...selRodada1, ...excluidas];
-  // Batch de 500 max
   for(let i=0;i<allToUpdate.length;i+=400){
     const bch = writeBatch(db);
     allToUpdate.slice(i,i+400).forEach(o=>{
       const isSel = o.rodadaEstimada===1;
       bch.update(doc(db,'carteira_futura',o.id),{
-        selecionada: isSel,
-        rodadaEstimada: o.rodadaEstimada||null
+        selecionada:      isSel,
+        rodadaEstimada:   o.rodadaEstimada||null,
+        empreiteiraRec:   o.empreiteiraRec||null,
+        adiar:            o.adiar||false,
+        scoreJSON:        o.scoreJSON||null,
+        motivo:           o.motivo||null
       });
     });
     await bch.commit();
   }
 
+  // ── Calcula bundling (excluídas próximas de selecionadas) ──────────
+  const bundlingCandidatos = cfCalcularBundling(selRodada1, excluidas, _cfConfig);
+  if(bundlingCandidatos.length){
+    const bchB = writeBatch(db);
+    bundlingCandidatos.forEach(b=>{
+      bchB.update(doc(db,'carteira_futura',b.idExcluida),{
+        bundlingDist: parseFloat(b.distKm), bundlingRefNota: b.notaSelecionada
+      });
+    });
+    await bchB.commit();
+  }
+
   // ── Atualiza estado local ──────────────────────────────────────────
   const rodadaMap={};
-  allToUpdate.forEach(o=>{ rodadaMap[o.id]={selecionada:o.rodadaEstimada===1, rodadaEstimada:o.rodadaEstimada}; });
-  _cfObras.forEach(o=>{ if(rodadaMap[o.id]){ Object.assign(o,rodadaMap[o.id]); } });
+  allToUpdate.forEach(o=>{ rodadaMap[o.id]={selecionada:o.rodadaEstimada===1, rodadaEstimada:o.rodadaEstimada,
+    empreiteiraRec:o.empreiteiraRec||null, adiar:o.adiar||false, scoreJSON:o.scoreJSON||null, motivo:o.motivo||null}; });
+  _cfObras.forEach(o=>{ if(rodadaMap[o.id]){ Object.assign(o,rodadaMap[o.id]); }
+    const bc = bundlingCandidatos.find(b=>b.idExcluida===o.id);
+    if(bc){ o.bundlingDist=parseFloat(bc.distKm); o.bundlingRefNota=bc.notaSelecionada; }
+  });
 
   cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
 
@@ -4210,6 +4538,16 @@ window.cfModalAbrirObra = function(id){
             <option value="ODI">ODI — Obra de Incentivo</option>
           </select>
         </div>
+        <div class="fg">
+          <label>Empreiteira</label>
+          <select id="cfEmpAbertura" style="font-size:13px">
+            <option value="">-- Selecionar --</option>
+            <option value="CS ELETRICIDADE" ${o.empreiteiraRec==='CS ELETRICIDADE'?'selected':''}>CS Eletricidade${o.empreiteiraRec==='CS ELETRICIDADE'?' ⭐ (recomendada)':''}</option>
+            <option value="ELETELSUL" ${o.empreiteiraRec==='ELETELSUL'?'selected':''}>Eletelsul${o.empreiteiraRec==='ELETELSUL'?' ⭐ (recomendada)':''}</option>
+          </select>
+          ${o.motivo?`<div style="font-size:9px;color:var(--muted);margin-top:3px">${o.motivo}</div>`:''}
+          ${o.adiar?`<div style="font-size:9px;color:#EF4444;margin-top:3px">⚠️ Sistema recomenda ADIAR — ambas empreiteiras sobrecarregadas no mês de vencimento</div>`:''}
+        </div>
         <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
           <button class="btn btn-secondary btn-sm" onclick="document.getElementById('cfModalAbrir').remove()">Cancelar</button>
           <button class="btn btn-primary btn-sm" onclick="cfConfirmarAbrirObra('${id}')">Pré-preencher Modal</button>
@@ -4231,7 +4569,8 @@ window.cfConfirmarAbrirObra = async function(id){
   // Navega para Obras e abre modal de NOVA obra pré-preenchido
   window.showPage('pgObras');
   // Salva dados no window para pré-preencher o modal após navegação
-  window._cfPreFill = {numero:o.nota, tipo, cidade:o.municipio, uscPrevisto:o.usc, ulvPrevisto:o.ulv||0, equipamentoRef:o.equipRef, prazoExec:o.prazoExec};
+  const empAbrir = document.getElementById('cfEmpAbertura')?.value||o.empreiteiraRec||'';
+  window._cfPreFill = {numero:o.nota, tipo, empreiteira:empAbrir, cidade:o.municipio, uscPrevisto:o.usc, ulvPrevisto:o.ulv||0, equipamentoRef:o.equipRef, prazoExec:o.prazoExec};
   setTimeout(()=>{
     // Abre o modal de nova obra (mesmo botão "+ Nova Obra")
     if(typeof openObraModal==='function') openObraModal();
