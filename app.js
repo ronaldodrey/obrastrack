@@ -3588,6 +3588,7 @@ function renderCarteiraFutura(){
           <input type="file" accept=".xlsx,.xls" style="display:none" onchange="cfUploadExcel(this)">
         </label>
         <button class="btn btn-secondary btn-sm" onclick="cfRunSelecao()">🎯 Executar Seleção</button>
+        <button class="btn btn-secondary btn-sm" style="color:#EF4444;border-color:#EF444455" onclick="cfLimparTudo()">🗑️ Limpar Tudo</button>
         <span id="cfContador" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
       </div>
 
@@ -3744,13 +3745,15 @@ function cfRenderEstatisticas(){
   const selecionadas = filaAtiva.filter(o=>o.selecionada);
   const uscTotal  = filaAtiva.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
 
-  // Por município
-  const porMun = {};
+  // Por município — contagem e USC
+  const porMunObj = {};
   filaAtiva.forEach(o=>{
     const m = o.municipio||'—';
-    porMun[m] = (porMun[m]||0) + 1;
+    if(!porMunObj[m]) porMunObj[m] = {count:0, usc:0};
+    porMunObj[m].count++;
+    porMunObj[m].usc += parseFloat(o.usc)||0;
   });
-  const topMun = Object.entries(porMun).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const porMunUSC = Object.entries(porMunObj).sort((a,b)=>b[1].usc-a[1].usc);
 
   cont.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px">
@@ -3762,11 +3765,26 @@ function cfRenderEstatisticas(){
     </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px">
       <div style="font-size:10px;font-weight:700;margin-bottom:8px;color:var(--muted)">POR MUNICÍPIO</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${topMun.map(([m,n])=>`
-          <span style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
-            padding:3px 10px;font-size:10px"><strong>${n}</strong> ${m}</span>`).join('')}
-        ${Object.keys(porMun).length>6?`<span style="font-size:10px;color:var(--muted);align-self:center">+${Object.keys(porMun).length-6} municípios</span>`:''}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:5px 8px;text-align:left">Município</th>
+            <th style="padding:5px 8px;text-align:center">Notas</th>
+            <th style="padding:5px 8px;text-align:right">USC Total</th>
+          </tr></thead>
+          <tbody>${porMunUSC.map(([m,dados])=>`
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:4px 8px">${m}</td>
+              <td style="padding:4px 8px;text-align:center;font-weight:700">${dados.count}</td>
+              <td style="padding:4px 8px;text-align:right">${dados.usc.toFixed(1)}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot><tr style="background:var(--surface2);font-weight:700">
+            <td style="padding:5px 8px">TOTAL</td>
+            <td style="padding:5px 8px;text-align:center">${filaAtiva.length}</td>
+            <td style="padding:5px 8px;text-align:right">${uscTotal.toFixed(1)}</td>
+          </tr></tfoot>
+        </table>
       </div>
     </div>`;
 }
@@ -3919,6 +3937,23 @@ async function cfSavePosicoes(){
 }
 
 // ── Bloquear / Desbloquear / Forçar ─────────────────────────────
+
+// ── Limpar toda a fila em massa ────────────────────────────────────────────
+window.cfLimparTudo = async function(){
+  const n = _cfObras.length;
+  if(!n){ toast('A fila já está vazia.','warn'); return; }
+  if(!confirm('Excluir TODAS as '+n+' obras da fila? Esta ação não pode ser desfeita.')) return;
+  try{
+    toast('Excluindo...','ok');
+    const batch = writeBatch(db);
+    _cfObras.forEach(o=>{ batch.delete(doc(db,'carteira_futura',o.id)); });
+    await batch.commit();
+    _cfObras = [];
+    cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+    toast('Fila limpa com sucesso.','ok');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
 window.cfBloquear = async function(id){
   const motivo = prompt('Motivo do bloqueio (opcional):');
   if(motivo===null) return; // cancelado
@@ -4129,11 +4164,30 @@ window.cfConfirmarAbrirObra = async function(id){
     if(window._cfPreFill){
       const pf = window._cfPreFill;
       const g = id => document.getElementById(id);
-      if(g('oNumero'))    g('oNumero').value    = pf.numero||'';
-      if(g('oTipo'))      g('oTipo').value       = pf.tipo||'R1';
-      if(g('oCidade'))    g('oCidade').value     = pf.cidade||'';
-      if(g('oUSCPrev'))   g('oUSCPrev').value    = pf.uscPrevisto||'';
-      if(g('oEquipRef'))  g('oEquipRef').value   = pf.equipamentoRef||'';
+      // IDs reais do modal de nova obra
+      if(g('oNum'))       g('oNum').value       = pf.numero||'';
+      if(g('oTipo'))      { g('oTipo').value    = pf.tipo||'R1'; g('oTipo').dispatchEvent(new Event('change')); }
+      if(g('oUSC'))       g('oUSC').value       = pf.uscPrevisto||'';
+      if(g('oEquipRef'))  g('oEquipRef').value  = pf.equipamentoRef||'';
+      // Cidade: é um <select>, busca a opção mais próxima
+      if(g('oCidade') && pf.cidade){
+        const opts = [...g('oCidade').options];
+        const match = opts.find(o=>o.value.toUpperCase()===pf.cidade.toUpperCase())
+          || opts.find(o=>o.value.toUpperCase().includes(pf.cidade.toUpperCase()));
+        if(match) g('oCidade').value = match.value;
+      }
+      // Prazo: seleciona opção ou coloca no campo customizado
+      if(g('oPrazoOpcao') && pf.prazoExec){
+        const p = parseInt(pf.prazoExec);
+        const opcs = [...g('oPrazoOpcao').options];
+        const pm = opcs.find(o=>parseInt(o.value)===p);
+        if(pm){ g('oPrazoOpcao').value=pm.value; }
+        else {
+          g('oPrazoOpcao').value='outro';
+          if(g('oPrazo')) g('oPrazo').value = p;
+        }
+        g('oPrazoOpcao').dispatchEvent(new Event('change'));
+      }
       window._cfPreFill = null;
     }
     toast('✓ Obra '+o.nota+' pré-preenchida. Revise e confirme os demais campos.','ok');
