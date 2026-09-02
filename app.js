@@ -3876,6 +3876,12 @@ function cfFilaRow(o, idx){
     <td style="padding:6px;text-align:center">
       ${cfStatusBadge(o)}
       ${o.status==='bloqueada'&&o.motivoBloqueio?`<div style="font-size:8px;color:#EF4444;margin-top:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.motivoBloqueio}">📋 ${o.motivoBloqueio}</div>`:''}
+      ${!o.selecionada&&o.rodadaEstimada&&o.rodadaEstimada>1?(()=>{
+        const hoje=new Date();
+        const dataEst=new Date(hoje.getFullYear(),hoje.getMonth()+(o.rodadaEstimada-1),1);
+        const mes=dataEst.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
+        return `<div style="font-size:8px;color:#6366F1;margin-top:2px" title="Previsão de abertura na rodada ${o.rodadaEstimada}">📅 Prev: ${mes}</div>`;
+      })():''}
     </td>
     <td style="padding:6px;text-align:center;white-space:nowrap">
       ${o.status==='bloqueada'
@@ -4114,8 +4120,77 @@ window.cfUploadExcel = async function(input){
 };
 
 // ── Executar seleção (placeholder — Fase 2) ──────────────────────
-window.cfRunSelecao = function(){
-  toast('⏳ Algoritmo de seleção será implementado na Fase 2.','warn');
+window.cfRunSelecao = async function(){
+  await cfLoadConfig();
+  const limObras = parseInt(_cfConfig.limiteObras)||35;
+  const limUSC   = parseFloat(_cfConfig.limiteUSC)||5000;
+
+  // Fila ativa em ordem de posição (sem abertas e sem bloqueadas)
+  const forcadas  = _cfObras.filter(o=>o.forcado && o.status!=='bloqueada' && o.status!=='aberta');
+  const regulares = _cfObras.filter(o=>!o.forcado && o.status!=='bloqueada' && o.status!=='aberta')
+                             .sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+
+  const uscForcado = forcadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  let capObras = limObras - forcadas.length;
+  let capUSC   = limUSC   - uscForcado;
+
+  // ── Seleciona obras dentro dos limites ──────────────────────────
+  const selRodada1 = [...forcadas.map(o=>({...o, rodadaEstimada:1}))];
+  const excluidas  = [];
+
+  regulares.forEach(o=>{
+    const u = parseFloat(o.usc)||0;
+    if(capObras>0 && capUSC-u >= -0.01){
+      selRodada1.push({...o, rodadaEstimada:1});
+      capObras--; capUSC-=u;
+    } else { excluidas.push(o); }
+  });
+
+  // ── Forecast para excluídas (1 rodada/mês) ───────────────────────
+  // Capacidade por rodada futura (as forçadas entram sempre, mas vamos assumir mesma configuração)
+  const capObrasRodada = limObras;
+  const capUSCRodada   = limUSC;
+  let restantes = [...excluidas];
+  let rodadaNum = 2;
+  const maxRodadas = 36; // até 3 anos
+
+  while(restantes.length>0 && rodadaNum<=maxRodadas){
+    let cO=capObrasRodada, cU=capUSCRodada;
+    const proxRestantes=[];
+    restantes.forEach(o=>{
+      const u=parseFloat(o.usc)||0;
+      if(cO>0 && cU-u>=-0.01){ o.rodadaEstimada=rodadaNum; cO--; cU-=u; }
+      else { o.rodadaEstimada=null; proxRestantes.push(o); }
+    });
+    restantes=proxRestantes;
+    rodadaNum++;
+  }
+
+  // ── Atualiza Firestore em batch ───────────────────────────────────
+  toast('⏳ Calculando e salvando seleção...','ok');
+  const allToUpdate = [...selRodada1, ...excluidas];
+  // Batch de 500 max
+  for(let i=0;i<allToUpdate.length;i+=400){
+    const bch = writeBatch(db);
+    allToUpdate.slice(i,i+400).forEach(o=>{
+      const isSel = o.rodadaEstimada===1;
+      bch.update(doc(db,'carteira_futura',o.id),{
+        selecionada: isSel,
+        rodadaEstimada: o.rodadaEstimada||null
+      });
+    });
+    await bch.commit();
+  }
+
+  // ── Atualiza estado local ──────────────────────────────────────────
+  const rodadaMap={};
+  allToUpdate.forEach(o=>{ rodadaMap[o.id]={selecionada:o.rodadaEstimada===1, rodadaEstimada:o.rodadaEstimada}; });
+  _cfObras.forEach(o=>{ if(rodadaMap[o.id]){ Object.assign(o,rodadaMap[o.id]); } });
+
+  cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+
+  const uscSel = selRodada1.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  toast(`✓ Seleção: ${selRodada1.length} obras · ${uscSel.toFixed(0)} USC. ${excluidas.length} obras com previsão de abertura calculada.`,'ok');
 };
 
 // ── Abrir como Obra (modal) ──────────────────────────────────────
@@ -4156,7 +4231,7 @@ window.cfConfirmarAbrirObra = async function(id){
   // Navega para Obras e abre modal de NOVA obra pré-preenchido
   window.showPage('pgObras');
   // Salva dados no window para pré-preencher o modal após navegação
-  window._cfPreFill = {numero:o.nota, tipo, cidade:o.municipio, uscPrevisto:o.usc, equipamentoRef:o.equipRef};
+  window._cfPreFill = {numero:o.nota, tipo, cidade:o.municipio, uscPrevisto:o.usc, ulvPrevisto:o.ulv||0, equipamentoRef:o.equipRef, prazoExec:o.prazoExec};
   setTimeout(()=>{
     // Abre o modal de nova obra (mesmo botão "+ Nova Obra")
     if(typeof openObraModal==='function') openObraModal();
@@ -4168,6 +4243,7 @@ window.cfConfirmarAbrirObra = async function(id){
       if(g('oNum'))       g('oNum').value       = pf.numero||'';
       if(g('oTipo'))      { g('oTipo').value    = pf.tipo||'R1'; g('oTipo').dispatchEvent(new Event('change')); }
       if(g('oUSC'))       g('oUSC').value       = pf.uscPrevisto||'';
+      if(g('oULV'))       g('oULV').value       = pf.ulvPrevisto||'';
       if(g('oEquipRef'))  g('oEquipRef').value  = pf.equipamentoRef||'';
       // Cidade: é um <select>, busca a opção mais próxima
       if(g('oCidade') && pf.cidade){
