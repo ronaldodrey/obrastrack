@@ -3737,16 +3737,16 @@ function cfRenderConfig(){
 function cfRenderEstatisticas(){
   const cont = document.getElementById('cfEstatisticas');
   if(!cont) return;
-  const ativas    = _cfObras.filter(o=>o.status!=='bloqueada'&&o.status!=='aberta');
-  const bloqueadas= _cfObras.filter(o=>o.status==='bloqueada');
-  const forcadas  = _cfObras.filter(o=>o.status==='forcada');
-  const selecionadas = _cfObras.filter(o=>o.selecionada);
-  const uscTotal  = _cfObras.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-  const uscSel    = selecionadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const filaAtiva = _cfObras.filter(o=>o.status!=='aberta');
+  const ativas    = filaAtiva.filter(o=>o.status!=='bloqueada');
+  const bloqueadas= filaAtiva.filter(o=>o.status==='bloqueada');
+  const forcadas  = filaAtiva.filter(o=>o.status==='forcada');
+  const selecionadas = filaAtiva.filter(o=>o.selecionada);
+  const uscTotal  = filaAtiva.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
 
   // Por município
   const porMun = {};
-  _cfObras.filter(o=>o.status!=='aberta').forEach(o=>{
+  filaAtiva.forEach(o=>{
     const m = o.municipio||'—';
     porMun[m] = (porMun[m]||0) + 1;
   });
@@ -3758,7 +3758,7 @@ function cfRenderEstatisticas(){
       ${cfKpi('USC Total', uscTotal.toFixed(0),'#3B82F6')}
       ${cfKpi('Bloqueadas', bloqueadas.length,'#EF4444')}
       ${cfKpi('Forçadas', forcadas.length,'#F59E0B')}
-      ${cfKpi('Selecionadas', selecionadas.length+' / '+uscSel.toFixed(0)+' USC', '#22C55E')}
+      ${cfKpi('Selecionadas', selecionadas.length+' / '+selecionadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0)+' USC', '#22C55E')}
     </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px">
       <div style="font-size:10px;font-weight:700;margin-bottom:8px;color:var(--muted)">POR MUNICÍPIO</div>
@@ -3836,9 +3836,9 @@ function cfFilaRow(o, idx){
     : o.selecionada ? 'background:rgba(34,197,94,.05)'
     : o.status==='forcada'||o.forcado ? 'background:rgba(245,158,11,.05)'
     : '';
-  const motivo = o.motivoBloqueio ? `title="${o.motivoBloqueio}"` : '';
   return `<tr draggable="true" data-id="${o.id}" data-pos="${o.posicao}"
-    style="border-bottom:1px solid var(--border);${rowBg};cursor:move" ${motivo}
+    style="border-bottom:1px solid var(--border);${rowBg};cursor:move"
+    title="${o.motivoBloqueio?'🔒 Bloqueio: '+o.motivoBloqueio:''}"  
     ondragstart="cfDragStart(event)" ondragover="cfDragOver(event)" ondrop="cfDrop(event)"
     ondragleave="cfDragLeave(event)">
     <td style="padding:6px;text-align:center;color:var(--muted);cursor:grab">☰</td>
@@ -3855,7 +3855,10 @@ function cfFilaRow(o, idx){
       if(us){ const y=us[3].length===2?'20'+us[3]:us[3]; return fmtTxt(y+'-'+us[1].padStart(2,'0')+'-'+us[2].padStart(2,'0')); }
       return fmtTxt(s);
     })():'—'}</td>
-    <td style="padding:6px;text-align:center">${cfStatusBadge(o)}</td>
+    <td style="padding:6px;text-align:center">
+      ${cfStatusBadge(o)}
+      ${o.status==='bloqueada'&&o.motivoBloqueio?`<div style="font-size:8px;color:#EF4444;margin-top:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.motivoBloqueio}">📋 ${o.motivoBloqueio}</div>`:''}
+    </td>
     <td style="padding:6px;text-align:center;white-space:nowrap">
       ${o.status==='bloqueada'
         ? `<button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border)" onclick="cfDesbloquear('${o.id}')">🔓 Desbloquear</button>`
@@ -4111,28 +4114,30 @@ window.cfConfirmarAbrirObra = async function(id){
   const tipo = document.getElementById('cfTipoAbertura')?.value||'R1';
   document.getElementById('cfModalAbrir')?.remove();
   if(!o) return;
-  // Marca como aberta
+  // Marca como aberta na Carteira Futura
   await updateDoc(doc(db,'carteira_futura',id),{status:'aberta',tipoAbertura:tipo});
   o.status='aberta'; o.tipoAbertura=tipo;
-  // Abre o modal de nova obra pré-preenchido
-  if(typeof abrirNovaObra==='function'){
-    abrirNovaObra({
-      numero:o.nota, tipo, cidade:o.municipio,
-      uscPrevisto:o.usc, equipamentoRef:o.equipRef,
-      prazoExec:o.prazoExec, origemCarteiraId:o.id
-    });
-  } else {
-    // Navega para Obras e abre modal
-    window.showPage('pgObras');
-    setTimeout(()=>{
-      if(typeof window.openNewObraModal==='function') window.openNewObraModal({
-        numero:o.nota, tipo, cidade:o.municipio,
-        uscPrevisto:o.usc, equipamentoRef:o.equipRef
-      });
-    },600);
-  }
   cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
-  toast(`✓ Obra ${o.nota} marcada como aberta. Tipo: ${tipo}`,'ok');
+  // Navega para Obras e abre modal de NOVA obra pré-preenchido
+  window.showPage('pgObras');
+  // Salva dados no window para pré-preencher o modal após navegação
+  window._cfPreFill = {numero:o.nota, tipo, cidade:o.municipio, uscPrevisto:o.usc, equipamentoRef:o.equipRef};
+  setTimeout(()=>{
+    // Abre o modal de nova obra (mesmo botão "+ Nova Obra")
+    if(typeof openObraModal==='function') openObraModal();
+    // Pré-preenche campos se possível
+    if(window._cfPreFill){
+      const pf = window._cfPreFill;
+      const g = id => document.getElementById(id);
+      if(g('oNumero'))    g('oNumero').value    = pf.numero||'';
+      if(g('oTipo'))      g('oTipo').value       = pf.tipo||'R1';
+      if(g('oCidade'))    g('oCidade').value     = pf.cidade||'';
+      if(g('oUSCPrev'))   g('oUSCPrev').value    = pf.uscPrevisto||'';
+      if(g('oEquipRef'))  g('oEquipRef').value   = pf.equipamentoRef||'';
+      window._cfPreFill = null;
+    }
+    toast('✓ Obra '+o.nota+' pré-preenchida. Revise e confirme os demais campos.','ok');
+  },500);
 };
 
 
