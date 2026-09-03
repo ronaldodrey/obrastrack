@@ -3649,10 +3649,12 @@ window.cfSaveConfig = async function(){
     limiteUSC:      parseFloat(g('cfLimUSC'))||5000,
     raioProx:          parseFloat(g('cfRaioProx'))||10,
     alfaProximidade:   parseFloat(g('cfAlfa'))||0.6,
-    limiteUscMesCS:    parseFloat(g('cfLimUscMesCS'))||2000,
-    limiteNotasMesCS:  parseFloat(g('cfLimNotasMesCS'))||25,
-    limiteUscMesEL:    parseFloat(g('cfLimUscMesEL'))||2000,
-    limiteNotasMesEL:  parseFloat(g('cfLimNotasMesEL'))||22,
+    capacidadeBaseUSC_CS: parseFloat(g('cfCapBaseCS'))||2000,
+    capacidadeBaseUSC_EL: parseFloat(g('cfCapBaseEL'))||2000,
+    limiteAtrasadas_CS:   parseFloat(g('cfLimAtrCS'))||20,
+    limiteAtrasadas_EL:   parseFloat(g('cfLimAtrEL'))||20,
+    fatoresSazonais_CS: {m2:parseFloat(g('cfFatorCSm2'))||0.85,m3:parseFloat(g('cfFatorCSm3'))||0.85,m4:parseFloat(g('cfFatorCSm4'))||0.9,m5:parseFloat(g('cfFatorCSm5'))||1.0,m6:parseFloat(g('cfFatorCSm6'))||1.0,m7:parseFloat(g('cfFatorCSm7'))||0.95,m8:parseFloat(g('cfFatorCSm8'))||0.9,m9:parseFloat(g('cfFatorCSm9'))||1.05,m10:parseFloat(g('cfFatorCSm10'))||1.05,m11:parseFloat(g('cfFatorCSm11'))||1.0,m12:parseFloat(g('cfFatorCSm12'))||1.0,m13:parseFloat(g('cfFatorCSm13'))||0.75},
+    fatoresSazonais_EL: {m2:parseFloat(g('cfFatorELm2'))||0.85,m3:parseFloat(g('cfFatorELm3'))||0.85,m4:parseFloat(g('cfFatorELm4'))||0.9,m5:parseFloat(g('cfFatorELm5'))||1.0,m6:parseFloat(g('cfFatorELm6'))||1.0,m7:parseFloat(g('cfFatorELm7'))||0.95,m8:parseFloat(g('cfFatorELm8'))||0.9,m9:parseFloat(g('cfFatorELm9'))||1.05,m10:parseFloat(g('cfFatorELm10'))||1.05,m11:parseFloat(g('cfFatorELm11'))||1.0,m12:parseFloat(g('cfFatorELm12'))||1.0,m13:parseFloat(g('cfFatorELm13'))||0.75},
     pesoDistancia:     parseFloat(g('cfPesoDist'))||40,
     pesoEquilibrio: parseFloat(g('cfPesoEq'))||40,
     pesoDesligamento: parseFloat(g('cfPesoDesl'))||20,
@@ -3744,27 +3746,31 @@ function cfRenderConfig(){
       </fieldset>
 
       <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
-        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Capacidade Mensal — CS</legend>
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — CS Eletricidade</legend>
         <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">USC máx/mês (obras ativas vencendo)</label>
-          <input type="number" id="cfLimUscMesCS" value="${c.limiteUscMesCS||2000}" style="font-size:12px">
+          <label style="font-size:10px">Capacidade base USC/mês</label>
+          <input type="number" id="cfCapBaseCS" value="${c.capacidadeBaseUSC_CS||2000}" style="font-size:12px">
         </div>
-        <div class="fg">
-          <label style="font-size:10px">Notas máx/mês (obras ativas vencendo)</label>
-          <input type="number" id="cfLimNotasMesCS" value="${c.limiteNotasMesCS||25}" style="font-size:12px">
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
+          <input type="number" id="cfLimAtrCS" value="${c.limiteAtrasadas_CS||20}" style="font-size:12px">
         </div>
+        <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorCSm1" value="${(c.fatoresSazonais_CS||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorCSm2" value="${(c.fatoresSazonais_CS||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorCSm3" value="${(c.fatoresSazonais_CS||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorCSm4" value="${(c.fatoresSazonais_CS||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorCSm5" value="${(c.fatoresSazonais_CS||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorCSm6" value="${(c.fatoresSazonais_CS||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorCSm7" value="${(c.fatoresSazonais_CS||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorCSm8" value="${(c.fatoresSazonais_CS||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorCSm9" value="${(c.fatoresSazonais_CS||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorCSm10" value="${(c.fatoresSazonais_CS||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorCSm11" value="${(c.fatoresSazonais_CS||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorCSm12" value="${(c.fatoresSazonais_CS||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
       </fieldset>
 
       <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
-        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Capacidade Mensal — Eletelsul</legend>
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — Eletelsul</legend>
         <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">USC máx/mês (obras ativas vencendo)</label>
-          <input type="number" id="cfLimUscMesEL" value="${c.limiteUscMesEL||2000}" style="font-size:12px">
+          <label style="font-size:10px">Capacidade base USC/mês</label>
+          <input type="number" id="cfCapBaseEL" value="${c.capacidadeBaseUSC_EL||2000}" style="font-size:12px">
         </div>
-        <div class="fg">
-          <label style="font-size:10px">Notas máx/mês (obras ativas vencendo)</label>
-          <input type="number" id="cfLimNotasMesEL" value="${c.limiteNotasMesEL||22}" style="font-size:12px">
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
+          <input type="number" id="cfLimAtrEL" value="${c.limiteAtrasadas_EL||20}" style="font-size:12px">
         </div>
+        <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorELm1" value="${(c.fatoresSazonais_EL||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorELm2" value="${(c.fatoresSazonais_EL||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorELm3" value="${(c.fatoresSazonais_EL||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorELm4" value="${(c.fatoresSazonais_EL||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorELm5" value="${(c.fatoresSazonais_EL||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorELm6" value="${(c.fatoresSazonais_EL||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorELm7" value="${(c.fatoresSazonais_EL||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorELm8" value="${(c.fatoresSazonais_EL||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorELm9" value="${(c.fatoresSazonais_EL||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorELm10" value="${(c.fatoresSazonais_EL||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorELm11" value="${(c.fatoresSazonais_EL||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorELm12" value="${(c.fatoresSazonais_EL||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
       </fieldset>
     </div>
     <button class="btn btn-primary btn-sm" onclick="cfSaveConfig()">💾 Salvar Configurações</button>
@@ -4027,7 +4033,11 @@ window.cfMostrarScore = function(id){
       <td style="padding:6px 8px;text-align:center">${s.desl}</td>
       <td style="padding:6px 8px;text-align:center">${mesLabel}</td>
       <td style="padding:6px 8px;text-align:center;color:${zonaCor};font-weight:700">${zonaLabel}</td>
-      <td style="padding:6px 8px;text-align:center;font-size:10px">${s.uscVenc||0} USC · ${s.notasVenc||0} notas</td>
+      <td style="padding:6px 8px;text-align:center;font-size:10px">
+        Backlog: ${s.backlogFinal||0} USC<br>
+        <span style="color:var(--muted)">${s.nAtrasadas||0} atrasadas · avg ${(s.avgUSC||0).toFixed(0)} USC/obra</span>
+        ${s.motivo?`<br><span style="color:#EF4444;font-size:9px">${s.motivo}</span>`:''}
+      </td>
     </tr>`;
   }).join('');
 
@@ -4275,43 +4285,48 @@ function getEquipGPS(equipRef){
   return (lat&&lng) ? {lat,lng} : null;
 }
 
-// Multiplicador de carga futura (dual: USC + notas)
-function calcMultiplicadorCarga(emp, mesVencimento, configCf){
-  // obras ativas dessa empreiteira vencendo no mês M
-  const [ano,mes] = mesVencimento.split('-').map(Number);
-  // Programas grandes excluídos da análise de capacidade mensal:
-  // PODI e Mono-Tri consomem muito USC e distorceriam os limites
-  const PROGRAMAS_EXCLUIR_CAPACIDADE = ['PODI','Mono-Tri'];
-
-  const ativas = obras.filter(o=>{
-    if((o.empreiteira||'').toUpperCase()!==emp.toUpperCase()) return false;
-    if(o.armazenado||o.cancelado) return false; // já concluída
-    if(!o.dataLimite) return false;
-    if(PROGRAMAS_EXCLUIR_CAPACIDADE.includes(o.programa)) return false; // exclui obras grandes
-    const [oa,om] = o.dataLimite.split('-').map(Number);
-    return oa===ano && om===mes;
-  });
-  const uscVenc   = ativas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-  const notasVenc = ativas.length;
-
+// ── Modelo de Backlog — calcula carga futura mês a mês ──────────────────────
+function calcBacklogScore(emp, mesVencimento, configCf){
   const isCS = emp.toUpperCase().includes('CS');
-  const limUSC   = isCS ? (configCf.limiteUscMesCS||2000)   : (configCf.limiteUscMesEL||2000);
-  const limNotas = isCS ? (configCf.limiteNotasMesCS||25)   : (configCf.limiteNotasMesEL||22);
-
-  const ratioUSC   = limUSC   > 0 ? uscVenc   / limUSC   : 0;
-  const ratioNotas = limNotas > 0 ? notasVenc / limNotas  : 0;
-  const ratioMax   = Math.max(ratioUSC, ratioNotas); // pior dos dois eixos
-
-  let mult;
-  if(ratioMax < 0.75)        mult = 1.0;
-  else if(ratioMax <= 1.25)  mult = 1 - (ratioMax - 0.75) / 0.5;
-  else                        mult = 0.0;
-
-  return {
-    mult: Math.max(0, Math.min(1, mult)),
-    uscVenc, notasVenc, ratioUSC, ratioNotas,
-    zona: ratioMax<0.75?'livre':ratioMax<=1.25?'suave':'bloqueada'
-  };
+  const EXCLUIR = ['PODI','Mono-Tri'];
+  const obrasAtivas = obras.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') &&
+    (o.empreiteira||'').toUpperCase()===emp.toUpperCase() &&
+    !o.conclusao && !o.armazenado && !o.cancelado &&
+    !EXCLUIR.includes(o.programa)
+  );
+  const backlogBase = obrasAtivas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const avgUSC = obrasAtivas.length>0 ? backlogBase/obrasAtivas.length : 0;
+  const hoje = (new Date()).toISOString().split('T')[0];
+  const nAtrasadas = obrasAtivas.filter(o=>o.dataLimite&&o.dataLimite<hoje).length;
+  const limAtr = isCS?(configCf.limiteAtrasadas_CS||20):(configCf.limiteAtrasadas_EL||20);
+  if(nAtrasadas>limAtr) return {zona:'bloqueada',score:0,backlogFinal:backlogBase,avgUSC,nAtrasadas,
+    motivo:`${nAtrasadas} obras atrasadas (limite: ${limAtr})`};
+  const capBase = isCS?(configCf.capacidadeBaseUSC_CS||2000):(configCf.capacidadeBaseUSC_EL||2000);
+  const fatores = isCS?(configCf.fatoresSazonais_CS||{}):(configCf.fatoresSazonais_EL||{});
+  const fator = m=>parseFloat(fatores['m'+m]||1.0);
+  const cfEntradas = typeof _cfObras!=='undefined'
+    ? _cfObras.filter(o=>o.selecionada&&(o.empreiteiraRec||'').toUpperCase()===emp.toUpperCase()) : [];
+  const dHoje=new Date(); let anoSim=dHoje.getFullYear(),mesSim=dHoje.getMonth()+1;
+  const [vAno,vMes]=mesVencimento.split('-').map(Number);
+  let backlog=backlogBase;
+  while(anoSim<vAno||(anoSim===vAno&&mesSim<=vMes)){
+    const capMes=capBase*fator(mesSim);
+    const entradas=cfEntradas.filter(o=>{
+      if(!o.dataEntrada) return false;
+      const[ea,em]=o.dataEntrada.split('-').map(Number); return ea===anoSim&&em===mesSim;
+    }).reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    backlog=Math.max(0,backlog-capMes)+entradas;
+    mesSim++; if(mesSim>12){mesSim=1;anoSim++;}
+  }
+  const capVenc=capBase*fator(vMes); const ratio=capVenc>0?backlog/capVenc:0;
+  let zona,score;
+  if(ratio<0.75){zona='livre';score=1.0;}
+  else if(ratio<=1.25){zona='suave';score=1-(ratio-0.75)/0.5;}
+  else{zona='bloqueada';score=0.0;}
+  return{zona,score:Math.max(0,Math.min(1,score)),ratio,backlogFinal:backlog,avgUSC,nAtrasadas,
+    motivo:zona==='bloqueada'?`Backlog ${backlog.toFixed(0)} USC no mês vencimento (>${(capVenc*1.25).toFixed(0)})`+
+      (nAtrasadas>0?` | ${nAtrasadas} atrasadas`:``):null};
 }
 
 // Score de distância híbrido (mínima + mediana ponderadas)
@@ -4377,17 +4392,27 @@ function calcScoreEmpreiteira(obracf, emp, configCf){
   const sDist  = calcScoreDist(gps, emp, raio, alfa);
   const sEq    = calcScoreEquil(emp, meta);
   const sDesl  = calcScoreDesl(obracf.equipRef, emp);
-  const carga  = calcMultiplicadorCarga(emp, mesVenc, configCf);
+  const carga  = calcBacklogScore(emp, mesVenc, configCf);
+  const pCarg  = (configCf.pesoDesligamento||20)/100; // reusa peso "desl" para carga no score
 
-  const scoreBruto = pDist*sDist + pEq*sEq + pDesl*sDesl;
-  const scoreFinal = scoreBruto * carga.mult;
+  // Score por fator — carga é componente separado (não multiplicador)
+  const sDistW  = pDist * sDist;
+  const sEqW    = pEq   * sEq;
+  const sDeslW  = (configCf.pesoDesligamento||20)/100 * sDesl;
+  const sCargW  = 0.25 * carga.score; // fator carga = 25% sempre
+
+  // Ajusta pesos restantes para 75% dos originais somarem com 25% de carga
+  const scoreBruto = sDistW*0.75 + sEqW*0.75 + sDeslW*0.75 + sCargW;
+  // Se bloqueada → score total zero
+  const scoreFinal = carga.zona==='bloqueada' ? 0 : scoreBruto;
 
   return {
     emp, scoreFinal: Math.round(scoreFinal*100),
     detalhes: {
-      dist:  Math.round(sDist*pDist*100),
-      equil: Math.round(sEq*pEq*100),
-      desl:  Math.round(sDesl*pDesl*100),
+      dist:  Math.round(sDistW*0.75*100),
+      equil: Math.round(sEqW*0.75*100),
+      desl:  Math.round(sDeslW*0.75*100),
+      carga: Math.round(sCargW*100),
     },
     carga, mesVenc
   };
