@@ -491,9 +491,12 @@ window.setDashPerspectiva = function(p){
 // ── Indicador de Execução — USC no prazo vs atrasada (D0 a D+7) ──────────
 function renderIndicadorExecucao(list){
   // Base: obras RD (!cancelado, !armazenado) com dataLimite definida
+  // Base: obras RD ativas, sem medida230 (230 = campo encerrado do ponto de vista executivo)
+  // e sem armazenamento, cancelamento
   const base = list.filter(o=>
     (o.tipo==='R1'||o.tipo==='R2') &&
     !o.cancelado && !o.armazenado && o.dataLimite &&
+    !o.medida230 &&           // exclui obras já com medida 230 informada
     (parseFloat(o.usc)||0) > 0
   );
   if(!base.length) return '';
@@ -513,20 +516,26 @@ function renderIndicadorExecucao(list){
 
   // Calcula indicador para cada dia D0..D+7
   // exclParalJust: true = paralisadas justificadas não entram como atrasadas
-  function calcIndicador(dataRef, exclParalJust){
+  function calcIndicador(dataRef, exclParalJust, prevDataRef){
     const atrasadas = base.filter(o=>{
       if(o.dataLimite>=dataRef || o.conclusao) return false;
-      // Paralisada justificada → exclui se toggle ligado
       if(exclParalJust && isParalJustificada(o, dataRef)) return false;
       return true;
     });
     const uscAtrasadas = atrasadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
     const uscNoPrazo   = uscTotal - uscAtrasadas;
+    // USC que VENCE neste passo (entre prevDataRef e dataRef, exclusive)
+    const uscVencendo = prevDataRef
+      ? base.filter(o=>o.dataLimite>=prevDataRef && o.dataLimite<dataRef && !o.conclusao
+          && !(exclParalJust && isParalJustificada(o, dataRef)))
+          .reduce((s,o)=>s+(parseFloat(o.usc)||0),0)
+      : 0;
     return {
       pct:       Math.max(0, Math.min(100, (uscNoPrazo/uscTotal)*100)),
       uscAtras:  uscAtrasadas,
       uscPrazo:  uscNoPrazo,
       nAtras:    atrasadas.length,
+      uscVencendo,
       nParalJust: exclParalJust ? base.filter(o=>o.dataLimite<dataRef&&!o.conclusao&&isParalJustificada(o,dataRef)).length : 0
     };
   }
@@ -541,7 +550,7 @@ function renderIndicadorExecucao(list){
   if(typeof window._indicExclParal === 'undefined') window._indicExclParal = false;
   const exclParal = window._indicExclParal;
 
-  const indicadores = dias.map(d=>({ dia:d, ...calcIndicador(d, exclParal) }));
+  const indicadores = dias.map((d,i)=>({ dia:d, ...calcIndicador(d, exclParal, i>0?dias[i-1]:null) }));
   const atual = indicadores[0].pct;
 
   // USC breakdown para hoje (já calculado em indicadores[0])
@@ -573,7 +582,8 @@ function renderIndicadorExecucao(list){
           <span style="font-size:10px;font-weight:700;color:#fff;white-space:nowrap">${item.pct.toFixed(1)}%</span>
         </div>
       </div>
-      <div style="font-size:9px;width:70px;text-align:right;flex-shrink:0">
+      <div style="font-size:9px;width:100px;text-align:right;flex-shrink:0">
+        ${i>0&&item.uscVencendo>0?`<span style="color:#EF4444;font-size:8px">-${item.uscVencendo.toFixed(0)} USC</span><br>`:''}
         ${i>0?`<span style="color:${deltaColor}">${deltaStr}</span>`:``}${nParalNote}
       </div>
     </div>`;
@@ -3886,30 +3896,12 @@ function cfRenderConfig(){
         </div>
       </fieldset>
 
-      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
-        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — CS Eletricidade</legend>
-        <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">Capacidade base USC/mês</label>
-          <input type="number" id="cfCapBaseCS" value="${c.capacidadeBaseUSC_CS||2000}" style="font-size:12px">
-        </div>
-        <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
-          <input type="number" id="cfLimAtrCS" value="${c.limiteAtrasadas_CS||20}" style="font-size:12px">
-        </div>
+\`+cfRenderCapacidadeFieldset('CS ELETRICIDADE','CS',c)+\`
         <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorCSm1" value="${(c.fatoresSazonais_CS||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorCSm2" value="${(c.fatoresSazonais_CS||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorCSm3" value="${(c.fatoresSazonais_CS||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorCSm4" value="${(c.fatoresSazonais_CS||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorCSm5" value="${(c.fatoresSazonais_CS||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorCSm6" value="${(c.fatoresSazonais_CS||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorCSm7" value="${(c.fatoresSazonais_CS||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorCSm8" value="${(c.fatoresSazonais_CS||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorCSm9" value="${(c.fatoresSazonais_CS||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorCSm10" value="${(c.fatoresSazonais_CS||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorCSm11" value="${(c.fatoresSazonais_CS||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorCSm12" value="${(c.fatoresSazonais_CS||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
       </fieldset>
 
-      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
-        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — Eletelsul</legend>
-        <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">Capacidade base USC/mês</label>
-          <input type="number" id="cfCapBaseEL" value="${c.capacidadeBaseUSC_EL||2000}" style="font-size:12px">
-        </div>
-        <div class="fg" style="margin-bottom:6px">
-          <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
-          <input type="number" id="cfLimAtrEL" value="${c.limiteAtrasadas_EL||20}" style="font-size:12px">
-        </div>
+\`+cfRenderCapacidadeFieldset('ELETELSUL','EL',c)+\`
         <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorELm1" value="${(c.fatoresSazonais_EL||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorELm2" value="${(c.fatoresSazonais_EL||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorELm3" value="${(c.fatoresSazonais_EL||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorELm4" value="${(c.fatoresSazonais_EL||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorELm5" value="${(c.fatoresSazonais_EL||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorELm6" value="${(c.fatoresSazonais_EL||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorELm7" value="${(c.fatoresSazonais_EL||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorELm8" value="${(c.fatoresSazonais_EL||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorELm9" value="${(c.fatoresSazonais_EL||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorELm10" value="${(c.fatoresSazonais_EL||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorELm11" value="${(c.fatoresSazonais_EL||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorELm12" value="${(c.fatoresSazonais_EL||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
       </fieldset>
@@ -4527,6 +4519,101 @@ function getEquipGPS(equipRef){
   const lat = parseFloat(eq.lat||eq.latitude||eq.LAT||0);
   const lng = parseFloat(eq.lng||eq.longitude||eq.long||eq.LNG||0);
   return (lat&&lng) ? {lat,lng} : null;
+}
+
+
+// ── Capacidade histórica por empreiteira (média móvel de obras concluídas) ──
+function calcCapacidadeHistorica(emp, nMeses){
+  nMeses = nMeses || 3;
+  // Obras RD com conclusão informada (excl. PODI/Mono-Tri)
+  const EXCLUIR = ['PODI','Mono-Tri'];
+  const concluidas = obras.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') &&
+    (o.empreiteira||'').toUpperCase()===emp.toUpperCase() &&
+    o.conclusao && !o.cancelado && !EXCLUIR.includes(o.programa)
+  );
+
+  // Agrupa por mês de conclusão
+  const porMes = {};
+  concluidas.forEach(o=>{
+    const mes = o.conclusao.slice(0,7); // YYYY-MM
+    if(!porMes[mes]) porMes[mes] = {count:0, usc:0};
+    porMes[mes].count++;
+    porMes[mes].usc += parseFloat(o.usc)||0;
+  });
+
+  // Pega os últimos N meses com dados (ordenado desc)
+  const hoje = new Date();
+  const mesesAnalisados = [];
+  for(let i=1; i<=Math.max(nMeses*2, 12); i++){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+    const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    if(porMes[key]) mesesAnalisados.push({mes:key, ...porMes[key]});
+    if(mesesAnalisados.length>=nMeses) break;
+  }
+
+  if(!mesesAnalisados.length) return null;
+
+  const totalUSC   = mesesAnalisados.reduce((s,m)=>s+m.usc,0);
+  const totalCount = mesesAnalisados.reduce((s,m)=>s+m.count,0);
+  const mediaUSC   = Math.round(totalUSC / mesesAnalisados.length);
+  const mediaCount = (totalCount / mesesAnalisados.length).toFixed(1);
+  const avgUscObra = totalCount>0 ? Math.round(totalUSC/totalCount) : 0;
+
+  return { mediaUSC, mediaCount, avgUscObra, mesesAnalisados, nMeses:mesesAnalisados.length };
+}
+
+
+// ── Fieldset de capacidade com cálculo histórico automático ───────────────
+function cfRenderCapacidadeFieldset(empNome, empKey, c){
+  const hist = calcCapacidadeHistorica(empNome, 3);
+  const capAtual = c['capacidadeBaseUSC_'+empKey]||2000;
+  const lbl = empKey==='CS' ? 'CS Eletricidade' : 'Eletelsul';
+
+  let histHtml = '';
+  if(hist && hist.nMeses>0){
+    const diff = hist.mediaUSC - capAtual;
+    const diffStr = (diff>=0?'+':'')+diff;
+    const diffCor = Math.abs(diff)<300 ? '#22C55E' : '#F59E0B';
+    histHtml = `
+      <div style="background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:6px;padding:8px;margin-bottom:8px;font-size:10px">
+        <div style="font-weight:700;color:#7c6af7;margin-bottom:4px">📊 Calculado dos últimos ${hist.nMeses} meses:</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
+          <div><span style="color:var(--muted)">Média USC/mês</span><br><strong>${hist.mediaUSC}</strong></div>
+          <div><span style="color:var(--muted)">Obras/mês</span><br><strong>${hist.mediaCount}</strong></div>
+          <div><span style="color:var(--muted)">Avg USC/obra</span><br><strong>${hist.avgUscObra}</strong></div>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:${diffCor}">
+          ${Math.abs(diff)<300
+            ? '✅ Configurado próximo ao histórico'
+            : `⚠️ Diferença: ${diffStr} USC vs configurado (${capAtual}) — considere ajustar`}
+        </div>
+        <button onclick="document.getElementById('cfCapBase${empKey}').value=${hist.mediaUSC}"
+          style="margin-top:6px;font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid #7c6af7;background:rgba(124,106,247,.1);color:#7c6af7;cursor:pointer">
+          Usar valor calculado (${hist.mediaUSC} USC)
+        </button>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">
+        Histórico por mês:
+        ${hist.mesesAnalisados.map(m=>`<span style="margin-right:6px">${m.mes}: ${m.usc.toFixed(0)} USC (${m.count} obras)</span>`).join('')}
+      </div>`;
+  } else {
+    histHtml = `<div style="font-size:9px;color:var(--muted);margin-bottom:8px;padding:6px;background:var(--surface2);border-radius:6px">
+      ℹ️ Sem histórico disponível — nenhuma obra concluída nos últimos meses para cálculo automático.
+    </div>`;
+  }
+
+  return `<fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px;grid-column:1/-1">
+    <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — ${lbl}</legend>
+    ${histHtml}
+    <div class="fg" style="margin-bottom:6px">
+      <label style="font-size:10px">Capacidade base USC/mês (manual)</label>
+      <input type="number" id="cfCapBase${empKey}" value="${capAtual}" style="font-size:12px">
+    </div>
+    <div class="fg" style="margin-bottom:6px">
+      <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
+      <input type="number" id="cfLimAtr${empKey}" value="${c['limiteAtrasadas_'+empKey]||20}" style="font-size:12px">
+    </div>`;
 }
 
 // ── Modelo de Backlog — calcula carga futura mês a mês ──────────────────────
