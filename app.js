@@ -383,6 +383,7 @@ let dashPerspectiva = 'gerente'; // 'gerente' | 'fiscal:Nome' | 'empreiteira:Nom
 
 let _renderDashTimer=null;
 function renderDashDebounced(){ clearTimeout(_renderDashTimer); _renderDashTimer=setTimeout(renderDash,80); }
+window.renderDash = renderDash;  // Export para inline handlers
 
 function renderDash(){
   if(window._migrando) return; // não renderiza durante migração para evitar flickering
@@ -505,13 +506,10 @@ function renderIndicadorExecucao(list){
   if(!uscTotal) return '';
 
   // Paralisadas justificadas: aceite da central vigente
-  function isParalJustificada(o, dataRef){
-    if(!o.paralisada) return false;
-    if(o.paralAceite!=='aceita') return false;
-    // Se não tem prazo de aceite, considera justificada indefinidamente
-    if(!o.paralAceiteAte) return true;
-    // Justificada enquanto prazo ainda válido
-    return o.paralAceiteAte >= dataRef;
+  // isParalExcluir: exclui obra paralisada do cálculo de atrasadas
+  // Considera: qualquer obra paralisada (independente do aceite da Central)
+  function isParalExcluir(o){
+    return !!o.paralisada; // qualquer paralisada é excluída quando toggle ligado
   }
 
   // Calcula indicador para cada dia D0..D+7
@@ -519,7 +517,7 @@ function renderIndicadorExecucao(list){
   function calcIndicador(dataRef, exclParalJust, prevDataRef){
     const atrasadas = base.filter(o=>{
       if(o.dataLimite>=dataRef || o.conclusao) return false;
-      if(exclParalJust && isParalJustificada(o, dataRef)) return false;
+      if(exclParalJust && isParalExcluir(o)) return false;
       return true;
     });
     const uscAtrasadas = atrasadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
@@ -527,7 +525,7 @@ function renderIndicadorExecucao(list){
     // USC que VENCE neste passo (entre prevDataRef e dataRef, exclusive)
     const uscVencendo = prevDataRef
       ? base.filter(o=>o.dataLimite>=prevDataRef && o.dataLimite<dataRef && !o.conclusao
-          && !(exclParalJust && isParalJustificada(o, dataRef)))
+          && !(exclParalJust && isParalExcluir(o)))
           .reduce((s,o)=>s+(parseFloat(o.usc)||0),0)
       : 0;
     return {
@@ -546,11 +544,25 @@ function renderIndicadorExecucao(list){
     return d.toISOString().split('T')[0];
   });
 
+  // Milestones: início e fim dos próximos 3 meses
+  const milestones = [];
+  for(let m=1; m<=3; m++){
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth()+m, 1);
+    const fim    = new Date(hoje.getFullYear(), hoje.getMonth()+m+1, 0);
+    const nomeMes = inicio.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'});
+    milestones.push({dia:inicio.toISOString().split('T')[0], label:'Início '+nomeMes, milestone:true});
+    milestones.push({dia:fim.toISOString().split('T')[0],    label:'Fim '+nomeMes,    milestone:true});
+  }
+
   // Toggle state (persiste na sessão)
   if(typeof window._indicExclParal === 'undefined') window._indicExclParal = false;
   const exclParal = window._indicExclParal;
 
-  const indicadores = dias.map((d,i)=>({ dia:d, ...calcIndicador(d, exclParal, i>0?dias[i-1]:null) }));
+  const indicadores = dias.map((d,i)=>({ dia:d, label:null, ...calcIndicador(d, exclParal, i>0?dias[i-1]:null) }));
+  const indicMilestones = milestones.map((ms,i)=>({
+    ...ms,
+    ...calcIndicador(ms.dia, exclParal, i>0?milestones[i-1].dia:dias[dias.length-1])
+  }));
   const atual = indicadores[0].pct;
 
   // USC breakdown para hoje (já calculado em indicadores[0])
@@ -595,13 +607,13 @@ function renderIndicadorExecucao(list){
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--muted)">
           <input type="checkbox" ${exclParal?'checked':''} onchange="window._indicExclParal=this.checked; renderDash();" style="cursor:pointer">
-          Excluir paralisadas <strong>justificadas</strong> das atrasadas
+          Excluir obras <strong>paralisadas</strong> das atrasadas
         </label>
         <span style="font-size:10px;color:var(--muted)">USC no prazo / USC total</span>
       </div>
     </div>
     ${nParalJust>0&&exclParal?`<div style="font-size:10px;color:#7c6af7;background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.3);border-radius:6px;padding:6px 10px;margin-bottom:10px">
-      🛑 ${nParalJust} obra(s) paralisada(s) com justificativa aceita pela Central excluída(s) do cálculo
+      🛑 ${nParalJust} obra(s) paralisada(s) excluída(s) do cálculo de atrasadas
     </div>`:''}
 
     <!-- Resumo hoje -->
@@ -629,6 +641,32 @@ function renderIndicadorExecucao(list){
       Projeção — obras sem conclusão que vencem entram como atrasadas
     </div>
     ${barras}
+    <div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--border)">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">
+        Perspectiva mensal — próximos 3 meses
+      </div>
+      ${indicMilestones.map((item,i)=>{
+        const cor = corIndicador(item.pct);
+        const prev = i===0 ? indicadores[indicadores.length-1] : indicMilestones[i-1];
+        const delta = (item.pct - prev.pct).toFixed(1);
+        const deltaStr = (parseFloat(delta)>=0?'+':'')+delta+'%';
+        const deltaColor = parseFloat(delta)>=0?'#22C55E':'#EF4444';
+        const isInicio = item.label.startsWith('Início');
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px${isInicio?';margin-top:8px':''}">
+          <div style="width:90px;font-size:10px;color:${isInicio?'var(--muted)':'var(--muted)'};flex-shrink:0;${isInicio?'font-weight:700':''}">${item.label}</div>
+          <div style="flex:1;background:var(--surface2);border-radius:6px;height:18px;overflow:hidden">
+            <div style="width:${item.pct.toFixed(1)}%;height:100%;background:${cor};border-radius:6px;
+              display:flex;align-items:center;padding-left:6px">
+              <span style="font-size:9px;font-weight:700;color:#fff;white-space:nowrap">${item.pct.toFixed(1)}%</span>
+            </div>
+          </div>
+          <div style="font-size:9px;width:100px;text-align:right;flex-shrink:0">
+            ${item.uscVencendo>0?`<span style="color:#EF4444;font-size:8px">-${item.uscVencendo.toFixed(0)} USC</span><br>`:''}
+            <span style="color:${deltaColor}">${deltaStr}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
     <div style="display:flex;gap:12px;margin-top:8px;font-size:9px;color:var(--muted)">
       <span>🟢 ≥ 85% bom</span><span>🟡 70–85% atenção</span><span>🔴 &lt; 70% crítico</span>
     </div>
@@ -3737,6 +3775,7 @@ function renderCarteiraFutura(){
       <!-- Ações -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
         <button class="btn btn-primary btn-sm" onclick="cfModalAddObra()">➕ Adicionar Obra</button>
+        <input type="search" id="cfBusca" placeholder="🔍 Buscar por OIS/nota..." style="font-size:11px;padding:5px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:inherit;width:200px" oninput="cfAplicarBusca(this.value)">
         <label class="btn btn-secondary btn-sm" style="cursor:pointer">
           📤 Importar Excel
           <input type="file" accept=".xlsx,.xls" style="display:none" onchange="cfUploadExcel(this)">
@@ -3984,7 +4023,10 @@ function cfAtualizarContador(){
 function cfRenderFila(){
   const cont = document.getElementById('cfFilaContainer');
   if(!cont) return;
-  const fila = _cfObras.filter(o=>o.status!=='aberta');
+  const busca = (window._cfBusca||'').toLowerCase();
+  const fila = _cfObras.filter(o=>o.status!=='aberta')
+    .filter(o=>!busca || (o.nota||'').toLowerCase().includes(busca)
+                       || (o.municipio||'').toLowerCase().includes(busca));
   if(!fila.length){
     cont.innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">
       Fila vazia — importe um Excel ou adicione obras manualmente.</div>`;
@@ -4309,6 +4351,13 @@ window.cfMostrarResultadoSelecao = function(selRodada1){
   const slot = document.getElementById('cfFilaContainer');
   if(slot) slot.insertAdjacentHTML('beforebegin', html);
 };
+
+// ── Busca na fila da Carteira Futura ──────────────────────────────────────
+window.cfAplicarBusca = function(termo){
+  window._cfBusca = (termo||'').trim().toLowerCase();
+  cfRenderFila();
+};
+
 window.cfBloquear = async function(id){
   const motivo = prompt('Motivo do bloqueio (opcional):');
   if(motivo===null) return; // cancelado
