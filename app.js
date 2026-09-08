@@ -487,6 +487,144 @@ window.setDashPerspectiva = function(p){
   renderDash();
 };
 
+
+// ── Indicador de Execução — USC no prazo vs atrasada (D0 a D+7) ──────────
+function renderIndicadorExecucao(list){
+  // Base: obras RD (!cancelado, !armazenado) com dataLimite definida
+  const base = list.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') &&
+    !o.cancelado && !o.armazenado && o.dataLimite &&
+    (parseFloat(o.usc)||0) > 0
+  );
+  if(!base.length) return '';
+
+  const uscTotal = base.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  if(!uscTotal) return '';
+
+  // Paralisadas justificadas: aceite da central vigente
+  function isParalJustificada(o, dataRef){
+    if(!o.paralisada) return false;
+    if(o.paralAceite!=='aceita') return false;
+    // Se não tem prazo de aceite, considera justificada indefinidamente
+    if(!o.paralAceiteAte) return true;
+    // Justificada enquanto prazo ainda válido
+    return o.paralAceiteAte >= dataRef;
+  }
+
+  // Calcula indicador para cada dia D0..D+7
+  // exclParalJust: true = paralisadas justificadas não entram como atrasadas
+  function calcIndicador(dataRef, exclParalJust){
+    const atrasadas = base.filter(o=>{
+      if(o.dataLimite>=dataRef || o.conclusao) return false;
+      // Paralisada justificada → exclui se toggle ligado
+      if(exclParalJust && isParalJustificada(o, dataRef)) return false;
+      return true;
+    });
+    const uscAtrasadas = atrasadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const uscNoPrazo   = uscTotal - uscAtrasadas;
+    return {
+      pct:       Math.max(0, Math.min(100, (uscNoPrazo/uscTotal)*100)),
+      uscAtras:  uscAtrasadas,
+      uscPrazo:  uscNoPrazo,
+      nAtras:    atrasadas.length,
+      nParalJust: exclParalJust ? base.filter(o=>o.dataLimite<dataRef&&!o.conclusao&&isParalJustificada(o,dataRef)).length : 0
+    };
+  }
+
+  const hoje = new Date();
+  const dias = Array.from({length:8},(_,i)=>{
+    const d = new Date(hoje); d.setDate(d.getDate()+i);
+    return d.toISOString().split('T')[0];
+  });
+
+  // Toggle state (persiste na sessão)
+  if(typeof window._indicExclParal === 'undefined') window._indicExclParal = false;
+  const exclParal = window._indicExclParal;
+
+  const indicadores = dias.map(d=>({ dia:d, ...calcIndicador(d, exclParal) }));
+  const atual = indicadores[0].pct;
+
+  // USC breakdown para hoje (já calculado em indicadores[0])
+  const uscAtualAtras = indicadores[0].uscAtras;
+  const uscAtualPrazo = indicadores[0].uscPrazo;
+  const nAtrasadas    = indicadores[0].nAtras;
+  const nParalJust    = indicadores[0].nParalJust;
+  const nNoPrazo      = base.length - nAtrasadas;
+
+  // Cor do indicador
+  function corIndicador(v){ return v>=85?'#22C55E':v>=70?'#F59E0B':'#EF4444'; }
+  function labelDia(iso, i){
+    if(i===0) return 'Hoje';
+    const d=new Date(iso); return 'D+'+i+' ('+d.getDate()+'/'+(d.getMonth()+1)+')';
+  }
+
+  // Barras de progresso
+  const barras = indicadores.map((item,i)=>{
+    const cor = corIndicador(item.pct);
+    const delta = i===0 ? '' : (item.pct - indicadores[i-1].pct).toFixed(1);
+    const deltaStr = i===0 ? '' : (parseFloat(delta)>=0?'+':'')+delta+'%';
+    const deltaColor = parseFloat(delta)>=0?'#22C55E':'#EF4444';
+    const nParalNote = item.nParalJust>0 ? ` <span style="font-size:8px;color:#7c6af7">(+${item.nParalJust} paral.just.)</span>` : '';
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="width:90px;font-size:10px;color:var(--muted);flex-shrink:0">${labelDia(item.dia,i)}</div>
+      <div style="flex:1;background:var(--surface2);border-radius:6px;height:20px;overflow:hidden">
+        <div style="width:${item.pct.toFixed(1)}%;height:100%;background:${cor};border-radius:6px;
+          display:flex;align-items:center;padding-left:6px">
+          <span style="font-size:10px;font-weight:700;color:#fff;white-space:nowrap">${item.pct.toFixed(1)}%</span>
+        </div>
+      </div>
+      <div style="font-size:9px;width:70px;text-align:right;flex-shrink:0">
+        ${i>0?`<span style="color:${deltaColor}">${deltaStr}</span>`:``}${nParalNote}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-weight:800;font-size:13px">📈 Indicador de Execução</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--muted)">
+          <input type="checkbox" ${exclParal?'checked':''} onchange="window._indicExclParal=this.checked; renderDash();" style="cursor:pointer">
+          Excluir paralisadas <strong>justificadas</strong> das atrasadas
+        </label>
+        <span style="font-size:10px;color:var(--muted)">USC no prazo / USC total</span>
+      </div>
+    </div>
+    ${nParalJust>0&&exclParal?`<div style="font-size:10px;color:#7c6af7;background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.3);border-radius:6px;padding:6px 10px;margin-bottom:10px">
+      🛑 ${nParalJust} obra(s) paralisada(s) com justificativa aceita pela Central excluída(s) do cálculo
+    </div>`:''}
+
+    <!-- Resumo hoje -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:14px">
+      <div style="background:${corIndicador(atual)}22;border:1px solid ${corIndicador(atual)}55;border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:28px;font-weight:900;color:${corIndicador(atual)}">${atual.toFixed(1)}%</div>
+        <div style="font-size:9px;color:var(--muted)">Hoje</div>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#22C55E">${uscAtualPrazo.toFixed(0)}</div>
+        <div style="font-size:9px;color:var(--muted)">USC no prazo (${nNoPrazo} obras)</div>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:18px;font-weight:700;color:#EF4444">${uscAtualAtras.toFixed(0)}</div>
+        <div style="font-size:9px;color:var(--muted)">USC atrasadas (${nAtrasadas} obras)</div>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:18px;font-weight:700">${uscTotal.toFixed(0)}</div>
+        <div style="font-size:9px;color:var(--muted)">USC total RD (${base.length} obras)</div>
+      </div>
+    </div>
+
+    <!-- Projeção D0 a D+7 -->
+    <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">
+      Projeção — obras sem conclusão que vencem entram como atrasadas
+    </div>
+    ${barras}
+    <div style="display:flex;gap:12px;margin-top:8px;font-size:9px;color:var(--muted)">
+      <span>🟢 ≥ 85% bom</span><span>🟡 70–85% atenção</span><span>🔴 &lt; 70% crítico</span>
+    </div>
+  </div>`;
+}
+
 function renderDashGerente(list, listAll){
   let html = '';
   html += `<div class="kpi-strip">
@@ -500,6 +638,9 @@ function renderDashGerente(list, listAll){
     ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+7d sem cadastro','#EF4444')}
     ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
   </div>`;
+
+  // ── Indicador de Execução (D0 a D+7) ──────────────────────────────────────
+  html += renderIndicadorExecucao(list);
 
   // Tabela resumo por fiscal
   // Cadastro urgente por fiscal
@@ -4073,6 +4214,109 @@ window.cfMostrarScore = function(id){
   </div>`;
   document.body.insertAdjacentHTML('beforeend',html);
 };
+
+// ── Painel de resultados após seleção ─────────────────────────────────────
+window.cfMostrarResultadoSelecao = function(selRodada1){
+  // Remove painel anterior
+  document.getElementById('cfResultadoPanel')?.remove();
+
+  const comRec   = selRodada1.filter(o=>o.empreiteiraRec && !o.adiar);
+  const adiadas  = selRodada1.filter(o=>o.adiar);
+  const forcadas = selRodada1.filter(o=>o.forcado);
+
+  // Diagnóstico de backlog por empreiteira
+  const diagCS = calcBacklogScore('CS ELETRICIDADE', (() => {
+    const d = new Date(); d.setMonth(d.getMonth()+1);
+    return d.toISOString().slice(0,7);
+  })(), _cfConfig);
+  const diagEL = calcBacklogScore('ELETELSUL', (() => {
+    const d = new Date(); d.setMonth(d.getMonth()+1);
+    return d.toISOString().slice(0,7);
+  })(), _cfConfig);
+
+  function zonaBadge(z){
+    return z==='livre'?'<span style="color:#22C55E">✅ Livre</span>'
+      :z==='suave'?'<span style="color:#F59E0B">⚠️ Suave</span>'
+      :'<span style="color:#EF4444">🚫 Bloqueada</span>';
+  }
+
+  const rowsRec = comRec.map(o=>{
+    const sc = o.scoreJSON ? JSON.parse(o.scoreJSON) : [];
+    const best = sc[0]||{};
+    const cor = best.emp?.includes('CS') ? '#3B82F6':'#F59E0B';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 8px;font-weight:700;color:var(--accent)">${o.nota}</td>
+      <td style="padding:5px 8px;font-size:9px">${o.municipio||'—'}</td>
+      <td style="padding:5px 8px;font-weight:700;color:${cor}">${best.emp?.replace('CS ELETRICIDADE','CS')||'—'}</td>
+      <td style="padding:5px 8px;text-align:center">${best.total||0}pts</td>
+      <td style="padding:5px 8px;text-align:center;font-size:9px">d:${best.dist||0} eq:${best.eq||0} bl:${best.carga||0}</td>
+      <td style="padding:5px 8px;text-align:center">${zonaBadge(best.zona||'livre')}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:9px">${best.backlogFinal||0} USC · ${best.nAtrasadas||0} atr.</td>
+      <td style="padding:5px 8px;cursor:pointer;color:var(--accent);text-align:center" onclick="cfMostrarScore('${o.id}')">🔍</td>
+    </tr>`;
+  }).join('');
+
+  const rowsAdiar = adiadas.map(o=>{
+    const sc = o.scoreJSON ? JSON.parse(o.scoreJSON) : [];
+    return `<tr style="border-bottom:1px solid var(--border);background:rgba(239,68,68,.04)">
+      <td style="padding:5px 8px;font-weight:700;color:#EF4444">${o.nota}</td>
+      <td style="padding:5px 8px;font-size:9px">${o.municipio||'—'}</td>
+      <td colspan="5" style="padding:5px 8px;font-size:9px;color:#EF4444">
+        ⏸ ADIADA — ${sc.map(s=>`${s.emp?.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')}: ${zonaBadge(s.zona||'bloqueada')} ${s.motivo?'('+s.motivo+')':''}`).join(' | ')}
+      </td>
+      <td style="padding:5px 8px;cursor:pointer;color:var(--accent);text-align:center" onclick="cfMostrarScore('${o.id}')">🔍</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<div id="cfResultadoPanel" style="margin-bottom:20px">
+    <div style="font-weight:800;font-size:14px;margin-bottom:12px">📊 Resultado da Seleção</div>
+
+    <!-- Diagnóstico de backlog atual -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      ${['CS ELETRICIDADE','ELETELSUL'].map((emp,i)=>{
+        const d = i===0 ? diagCS : diagEL;
+        const cor = d.zona==='livre'?'#22C55E':d.zona==='suave'?'#F59E0B':'#EF4444';
+        return `<div style="background:var(--surface);border:1px solid ${cor}44;border-radius:10px;padding:12px">
+          <div style="font-weight:700;font-size:11px;margin-bottom:8px">${emp.replace('CS ELETRICIDADE','CS Eletricidade')}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px">
+            <div><span style="color:var(--muted)">Backlog atual:</span><br><strong>${d.backlogFinal?.toFixed(0)||0} USC</strong></div>
+            <div><span style="color:var(--muted)">Média USC/obra:</span><br><strong>${d.avgUSC?.toFixed(0)||0}</strong></div>
+            <div><span style="color:var(--muted)">Atrasadas:</span><br><strong style="color:${d.nAtrasadas>10?'#EF4444':'inherit'}">${d.nAtrasadas||0}</strong></div>
+            <div><span style="color:var(--muted)">Zona:</span><br><strong style="color:${cor}">${d.zona?.toUpperCase()||'—'}</strong></div>
+          </div>
+          ${d.motivo?`<div style="font-size:9px;color:#EF4444;margin-top:6px;padding:4px;background:rgba(239,68,68,.08);border-radius:4px">⚠️ ${d.motivo}</div>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Obras com recomendação -->
+    ${comRec.length?`<div style="font-weight:700;font-size:11px;color:#22C55E;margin-bottom:6px">✅ ${comRec.length} obras com empreiteira recomendada</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:5px 8px;text-align:left">OIS</th><th style="padding:5px 8px;text-align:left">Município</th>
+          <th style="padding:5px 8px;text-align:left">Recomendada</th><th style="padding:5px 8px;text-align:center">Score</th>
+          <th style="padding:5px 8px;text-align:center">Fatores</th><th style="padding:5px 8px;text-align:center">Zona</th>
+          <th style="padding:5px 8px;text-align:center">Backlog</th><th style="padding:5px 8px"></th>
+        </tr></thead><tbody>${rowsRec}</tbody>
+      </table></div>
+    </div>`:``}
+
+    <!-- Obras adiadas -->
+    ${adiadas.length?`<div style="font-weight:700;font-size:11px;color:#EF4444;margin-bottom:6px">⏸ ${adiadas.length} obras adiadas — ambas empreiteiras bloqueadas</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:5px 8px;text-align:left">OIS</th><th style="padding:5px 8px;text-align:left">Município</th>
+          <th colspan="5" style="padding:5px 8px;text-align:left">Motivo do adiamento</th><th></th>
+        </tr></thead><tbody>${rowsAdiar}</tbody>
+      </table></div>
+    </div>`:``}
+  </div>`;
+
+  const slot = document.getElementById('cfFilaContainer');
+  if(slot) slot.insertAdjacentHTML('beforebegin', html);
+};
 window.cfBloquear = async function(id){
   const motivo = prompt('Motivo do bloqueio (opcional):');
   if(motivo===null) return; // cancelado
@@ -4432,8 +4676,8 @@ function cfRecomendarEmpreiteira(obracf, configCf){
     adiar,
     scores,
     motivo: adiar
-      ? 'Ambas empreiteiras sobrecarregadas no mês de vencimento'
-      : `Maior score: dist+${melhor.detalhes.dist} eq+${melhor.detalhes.equil} desl+${melhor.detalhes.desl}`
+      ? 'Ambas bloqueadas: ' + scores.map(s=>s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')+' '+s.carga.zona+(s.carga.motivo?' ('+s.carga.motivo+')':'')).join(' | ')
+      : `Recomendado ${melhor.emp.replace('CS ELETRICIDADE','CS')}: dist+${melhor.detalhes.dist} eq+${melhor.detalhes.equil} carga+${melhor.detalhes.carga||0}`
   };
 }
 
@@ -4541,9 +4785,9 @@ window.cfRunSelecao = async function(){
   });
 
   cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
-
+  cfMostrarResultadoSelecao(selRodada1);
   const uscSel = selRodada1.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-  toast(`✓ Seleção: ${selRodada1.length} obras · ${uscSel.toFixed(0)} USC. ${excluidas.length} obras com previsão de abertura calculada.`,'ok');
+  toast(`✓ Seleção: ${selRodada1.length} obras · ${uscSel.toFixed(0)} USC. Veja painel de resultados abaixo.`,'ok');
 };
 
 // ── Abrir como Obra (modal) ──────────────────────────────────────
