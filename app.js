@@ -3489,18 +3489,1320 @@ function renderUSCMediaPorPrograma(pool){
 }
 
 
+
+// ── Capacidade histórica por empreiteira (média móvel de obras concluídas) ──
+function calcCapacidadeHistorica(emp, nMeses){
+  nMeses = nMeses || 3;
+  // Obras RD com conclusão informada (excl. PODI/Mono-Tri)
+  const EXCLUIR = ['PODI','Mono-Tri'];
+  const concluidas = obras.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') &&
+    (o.empreiteira||'').toUpperCase()===emp.toUpperCase() &&
+    o.conclusao && !o.cancelado && !EXCLUIR.includes(o.programa)
+  );
+
+  // Agrupa por mês de conclusão
+  const porMes = {};
+  concluidas.forEach(o=>{
+    const mes = o.conclusao.slice(0,7); // YYYY-MM
+    if(!porMes[mes]) porMes[mes] = {count:0, usc:0};
+    porMes[mes].count++;
+    porMes[mes].usc += parseFloat(o.usc)||0;
+  });
+
+  // Pega os últimos N meses com dados (ordenado desc)
+  const hoje = new Date();
+  const mesesAnalisados = [];
+  for(let i=1; i<=Math.max(nMeses*2, 12); i++){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+    const key = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    if(porMes[key]) mesesAnalisados.push({mes:key, ...porMes[key]});
+    if(mesesAnalisados.length>=nMeses) break;
+  }
+
+  if(!mesesAnalisados.length) return null;
+
+  const totalUSC   = mesesAnalisados.reduce((s,m)=>s+m.usc,0);
+  const totalCount = mesesAnalisados.reduce((s,m)=>s+m.count,0);
+  const mediaUSC   = Math.round(totalUSC / mesesAnalisados.length);
+  const mediaCount = (totalCount / mesesAnalisados.length).toFixed(1);
+  const avgUscObra = totalCount>0 ? Math.round(totalUSC/totalCount) : 0;
+
+  return { mediaUSC, mediaCount, avgUscObra, mesesAnalisados, nMeses:mesesAnalisados.length };
+}
+
+
+// ── Fieldset de capacidade com cálculo histórico automático ───────────────
+
+
+
+// ── Estado local ─────────────────────────────────────────────────
+let _cfObras    = [];   // obras na fila (ordenadas por posicao)
+let _cfConfig   = {};   // configurações do gerente
+let _cfDragSrc  = null; // linha arrastada no drag-and-drop
+let _cfAbaAtiva = 'cliente'; // 'cliente' | 'melhoria'
+
+// ── Render principal ─────────────────────────────────────────────
 function renderCarteiraFutura(){
-  const cont=document.getElementById('pgCarteiraFuturaContent');
+  const cont = document.getElementById('pgCarteiraFuturaContent');
   if(!cont) return;
-  cont.innerHTML=`
-    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📅 Carteira de Obras Futura</div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;text-align:center">
-      <div style="font-size:48px;margin-bottom:16px">📊</div>
-      <div style="font-size:16px;font-weight:700;margin-bottom:8px">Em desenvolvimento</div>
-      <div style="font-size:12px;color:var(--muted)">Aguardando base de dados do cliente para otimizar a abertura de obras futuras.</div>
-    </div>`;
+  cont.innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:16px">📅 Carteira Futura</div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
+      <button id="cfTabCliente" onclick="cfSetAba('cliente')"
+        style="padding:6px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:700;font-size:13px;
+        background:var(--accent);color:#fff">📋 Obras Cliente</button>
+      <button id="cfTabMelhoria" onclick="toast('Obras Melhoria será implementado na próxima fase.','warn')"
+        style="padding:6px 20px;border-radius:8px;border:1px solid var(--border);cursor:not-allowed;font-size:13px;
+        background:var(--surface);color:var(--muted);opacity:.5" title="Em breve — próxima fase">🔧 Obras Melhoria</button>
+    </div>
+
+    <div id="cfAbaCliente">
+      <!-- Config colapsável -->
+      <details id="cfConfigPanel" style="margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:700;font-size:13px;padding:12px;
+          background:var(--surface);border:1px solid var(--border);border-radius:10px;list-style:none">
+          ⚙️ Parâmetros de Seleção e Otimização ▾
+        </summary>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:0 0 10px 10px;
+          padding:16px;margin-top:-1px" id="cfConfigBody">
+          <div class="loading" style="font-size:11px">Carregando...</div>
+        </div>
+      </details>
+
+      <!-- Ações -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="cfModalAddObra()">➕ Adicionar Obra</button>
+        <input type="search" id="cfBusca" placeholder="🔍 Buscar por OIS/nota..." style="font-size:11px;padding:5px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:inherit;width:200px" oninput="cfAplicarBusca(this.value)">
+        <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+          📤 Importar Excel
+          <input type="file" accept=".xlsx,.xls" style="display:none" onchange="cfUploadExcel(this)">
+        </label>
+        <button class="btn btn-secondary btn-sm" onclick="cfRunSelecao()">🎯 Executar Seleção</button>
+        <button class="btn btn-secondary btn-sm" style="color:#EF4444;border-color:#EF444455" onclick="cfLimparTudo()">🗑️ Limpar Tudo</button>
+        <span id="cfContador" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+      </div>
+
+      <!-- Estatísticas -->
+      <div id="cfEstatisticas" style="margin-bottom:16px"></div>
+
+      <!-- Fila -->
+      <div id="cfFilaContainer">
+        <div class="loading">Carregando fila...</div>
+      </div>
+    </div>
+  `;
+
+  cfLoadConfig().then(()=>{ cfRenderConfig(); });
+  cfLoadObras();
 }
 window.renderCarteiraFutura = renderCarteiraFutura;
+
+// ── Aba ──────────────────────────────────────────────────────────
+window.cfSetAba = function(aba){
+  _cfAbaAtiva = aba;
+  // Visual
+  document.getElementById('cfTabCliente').style.background = aba==='cliente' ? 'var(--accent)' : 'var(--surface)';
+  document.getElementById('cfTabCliente').style.color = aba==='cliente' ? '#fff' : 'var(--muted)';
+  document.getElementById('cfAbaCliente').style.display = aba==='cliente' ? '' : 'none';
+};
+
+// ── Carregar obras do Firestore ──────────────────────────────────
+async function cfLoadObras(){
+  try{
+    const snap = await getDocs(collection(db,'carteira_futura'));
+    _cfObras = snap.docs.map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+    cfRenderFila();
+    cfRenderEstatisticas();
+    cfAtualizarContador();
+  }catch(e){
+    document.getElementById('cfFilaContainer').innerHTML =
+      `<div style="color:#EF4444;font-size:12px">Erro ao carregar: ${e.message}</div>`;
+  }
+}
+
+// ── Carregar e salvar configuração ───────────────────────────────
+async function cfLoadConfig(){
+  try{
+    const snap = await getDoc(doc(db,'config','carteiraFutura'));
+    _cfConfig = snap.exists() ? snap.data() : {};
+  }catch(e){ _cfConfig = {}; }
+}
+
+window.cfSaveConfig = async function(){
+  const g = id => document.getElementById(id)?.value;
+  const cfg = {
+    limiteObras:    parseInt(g('cfLimObras'))||35,
+    limiteUSC:      parseFloat(g('cfLimUSC'))||5000,
+    raioProx:          parseFloat(g('cfRaioProx'))||10,
+    alfaProximidade:   parseFloat(g('cfAlfa'))||0.6,
+    capacidadeBaseUSC_CS: parseFloat(g('cfCapBaseCS'))||2000,
+    capacidadeBaseUSC_EL: parseFloat(g('cfCapBaseEL'))||2000,
+    limiteAtrasadas_CS:   parseFloat(g('cfLimAtrCS'))||20,
+    limiteAtrasadas_EL:   parseFloat(g('cfLimAtrEL'))||20,
+    fatoresSazonais_CS: {m2:parseFloat(g('cfFatorCSm2'))||0.85,m3:parseFloat(g('cfFatorCSm3'))||0.85,m4:parseFloat(g('cfFatorCSm4'))||0.9,m5:parseFloat(g('cfFatorCSm5'))||1.0,m6:parseFloat(g('cfFatorCSm6'))||1.0,m7:parseFloat(g('cfFatorCSm7'))||0.95,m8:parseFloat(g('cfFatorCSm8'))||0.9,m9:parseFloat(g('cfFatorCSm9'))||1.05,m10:parseFloat(g('cfFatorCSm10'))||1.05,m11:parseFloat(g('cfFatorCSm11'))||1.0,m12:parseFloat(g('cfFatorCSm12'))||1.0,m13:parseFloat(g('cfFatorCSm13'))||0.75},
+    fatoresSazonais_EL: {m2:parseFloat(g('cfFatorELm2'))||0.85,m3:parseFloat(g('cfFatorELm3'))||0.85,m4:parseFloat(g('cfFatorELm4'))||0.9,m5:parseFloat(g('cfFatorELm5'))||1.0,m6:parseFloat(g('cfFatorELm6'))||1.0,m7:parseFloat(g('cfFatorELm7'))||0.95,m8:parseFloat(g('cfFatorELm8'))||0.9,m9:parseFloat(g('cfFatorELm9'))||1.05,m10:parseFloat(g('cfFatorELm10'))||1.05,m11:parseFloat(g('cfFatorELm11'))||1.0,m12:parseFloat(g('cfFatorELm12'))||1.0,m13:parseFloat(g('cfFatorELm13'))||0.75},
+    pesoDistancia:     parseFloat(g('cfPesoDist'))||40,
+    pesoEquilibrio: parseFloat(g('cfPesoEq'))||40,
+    pesoDesligamento: parseFloat(g('cfPesoDesl'))||20,
+    metaObrasCS:    parseFloat(g('cfMetaObrasCS'))||150,
+    metaObrasEL:    parseFloat(g('cfMetaObrasEL'))||130,
+    metaUSCCS:      parseFloat(g('cfMetaUSCCS'))||50000,
+    metaUSCEL:      parseFloat(g('cfMetaUSCEL'))||45000,
+  };
+  // Valida soma dos pesos
+  const soma = cfg.pesoDistancia + cfg.pesoEquilibrio + cfg.pesoDesligamento;
+  if(Math.abs(soma-100)>1){ toast(`Pesos devem somar 100% (atual: ${soma}%)`, 'err'); return; }
+  await setDoc(doc(db,'config','carteiraFutura'), cfg);
+  _cfConfig = cfg;
+  toast('✓ Configurações salvas.','ok');
+};
+
+// ── Render config panel ──────────────────────────────────────────
+function cfRenderConfig(){
+  const c = _cfConfig;
+  const body = document.getElementById('cfConfigBody');
+  if(!body) return;
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px">
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Limites de Seleção</legend>
+        <div class="fg" style="margin-bottom:8px">
+          <label style="font-size:10px">Máx. Obras</label>
+          <input type="number" id="cfLimObras" value="${c.limiteObras||35}" min="1" max="999" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Máx. USC</label>
+          <input type="number" id="cfLimUSC" value="${c.limiteUSC||5000}" min="0" step="100" style="font-size:12px">
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Pesos do Score (%)</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">Distância</label>
+          <input type="number" id="cfPesoDist" value="${c.pesoDistancia||40}" min="0" max="100" style="font-size:12px">
+        </div>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">Equilíbrio</label>
+          <input type="number" id="cfPesoEq" value="${c.pesoEquilibrio||40}" min="0" max="100" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Desligamento</label>
+          <input type="number" id="cfPesoDesl" value="${c.pesoDesligamento||20}" min="0" max="100" style="font-size:12px">
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:4px">Soma deve ser 100%</div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Metas de Obras</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">CS Eletricidade</label>
+          <input type="number" id="cfMetaObrasCS" value="${c.metaObrasCS||150}" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Eletelsul</label>
+          <input type="number" id="cfMetaObrasEL" value="${c.metaObrasEL||130}" style="font-size:12px">
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Metas USC</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">CS Eletricidade</label>
+          <input type="number" id="cfMetaUSCCS" value="${c.metaUSCCS||50000}" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Eletelsul</label>
+          <input type="number" id="cfMetaUSCEL" value="${c.metaUSCEL||45000}" style="font-size:12px">
+        </div>
+      </fieldset>
+
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+        <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Proximidade</legend>
+        <div class="fg" style="margin-bottom:6px">
+          <label style="font-size:10px">Raio (km)</label>
+          <input type="number" id="cfRaioProx" value="${c.raioProx||10}" min="1" max="100" style="font-size:12px">
+        </div>
+        <div class="fg">
+          <label style="font-size:10px">Peso obra mais próxima (α)</label>
+          <input type="number" id="cfAlfa" value="${c.alfaProximidade||0.6}" min="0" max="1" step="0.1" style="font-size:12px">
+          <small style="font-size:9px;color:var(--muted)">0=só mediana · 1=só mínima</small>
+        </div>
+      </fieldset>
+
+${cfRenderCapacidadeFieldset('CS ELETRICIDADE','CS',c)}
+        <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorCSm1" value="${(c.fatoresSazonais_CS||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorCSm2" value="${(c.fatoresSazonais_CS||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorCSm3" value="${(c.fatoresSazonais_CS||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorCSm4" value="${(c.fatoresSazonais_CS||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorCSm5" value="${(c.fatoresSazonais_CS||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorCSm6" value="${(c.fatoresSazonais_CS||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorCSm7" value="${(c.fatoresSazonais_CS||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorCSm8" value="${(c.fatoresSazonais_CS||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorCSm9" value="${(c.fatoresSazonais_CS||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorCSm10" value="${(c.fatoresSazonais_CS||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorCSm11" value="${(c.fatoresSazonais_CS||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorCSm12" value="${(c.fatoresSazonais_CS||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
+      </fieldset>
+
+${cfRenderCapacidadeFieldset('ELETELSUL','EL',c)}
+        <div style="font-size:9px;font-weight:700;color:var(--muted);margin-bottom:4px">Fatores sazonais (×base)</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jan</span><input type="number" id="cfFatorELm1" value="${(c.fatoresSazonais_EL||{})["m1"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Fev</span><input type="number" id="cfFatorELm2" value="${(c.fatoresSazonais_EL||{})["m2"]||0.85}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mar</span><input type="number" id="cfFatorELm3" value="${(c.fatoresSazonais_EL||{})["m3"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Abr</span><input type="number" id="cfFatorELm4" value="${(c.fatoresSazonais_EL||{})["m4"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Mai</span><input type="number" id="cfFatorELm5" value="${(c.fatoresSazonais_EL||{})["m5"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jun</span><input type="number" id="cfFatorELm6" value="${(c.fatoresSazonais_EL||{})["m6"]||0.95}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Jul</span><input type="number" id="cfFatorELm7" value="${(c.fatoresSazonais_EL||{})["m7"]||0.9}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Ago</span><input type="number" id="cfFatorELm8" value="${(c.fatoresSazonais_EL||{})["m8"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Set</span><input type="number" id="cfFatorELm9" value="${(c.fatoresSazonais_EL||{})["m9"]||1.05}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Out</span><input type="number" id="cfFatorELm10" value="${(c.fatoresSazonais_EL||{})["m10"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Nov</span><input type="number" id="cfFatorELm11" value="${(c.fatoresSazonais_EL||{})["m11"]||1.0}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:28px;font-size:9px;color:var(--muted)">Dez</span><input type="number" id="cfFatorELm12" value="${(c.fatoresSazonais_EL||{})["m12"]||0.75}" min="0" max="2" step="0.05" style="font-size:11px;width:60px"></div>
+      </fieldset>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="cfSaveConfig()">💾 Salvar Configurações</button>
+    <div style="font-size:9px;color:var(--muted);margin-top:6px">💡 Calibre USC/mês e Notas/mês gradualmente — meta: ≥75% da capacidade ocupada sem ultrapassar 125%</div>
+  `;
+}
+
+// ── Estatísticas ─────────────────────────────────────────────────
+function cfRenderEstatisticas(){
+  const cont = document.getElementById('cfEstatisticas');
+  if(!cont) return;
+  const filaAtiva = _cfObras.filter(o=>o.status!=='aberta');
+  const ativas    = filaAtiva.filter(o=>o.status!=='bloqueada');
+  const bloqueadas= filaAtiva.filter(o=>o.status==='bloqueada');
+  const forcadas  = filaAtiva.filter(o=>o.status==='forcada');
+  const selecionadas = filaAtiva.filter(o=>o.selecionada);
+  const uscTotal  = filaAtiva.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+
+  // Por município — contagem e USC
+  const porMunObj = {};
+  filaAtiva.forEach(o=>{
+    const m = o.municipio||'—';
+    if(!porMunObj[m]) porMunObj[m] = {count:0, usc:0};
+    porMunObj[m].count++;
+    porMunObj[m].usc += parseFloat(o.usc)||0;
+  });
+  const porMunUSC = Object.entries(porMunObj).sort((a,b)=>b[1].usc-a[1].usc);
+
+  cont.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px">
+      ${cfKpi('Total na Fila', _cfObras.filter(o=>o.status!=='aberta').length+' obras','#7c6af7')}
+      ${cfKpi('USC Total', uscTotal.toFixed(0),'#3B82F6')}
+      ${cfKpi('Bloqueadas', bloqueadas.length,'#EF4444')}
+      ${cfKpi('Forçadas', forcadas.length,'#F59E0B')}
+      ${cfKpi('Selecionadas', selecionadas.length+' / '+selecionadas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0)+' USC', '#22C55E')}
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px">
+      <div style="font-size:10px;font-weight:700;margin-bottom:8px;color:var(--muted)">POR MUNICÍPIO</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:5px 8px;text-align:left">Município</th>
+            <th style="padding:5px 8px;text-align:center">Notas</th>
+            <th style="padding:5px 8px;text-align:right">USC Total</th>
+          </tr></thead>
+          <tbody>${porMunUSC.map(([m,dados])=>`
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:4px 8px">${m}</td>
+              <td style="padding:4px 8px;text-align:center;font-weight:700">${dados.count}</td>
+              <td style="padding:4px 8px;text-align:right">${dados.usc.toFixed(1)}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot><tr style="background:var(--surface2);font-weight:700">
+            <td style="padding:5px 8px">TOTAL</td>
+            <td style="padding:5px 8px;text-align:center">${filaAtiva.length}</td>
+            <td style="padding:5px 8px;text-align:right">${uscTotal.toFixed(1)}</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>`;
+}
+
+function cfKpi(label, value, cor){
+  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+    <div style="font-size:18px;font-weight:900;color:${cor}">${value}</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:2px">${label}</div>
+  </div>`;
+}
+
+function cfAtualizarContador(){
+  const el = document.getElementById('cfContador');
+  if(!el) return;
+  const atv = _cfObras.filter(o=>o.status!=='aberta');
+  el.textContent = `${atv.length} obras na fila · ${atv.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0)} USC`;
+}
+
+// ── Render da Fila ───────────────────────────────────────────────
+function cfRenderFila(){
+  const cont = document.getElementById('cfFilaContainer');
+  if(!cont) return;
+  const busca = (window._cfBusca||'').toLowerCase();
+  const fila = _cfObras.filter(o=>o.status!=='aberta')
+    .filter(o=>!busca || (o.nota||'').toLowerCase().includes(busca)
+                       || (o.municipio||'').toLowerCase().includes(busca));
+  if(!fila.length){
+    cont.innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)">
+      Fila vazia — importe um Excel ou adicione obras manualmente.</div>`;
+    return;
+  }
+  let pos=0;
+  cont.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px" id="cfFilaTabela">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:8px 6px;width:28px;text-align:center" title="Arrastar para reordenar">↕</th>
+            <th style="padding:8px 6px;text-align:center;width:36px">#</th>
+            <th style="padding:8px 6px;text-align:left">OIS/Nota</th>
+            <th style="padding:8px 6px;text-align:left">Município</th>
+            <th style="padding:8px 6px;text-align:center">Equip.Ref.</th>
+            <th style="padding:8px 6px;text-align:right">USC</th>
+            <th style="padding:8px 6px;text-align:center">Prazo</th>
+            <th style="padding:8px 6px;text-align:center">Entrada</th>
+            <th style="padding:8px 6px;text-align:center">Status</th>
+            <th style="padding:8px 6px;text-align:center">Ações</th>
+          </tr></thead>
+          <tbody id="cfFilaBody">
+            ${fila.map((o,i)=>cfFilaRow(o,i)).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  cfInitDragDrop();
+}
+
+function cfStatusBadge(o){
+  if(o.status==='bloqueada')
+    return `<span style="background:#EF444422;color:#EF4444;border:1px solid #EF444455;border-radius:6px;padding:1px 8px;font-size:9px;font-weight:700">🔒 Bloqueada</span>`;
+  if(o.status==='forcada'||o.forcado)
+    return `<span style="background:#F59E0B22;color:#F59E0B;border:1px solid #F59E0B55;border-radius:6px;padding:1px 8px;font-size:9px;font-weight:700">⭐ Forçada</span>`;
+  if(o.selecionada)
+    return `<span style="background:#22C55E22;color:#22C55E;border:1px solid #22C55E55;border-radius:6px;padding:1px 8px;font-size:9px;font-weight:700">✅ Selecionada</span>`;
+  return `<span style="background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:1px 8px;font-size:9px">Ativa</span>`;
+}
+
+function cfFilaRow(o, idx){
+  const rowBg = o.status==='bloqueada' ? 'background:rgba(239,68,68,.04)'
+    : o.selecionada ? 'background:rgba(34,197,94,.05)'
+    : o.status==='forcada'||o.forcado ? 'background:rgba(245,158,11,.05)'
+    : '';
+  return `<tr draggable="true" data-id="${o.id}" data-pos="${o.posicao}"
+    style="border-bottom:1px solid var(--border);${rowBg};cursor:move"
+    title="${o.motivoBloqueio?'🔒 Bloqueio: '+o.motivoBloqueio:''}"  
+    ondragstart="cfDragStart(event)" ondragover="cfDragOver(event)" ondrop="cfDrop(event)"
+    ondragleave="cfDragLeave(event)">
+    <td style="padding:6px;text-align:center;color:var(--muted);cursor:grab">☰</td>
+    <td style="padding:6px;text-align:center;font-weight:700;color:var(--muted)">${idx+1}</td>
+    <td style="padding:6px">
+      <div style="font-weight:700;color:var(--accent);cursor:pointer" ${o.scoreJSON?`onclick="cfMostrarScore('${o.id}')"`:''}>${o.nota}</div>
+      ${o.empreiteiraRec&&o.selecionada&&o.status!=='bloqueada'?(()=>{
+        const scores = o.scoreJSON?JSON.parse(o.scoreJSON):[];
+        const best = scores[0]||{};
+        const cor = o.adiar?'#6b7280':o.empreiteiraRec.includes('CS')?'#3B82F6':'#F59E0B';
+        const label = o.adiar?'⏸ Adiar':('✅ '+o.empreiteiraRec.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel'));
+        return `<div style="font-size:8px;color:${cor};font-weight:700;margin-top:2px">${label} (${best.total||0}pts)</div>`;
+      })():''}
+    </td>
+    <td style="padding:6px">${o.municipio||'—'}</td>
+    <td style="padding:6px;text-align:center;font-family:monospace">${o.equipRef||o.equipRefAlt||'—'}${o.equipRefAlt&&!o.equipRef?'<span title="Equip. alternativo" style="color:#F59E0B;font-size:9px"> ⚠️alt</span>':''}</td>
+    <td style="padding:6px;text-align:right">${parseFloat(o.usc||0).toFixed(1)}</td>
+    <td style="padding:6px;text-align:center">${o.prazoExec||'—'}d</td>
+    <td style="padding:6px;text-align:center;white-space:nowrap;font-size:9px;color:var(--muted)">${o.dataEntrada?(()=>{
+      // Re-parse dates that might be stored in US format (M/D/YY)
+      const s=String(o.dataEntrada);
+      const us=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if(us){ const y=us[3].length===2?'20'+us[3]:us[3]; return fmtTxt(y+'-'+us[1].padStart(2,'0')+'-'+us[2].padStart(2,'0')); }
+      return fmtTxt(s);
+    })():'—'}</td>
+    <td style="padding:6px;text-align:center">
+      ${cfStatusBadge(o)}
+      ${o.status==='bloqueada'&&o.motivoBloqueio?`<div style="font-size:8px;color:#EF4444;margin-top:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.motivoBloqueio}">📋 ${o.motivoBloqueio}</div>`:''}
+      ${!o.selecionada&&o.rodadaEstimada&&o.rodadaEstimada>1?(()=>{
+        const hoje=new Date();
+        const dataEst=new Date(hoje.getFullYear(),hoje.getMonth()+(o.rodadaEstimada-1),1);
+        const mes=dataEst.toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
+        return `<div style="font-size:8px;color:#6366F1;margin-top:2px" title="Previsão de abertura na rodada ${o.rodadaEstimada}">📅 Prev: ${mes}</div>`;
+      })():''}
+      ${o.bundlingRefNota?`<div style="font-size:8px;color:#10B981;margin-top:2px" title="Próxima a obra ${o.bundlingRefNota} — ${o.bundlingDist}km">🔗 Bundle c/ ${o.bundlingRefNota} (${o.bundlingDist}km)</div>`:''}
+    </td>
+    <td style="padding:6px;text-align:center;white-space:nowrap">
+      ${o.status==='bloqueada'
+        ? `<button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border)" onclick="cfDesbloquear('${o.id}')">🔓 Desbloquear</button>`
+        : `<button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:rgba(239,68,68,.1);color:#EF4444;border:1px solid #EF444444" onclick="cfBloquear('${o.id}')">🔒 Bloquear</button>`}
+      <button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:${o.forcado?'rgba(245,158,11,.2)':'var(--surface2)'};border:1px solid var(--border)" onclick="cfToggleForcar('${o.id}')" title="${o.forcado?'Remover força':'Forçar entrada'}">⭐</button>
+      <button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:rgba(34,197,94,.1);color:#22C55E;border:1px solid #22C55E44" onclick="cfModalAbrirObra('${o.id}')">🚀 Abrir</button>
+      <button class="btn btn-sm" style="font-size:9px;padding:2px 6px;background:var(--surface2);border:1px solid var(--border);color:#EF4444" onclick="cfExcluir('${o.id}')">🗑</button>
+    </td>
+  </tr>`;
+}
+
+// ── Drag and Drop ─────────────────────────────────────────────────
+function cfInitDragDrop(){ /* rows têm os handlers inline */ }
+
+window.cfDragStart = function(e){
+  _cfDragSrc = e.currentTarget;
+  e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain', e.currentTarget.dataset.id);
+  setTimeout(()=>{ if(_cfDragSrc) _cfDragSrc.style.opacity='0.4'; },0);
+};
+window.cfDragOver = function(e){
+  e.preventDefault(); e.dataTransfer.dropEffect='move';
+  const tr = e.currentTarget;
+  document.querySelectorAll('#cfFilaBody tr').forEach(r=>r.style.borderTop='');
+  tr.style.borderTop='2px solid var(--accent)';
+};
+window.cfDragLeave = function(e){ e.currentTarget.style.borderTop=''; };
+window.cfDrop = async function(e){
+  e.preventDefault();
+  document.querySelectorAll('#cfFilaBody tr').forEach(r=>r.style.borderTop='');
+  if(!_cfDragSrc) return;
+  _cfDragSrc.style.opacity='1';
+  const fromId = _cfDragSrc.dataset.id;
+  const toId   = e.currentTarget.dataset.id;
+  if(fromId===toId){ _cfDragSrc=null; return; }
+  // Reordena localmente
+  const fromIdx = _cfObras.findIndex(o=>o.id===fromId);
+  const toIdx   = _cfObras.findIndex(o=>o.id===toId);
+  if(fromIdx<0||toIdx<0){ _cfDragSrc=null; return; }
+  const [moved] = _cfObras.splice(fromIdx,1);
+  _cfObras.splice(toIdx,0,moved);
+  // Reatribui posições
+  _cfObras.forEach((o,i)=>o.posicao=i+1);
+  _cfDragSrc=null;
+  // Salva no Firestore (batch)
+  await cfSavePosicoes();
+  cfRenderFila();
+  cfRenderEstatisticas();
+  cfAtualizarContador();
+};
+
+async function cfSavePosicoes(){
+  try{
+    const batch = writeBatch(db);
+    _cfObras.forEach(o=>{ batch.update(doc(db,'carteira_futura',o.id),{posicao:o.posicao}); });
+    await batch.commit();
+  }catch(e){ toast('Erro ao salvar ordem: '+e.message,'err'); }
+}
+
+// ── Bloquear / Desbloquear / Forçar ─────────────────────────────
+
+// ── Limpar toda a fila em massa ────────────────────────────────────────────
+window.cfLimparTudo = async function(){
+  const n = _cfObras.length;
+  if(!n){ toast('A fila já está vazia.','warn'); return; }
+  if(!confirm('Excluir TODAS as '+n+' obras da fila? Esta ação não pode ser desfeita.')) return;
+  try{
+    toast('Excluindo...','ok');
+    const batch = writeBatch(db);
+    _cfObras.forEach(o=>{ batch.delete(doc(db,'carteira_futura',o.id)); });
+    await batch.commit();
+    _cfObras = [];
+    cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+    toast('Fila limpa com sucesso.','ok');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
+
+// ── Score detail modal ──────────────────────────────────────────────────────
+window.cfMostrarScore = function(id){
+  const o = _cfObras.find(o=>o.id===id);
+  if(!o||!o.scoreJSON) return;
+  const scores = JSON.parse(o.scoreJSON);
+
+  const rows = scores.map(s=>{
+    const zonaCor = s.zona==='livre'?'#22C55E':s.zona==='suave'?'#F59E0B':'#EF4444';
+    const zonaLabel = s.zona==='livre'?'✅ Livre':s.zona==='suave'?'⚠️ Suave':'🚫 Bloqueada';
+    const mesLabel = s.mesVenc?s.mesVenc.replace(/(\d{4})-(\d{2})/,'$2/$1'):'—';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 8px;font-weight:700">${s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:18px;font-weight:900;color:var(--accent)">${s.total}</td>
+      <td style="padding:6px 8px;text-align:center">${s.dist}</td>
+      <td style="padding:6px 8px;text-align:center">${s.eq}</td>
+      <td style="padding:6px 8px;text-align:center">${s.desl}</td>
+      <td style="padding:6px 8px;text-align:center">${mesLabel}</td>
+      <td style="padding:6px 8px;text-align:center;color:${zonaCor};font-weight:700">${zonaLabel}</td>
+      <td style="padding:6px 8px;text-align:center;font-size:10px">
+        Backlog: ${s.backlogFinal||0} USC<br>
+        <span style="color:var(--muted)">${s.nAtrasadas||0} atrasadas · avg ${(s.avgUSC||0).toFixed(0)} USC/obra</span>
+        ${s.motivo?`<br><span style="color:#EF4444;font-size:9px">${s.motivo}</span>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const prazo = parseInt(o.prazoExec)||120;
+  const hoje = new Date();
+  const venc = new Date(hoje.getTime()+prazo*24*3600*1000);
+  const mesVenc = venc.toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+
+  const html=`<div id="cfScoreModal" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border-radius:16px;padding:24px;width:min(700px,96vw);max-height:90vh;overflow-y:auto">
+      <div style="font-weight:900;font-size:15px;margin-bottom:4px">📊 Análise de Score — Obra ${o.nota}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px">${o.municipio||'—'} · USC: ${o.usc} · Prazo: ${prazo}d → vence ${mesVenc}</div>
+      ${o.motivo?`<div style="font-size:11px;color:var(--muted);margin-bottom:12px;padding:8px;background:var(--surface2);border-radius:8px">💡 ${o.motivo}</div>`:''}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:6px 8px;text-align:left">Empreiteira</th>
+            <th style="padding:6px 8px;text-align:center">Total</th>
+            <th style="padding:6px 8px;text-align:center">Dist.</th>
+            <th style="padding:6px 8px;text-align:center">Equil.</th>
+            <th style="padding:6px 8px;text-align:center">Desl.</th>
+            <th style="padding:6px 8px;text-align:center">Mês venc.</th>
+            <th style="padding:6px 8px;text-align:center">Zona</th>
+            <th style="padding:6px 8px;text-align:center">Carga mês</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="text-align:right;margin-top:16px">
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('cfScoreModal').remove()">Fechar</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+};
+
+// ── Painel de resultados após seleção ─────────────────────────────────────
+window.cfMostrarResultadoSelecao = function(selRodada1, adiadas){
+  // Remove painel anterior
+  document.getElementById('cfResultadoPanel')?.remove();
+
+  const comRec         = selRodada1.filter(o=>o.empreiteiraRec && !o.adiar);
+  adiadas              = adiadas || selRodada1.filter(o=>o.adiar);
+  const forcadas       = selRodada1.filter(o=>o.forcado||o.status==='forcada');
+  const forcadasSemEmp = forcadas.filter(o=>!o.empreiteiraRec);
+
+  // Diagnóstico de backlog por empreiteira
+  const diagCS = calcBacklogScore('CS ELETRICIDADE', (() => {
+    const d = new Date(); d.setMonth(d.getMonth()+1);
+    return d.toISOString().slice(0,7);
+  })(), _cfConfig);
+  const diagEL = calcBacklogScore('ELETELSUL', (() => {
+    const d = new Date(); d.setMonth(d.getMonth()+1);
+    return d.toISOString().slice(0,7);
+  })(), _cfConfig);
+
+  function zonaBadge(z){
+    return z==='livre'?'<span style="color:#22C55E">✅ Livre</span>'
+      :z==='suave'?'<span style="color:#F59E0B">⚠️ Suave</span>'
+      :'<span style="color:#EF4444">🚫 Bloqueada</span>';
+  }
+
+  const rowsRec = comRec.map(o=>{
+    const sc = o.scoreJSON ? JSON.parse(o.scoreJSON) : [];
+    const best = sc[0]||{};
+    const cor = best.emp?.includes('CS') ? '#3B82F6':'#F59E0B';
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:5px 8px;font-weight:700;color:var(--accent)">${o.nota}</td>
+      <td style="padding:5px 8px;font-size:9px">${o.municipio||'—'}</td>
+      <td style="padding:5px 8px;font-weight:700;color:${cor}">${best.emp?.replace('CS ELETRICIDADE','CS')||'—'}</td>
+      <td style="padding:5px 8px;text-align:center">${best.total||0}pts</td>
+      <td style="padding:5px 8px;text-align:center;font-size:9px">d:${best.dist||0} eq:${best.eq||0} bl:${best.carga||0}</td>
+      <td style="padding:5px 8px;text-align:center">${zonaBadge(best.zona||'livre')}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:9px">${best.backlogFinal||0} USC · ${best.nAtrasadas||0} atr.</td>
+      <td style="padding:5px 8px;cursor:pointer;color:var(--accent);text-align:center" onclick="cfMostrarScore('${o.id}')">🔍</td>
+    </tr>`;
+  }).join('');
+
+  const rowsAdiar = adiadas.map(o=>{
+    const sc = o.scoreJSON ? JSON.parse(o.scoreJSON) : [];
+    return `<tr style="border-bottom:1px solid var(--border);background:rgba(239,68,68,.04)">
+      <td style="padding:5px 8px;font-weight:700;color:#EF4444">${o.nota}</td>
+      <td style="padding:5px 8px;font-size:9px">${o.municipio||'—'}</td>
+      <td colspan="5" style="padding:5px 8px;font-size:9px;color:#EF4444">
+        ⏸ ADIADA — ${sc.map(s=>`${s.emp?.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')}: ${zonaBadge(s.zona||'bloqueada')} ${s.motivo?'('+s.motivo+')':''}`).join(' | ')}
+      </td>
+      <td style="padding:5px 8px;cursor:pointer;color:var(--accent);text-align:center" onclick="cfMostrarScore('${o.id}')">🔍</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<div id="cfResultadoPanel" style="margin-bottom:20px">
+    <div style="font-weight:800;font-size:14px;margin-bottom:12px">📊 Resultado da Seleção</div>
+
+    <!-- Diagnóstico de backlog atual -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      ${['CS ELETRICIDADE','ELETELSUL'].map((emp,i)=>{
+        const d = i===0 ? diagCS : diagEL;
+        const cor = d.zona==='livre'?'#22C55E':d.zona==='suave'?'#F59E0B':'#EF4444';
+        return `<div style="background:var(--surface);border:1px solid ${cor}44;border-radius:10px;padding:12px">
+          <div style="font-weight:700;font-size:11px;margin-bottom:8px">${emp.replace('CS ELETRICIDADE','CS Eletricidade')}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px">
+            <div><span style="color:var(--muted)">Backlog atual:</span><br><strong>${d.backlogFinal?.toFixed(0)||0} USC</strong></div>
+            <div><span style="color:var(--muted)">Média USC/obra:</span><br><strong>${d.avgUSC?.toFixed(0)||0}</strong></div>
+            <div><span style="color:var(--muted)">Atrasadas:</span><br><strong style="color:${d.nAtrasadas>10?'#EF4444':'inherit'}">${d.nAtrasadas||0}</strong></div>
+            <div><span style="color:var(--muted)">Zona:</span><br><strong style="color:${cor}">${d.zona?.toUpperCase()||'—'}</strong></div>
+          </div>
+          ${d.motivo?`<div style="font-size:9px;color:#EF4444;margin-top:6px;padding:4px;background:rgba(239,68,68,.08);border-radius:4px">⚠️ ${d.motivo}</div>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Obras com recomendação -->
+    ${comRec.length?`<div style="font-weight:700;font-size:11px;color:#22C55E;margin-bottom:6px">
+      ✅ ${comRec.length} obras atribuídas · ${comRec.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0)} USC (CS: ${comRec.filter(o=>o.empreiteiraRec?.includes('CS')).length} · Eletel: ${comRec.filter(o=>o.empreiteiraRec?.includes('EL')||o.empreiteiraRec?.includes('Eletel')).length})</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:5px 8px;text-align:left">OIS</th><th style="padding:5px 8px;text-align:left">Município</th>
+          <th style="padding:5px 8px;text-align:left">Recomendada</th><th style="padding:5px 8px;text-align:center">Score</th>
+          <th style="padding:5px 8px;text-align:center">Fatores</th><th style="padding:5px 8px;text-align:center">Zona</th>
+          <th style="padding:5px 8px;text-align:center">Backlog</th><th style="padding:5px 8px"></th>
+        </tr></thead><tbody>${rowsRec}</tbody>
+      </table></div>
+    </div>`:``}
+
+    <!-- Forçadas sem empreiteira -->
+    ${forcadasSemEmp.length?`<div style="font-weight:700;font-size:11px;color:#F59E0B;margin-bottom:6px">
+      ⭐ ${forcadasSemEmp.length} obra(s) FORÇADA(S) — sem empreiteira disponível (ajuste os limites de atrasadas ou capacidade)</div>
+      <div style="background:rgba(245,158,11,.08);border:1px solid #F59E0B44;border-radius:10px;padding:10px;margin-bottom:12px;font-size:10px">
+        ${forcadasSemEmp.map(o=>`<div style="margin-bottom:4px">⭐ <strong>${o.nota}</strong> — ${o.municipio||'—'} · ${o.usc} USC · ${o.motivo||'Ambas empreiteiras bloqueadas'}</div>`).join('')}
+      </div>`:``}
+
+    <!-- Obras adiadas -->
+    ${adiadas.length?`<div style="font-weight:700;font-size:11px;color:#EF4444;margin-bottom:6px">⏸ ${adiadas.length} obras adiadas — ambas empreiteiras bloqueadas</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:5px 8px;text-align:left">OIS</th><th style="padding:5px 8px;text-align:left">Município</th>
+          <th colspan="5" style="padding:5px 8px;text-align:left">Motivo do adiamento</th><th></th>
+        </tr></thead><tbody>${rowsAdiar}</tbody>
+      </table></div>
+    </div>`:``}
+  </div>`;
+
+  const slot = document.getElementById('cfFilaContainer');
+  if(slot) slot.insertAdjacentHTML('beforebegin', html);
+};
+
+// ── Busca na fila da Carteira Futura ──────────────────────────────────────
+window.cfAplicarBusca = function(termo){
+  window._cfBusca = (termo||'').trim().toLowerCase();
+  cfRenderFila();
+};
+
+window.cfBloquear = async function(id){
+  const motivo = prompt('Motivo do bloqueio (opcional):');
+  if(motivo===null) return; // cancelado
+  await updateDoc(doc(db,'carteira_futura',id),{status:'bloqueada', motivoBloqueio:motivo||''});
+  const o = _cfObras.find(o=>o.id===id);
+  if(o){ o.status='bloqueada'; o.motivoBloqueio=motivo||''; }
+  cfRenderFila(); cfRenderEstatisticas();
+  toast('Obra bloqueada.','ok');
+};
+
+window.cfDesbloquear = async function(id){
+  await updateDoc(doc(db,'carteira_futura',id),{status:'ativa', motivoBloqueio:''});
+  const o = _cfObras.find(o=>o.id===id);
+  if(o){ o.status='ativa'; o.motivoBloqueio=''; }
+  cfRenderFila(); cfRenderEstatisticas();
+  toast('Obra desbloqueada.','ok');
+};
+
+window.cfToggleForcar = async function(id){
+  const o = _cfObras.find(o=>o.id===id);
+  if(!o) return;
+  const novoForcado = !o.forcado;
+  await updateDoc(doc(db,'carteira_futura',id),{forcado:novoForcado, status:novoForcado?'forcada':'ativa'});
+  o.forcado=novoForcado; o.status=novoForcado?'forcada':'ativa';
+  cfRenderFila(); cfRenderEstatisticas();
+  toast(novoForcado?'Obra forçada para seleção.':'Força removida.','ok');
+};
+
+window.cfExcluir = async function(id){
+  if(!confirm('Excluir esta obra da fila?')) return;
+  await deleteDoc(doc(db,'carteira_futura',id));
+  _cfObras = _cfObras.filter(o=>o.id!==id);
+  _cfObras.forEach((o,i)=>o.posicao=i+1);
+  cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+  toast('Obra removida da fila.','ok');
+};
+
+// ── Adicionar manualmente ─────────────────────────────────────────
+window.cfModalAddObra = function(){
+  const modalHtml=`
+    <div id="cfModalAdd" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:flex;align-items:center;justify-content:center">
+      <div style="background:var(--surface);border-radius:16px;padding:24px;width:min(480px,95vw);max-height:90vh;overflow-y:auto">
+        <div style="font-weight:900;font-size:15px;margin-bottom:16px">➕ Adicionar Obra à Fila</div>
+        <div class="fg-grid">
+          <div class="fg"><label>Nota/OIS *</label><input type="text" id="cfAddNota" placeholder="400000000"></div>
+          <div class="fg"><label>Município *</label><input type="text" id="cfAddMun" placeholder="LAGES"></div>
+          <div class="fg"><label>Equip. Referência *</label><input type="text" id="cfAddEquip" placeholder="18758"></div>
+          <div class="fg"><label>Equip. Alternativo (se sem GPS)</label><input type="text" id="cfAddEquipAlt" placeholder="opcional"></div>
+          <div class="fg"><label>USC *</label><input type="number" id="cfAddUSC" min="0" step="0.01"></div>
+          <div class="fg"><label>ULV</label><input type="number" id="cfAddULV" min="0" step="0.01" value="0"></div>
+          <div class="fg"><label>Prazo Execução (dias)</label><input type="number" id="cfAddPrazo" value="120"></div>
+          <div class="fg"><label>Data de Entrada *</label><input type="date" id="cfAddData"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('cfModalAdd').remove()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" onclick="cfSalvarAddObra()">Adicionar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend',modalHtml);
+};
+
+window.cfSalvarAddObra = async function(){
+  const g=id=>document.getElementById(id)?.value.trim();
+  const nota=g('cfAddNota'), mun=g('cfAddMun'), equip=g('cfAddEquip'), usc=g('cfAddUSC'), data=g('cfAddData');
+  if(!nota||!mun||!equip||!usc||!data){ toast('Preencha os campos obrigatórios (*)','err'); return; }
+  const proximaPosicao = _cfObras.length>0 ? Math.max(..._cfObras.map(o=>o.posicao||0))+1 : 1;
+  const nova={
+    nota, municipio:mun.toUpperCase(), equipRef:equip, equipRefAlt:g('cfAddEquipAlt')||'',
+    usc:parseFloat(usc)||0, ulv:parseFloat(g('cfAddULV'))||0,
+    prazoExec:parseInt(g('cfAddPrazo'))||120, dataEntrada:data,
+    posicao:proximaPosicao, status:'ativa', forcado:false, selecionada:false,
+    criadoEm:serverTimestamp()
+  };
+  const ref = await addDoc(collection(db,'carteira_futura'),nova);
+  _cfObras.push({id:ref.id,...nova});
+  document.getElementById('cfModalAdd').remove();
+  cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+  toast('✓ Obra adicionada à fila.','ok');
+};
+
+// ── Upload Excel ─────────────────────────────────────────────────
+window.cfUploadExcel = async function(input){
+  const file = input.files[0];
+  if(!file) return;
+  const XLSX = await loadSheetJS();
+  const ab = await file.arrayBuffer();
+  const wb = XLSX.read(ab,{type:'array',cellDates:true});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false});
+
+  // Detecta header: NOTA | Município | Data de Entrada | Nr Equipamento | Qtd USC | Qtd ULV | Prazo
+  const headerRow = rows.findIndex(r=>r.some(v=>typeof v==='string'&&v.toUpperCase().includes('NOTA')));
+  if(headerRow<0){ toast('Cabeçalho não encontrado no Excel.','err'); return; }
+
+  const dataRows = rows.slice(headerRow+1).filter(r=>r[0]&&String(r[0]).trim());
+  if(!dataRows.length){ toast('Nenhuma obra encontrada no Excel.','err'); return; }
+
+ // Converte e ordena por data de entrada (mais antiga primeiro)
+    function parseCfDate(raw){
+      if(!raw) return '';
+      if(raw instanceof Date) return raw.toISOString().split('T')[0];
+      const s=String(raw).trim();
+      const iso=s.match(/^(\d{4})-(\d{2})-(\d{2})/);  if(iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+      const br=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);  if(br)  return `${br[3]}-${br[2]}-${br[1]}`;
+      const us=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if(us){ const y=us[3].length===2?'20'+us[3]:us[3]; return `${y}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`; }
+      return s.slice(0,10);
+    }
+    const obras = dataRows.map(r=>{
+      const dataEntrada = parseCfDate(r[2]);
+    return{
+      nota:String(r[0]).trim(),
+      municipio:String(r[1]||'').toUpperCase().trim(),
+      dataEntrada,
+      equipRef:String(r[3]||'').trim(),
+      usc:parseFloat(String(r[4]).replace(',','.'))||0,
+      ulv:parseFloat(String(r[5]).replace(',','.'))||0,
+      prazoExec:parseInt(r[6])||120,
+    };
+  }).sort((a,b)=>a.dataEntrada.localeCompare(b.dataEntrada));
+
+  if(!confirm(`Importar ${obras.length} obras do Excel?\n\n` +
+    `• Obras existentes com a mesma NOTA serão atualizadas\n` +
+    `• Novas obras serão adicionadas no final da fila`)) return;
+
+  toast('⏳ Importando...','ok');
+  const batch = writeBatch(db);
+  const existingNotas = new Set(_cfObras.map(o=>o.nota));
+  let added=0, updated=0;
+  let maxPos = _cfObras.length>0 ? Math.max(..._cfObras.map(o=>o.posicao||0)) : 0;
+
+  obras.forEach(nova=>{
+    const existing = _cfObras.find(o=>o.nota===nova.nota);
+    if(existing){
+      batch.update(doc(db,'carteira_futura',existing.id),{
+        municipio:nova.municipio, dataEntrada:nova.dataEntrada,
+        equipRef:nova.equipRef, usc:nova.usc, ulv:nova.ulv, prazoExec:nova.prazoExec
+      });
+      Object.assign(existing,nova);
+      updated++;
+    }else{
+      maxPos++;
+      const newDoc={...nova, posicao:maxPos, status:'ativa', forcado:false,
+        selecionada:false, equipRefAlt:'', criadoEm:serverTimestamp()};
+      const ref=doc(collection(db,'carteira_futura'));
+      batch.set(ref,newDoc);
+      _cfObras.push({id:ref.id,...newDoc});
+      added++;
+    }
+  });
+
+  await batch.commit();
+  _cfObras.sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+  cfRenderFila(); cfRenderEstatisticas(); cfAtualizarContador();
+  toast(`✓ ${added} adicionadas, ${updated} atualizadas.`,'ok');
+  input.value='';
+};
+
+// ── Executar seleção (placeholder — Fase 2) ──────────────────────
+
+
+// ── Otimização 2: Candidatos a Bundling (obras próximas não selecionadas) ────
+function cfCalcularBundling(selecionadas, excluidas, configCf){
+  const raio  = configCf.raioProx||10;
+  const candidatos = [];
+
+  selecionadas.forEach(sel=>{
+    const gpsSel = getEquipGPS(sel.equipRef)||(sel.equipRefAlt?getEquipGPS(sel.equipRefAlt):null);
+    if(!gpsSel) return;
+
+    excluidas.forEach(exc=>{
+      if(exc.bundlingRef) return; // já tem candidato
+      const gpsExc = getEquipGPS(exc.equipRef)||(exc.equipRefAlt?getEquipGPS(exc.equipRefAlt):null);
+      if(!gpsExc) return;
+      const dist = haversine(gpsSel.lat,gpsSel.lng,gpsExc.lat,gpsExc.lng);
+      if(dist<=raio){
+        candidatos.push({
+          idExcluida: exc.id, notaExcluida: exc.nota,
+          idSelecionada: sel.id, notaSelecionada: sel.nota,
+          distKm: dist.toFixed(1)
+        });
+        exc.bundlingDist = dist;
+        exc.bundlingRefNota = sel.nota;
+      }
+    });
+  });
+
+  return candidatos;
+}
+
+// ── Carteira Futura — Motor de Score por Empreiteira ──────────────────────
+
+// Haversine distance em km entre dois pontos GPS
+function haversine(lat1,lng1,lat2,lng2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+// Busca GPS de um equipamento na Base Equipamentos (window.equipDB)
+function getEquipGPS(equipRef){
+  if(!equipRef||!window.equipDB) return null;
+  const ref = String(equipRef).trim();
+  const eq = window.equipDB.find(e=>String(e.codigo||e.numero||e.equip||'').trim()===ref
+    || String(e.id||'').trim()===ref);
+  if(!eq) return null;
+  const lat = parseFloat(eq.lat||eq.latitude||eq.LAT||0);
+  const lng = parseFloat(eq.lng||eq.longitude||eq.long||eq.LNG||0);
+  return (lat&&lng) ? {lat,lng} : null;
+}
+
+
+// ── Capacidade histórica por empreiteira (média móvel de obras concluídas) ──
+
+
+// ── Fieldset de capacidade com cálculo histórico automático ───────────────
+function cfRenderCapacidadeFieldset(empNome, empKey, c){
+  const hist = calcCapacidadeHistorica(empNome, 3);
+  const capAtual = c['capacidadeBaseUSC_'+empKey]||2000;
+  const lbl = empKey==='CS' ? 'CS Eletricidade' : 'Eletelsul';
+
+  let histHtml = '';
+  if(hist && hist.nMeses>0){
+    const diff = hist.mediaUSC - capAtual;
+    const diffStr = (diff>=0?'+':'')+diff;
+    const diffCor = Math.abs(diff)<300 ? '#22C55E' : '#F59E0B';
+    histHtml = `
+      <div style="background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:6px;padding:8px;margin-bottom:8px;font-size:10px">
+        <div style="font-weight:700;color:#7c6af7;margin-bottom:4px">📊 Calculado dos últimos ${hist.nMeses} meses:</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
+          <div><span style="color:var(--muted)">Média USC/mês</span><br><strong>${hist.mediaUSC}</strong></div>
+          <div><span style="color:var(--muted)">Obras/mês</span><br><strong>${hist.mediaCount}</strong></div>
+          <div><span style="color:var(--muted)">Avg USC/obra</span><br><strong>${hist.avgUscObra}</strong></div>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:${diffCor}">
+          ${Math.abs(diff)<300
+            ? '✅ Configurado próximo ao histórico'
+            : `⚠️ Diferença: ${diffStr} USC vs configurado (${capAtual}) — considere ajustar`}
+        </div>
+        <button onclick="document.getElementById('cfCapBase${empKey}').value=${hist.mediaUSC}"
+          style="margin-top:6px;font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid #7c6af7;background:rgba(124,106,247,.1);color:#7c6af7;cursor:pointer">
+          Usar valor calculado (${hist.mediaUSC} USC)
+        </button>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-bottom:4px">
+        Histórico por mês:
+        ${hist.mesesAnalisados.map(m=>`<span style="margin-right:6px">${m.mes}: ${m.usc.toFixed(0)} USC (${m.count} obras)</span>`).join('')}
+      </div>`;
+  } else {
+    histHtml = `<div style="font-size:9px;color:var(--muted);margin-bottom:8px;padding:6px;background:var(--surface2);border-radius:6px">
+      ℹ️ Sem histórico disponível — nenhuma obra concluída nos últimos meses para cálculo automático.
+    </div>`;
+  }
+
+  return `<fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px;grid-column:1/-1">
+    <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">Backlog — ${lbl}</legend>
+    ${histHtml}
+    <div class="fg" style="margin-bottom:6px">
+      <label style="font-size:10px">Capacidade base USC/mês (manual)</label>
+      <input type="number" id="cfCapBase${empKey}" value="${capAtual}" style="font-size:12px">
+    </div>
+    <div class="fg" style="margin-bottom:6px">
+      <label style="font-size:10px">Limite de obras atrasadas (bloqueia)</label>
+      <input type="number" id="cfLimAtr${empKey}" value="${c['limiteAtrasadas_'+empKey]||20}" style="font-size:12px">
+    </div>`;
+}
+
+// ── Modelo de Backlog — calcula carga futura mês a mês ──────────────────────
+function calcBacklogScore(emp, mesVencimento, configCf, uscJaAtribuido){
+  const isCS = emp.toUpperCase().includes('CS');
+  const EXCLUIR = ['PODI','Mono-Tri'];
+  const obrasAtivas = obras.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') &&
+    (o.empreiteira||'').toUpperCase()===emp.toUpperCase() &&
+    !o.conclusao && !o.armazenado && !o.cancelado &&
+    !EXCLUIR.includes(o.programa)
+  );
+  const backlogBase = obrasAtivas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0)
+    + (parseFloat(uscJaAtribuido)||0); // USC já atribuído nesta rodada de seleção
+  const avgUSC = obrasAtivas.length>0 ? backlogBase/obrasAtivas.length : 0;
+  const hoje = (new Date()).toISOString().split('T')[0];
+  const nAtrasadas = obrasAtivas.filter(o=>o.dataLimite&&o.dataLimite<hoje).length;
+  const limAtr = isCS?(configCf.limiteAtrasadas_CS||20):(configCf.limiteAtrasadas_EL||20);
+  if(nAtrasadas>limAtr) return {zona:'bloqueada',score:0,backlogFinal:backlogBase,avgUSC,nAtrasadas,
+    motivo:`${nAtrasadas} obras atrasadas (limite: ${limAtr})`};
+  const capBase = isCS?(configCf.capacidadeBaseUSC_CS||2000):(configCf.capacidadeBaseUSC_EL||2000);
+  const fatores = isCS?(configCf.fatoresSazonais_CS||{}):(configCf.fatoresSazonais_EL||{});
+  const fator = m=>parseFloat(fatores['m'+m]||1.0);
+  const cfEntradas = typeof _cfObras!=='undefined'
+    ? _cfObras.filter(o=>o.selecionada&&(o.empreiteiraRec||'').toUpperCase()===emp.toUpperCase()) : [];
+  const dHoje=new Date(); let anoSim=dHoje.getFullYear(),mesSim=dHoje.getMonth()+1;
+  const [vAno,vMes]=mesVencimento.split('-').map(Number);
+  let backlog=backlogBase;
+  while(anoSim<vAno||(anoSim===vAno&&mesSim<=vMes)){
+    const capMes=capBase*fator(mesSim);
+    const entradas=cfEntradas.filter(o=>{
+      if(!o.dataEntrada) return false;
+      const[ea,em]=o.dataEntrada.split('-').map(Number); return ea===anoSim&&em===mesSim;
+    }).reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    backlog=Math.max(0,backlog-capMes)+entradas;
+    mesSim++; if(mesSim>12){mesSim=1;anoSim++;}
+  }
+  const capVenc=capBase*fator(vMes); const ratio=capVenc>0?backlog/capVenc:0;
+  let zona,score;
+  if(ratio<0.75){zona='livre';score=1.0;}
+  else if(ratio<=1.25){zona='suave';score=1-(ratio-0.75)/0.5;}
+  else{zona='bloqueada';score=0.0;}
+  return{zona,score:Math.max(0,Math.min(1,score)),ratio,backlogFinal:backlog,avgUSC,nAtrasadas,
+    motivo:zona==='bloqueada'?`Backlog ${backlog.toFixed(0)} USC no mês vencimento (>${(capVenc*1.25).toFixed(0)})`+
+      (nAtrasadas>0?` | ${nAtrasadas} atrasadas`:``):null};
+}
+
+// Score de distância híbrido (mínima + mediana ponderadas)
+function calcScoreDist(gpsCandidata, emp, raio, alfa){
+  if(!gpsCandidata) return 0.3; // sem GPS, score neutro
+  const obrasEmp = obras.filter(o=>(o.empreiteira||'').toUpperCase()===emp.toUpperCase()
+    && !o.armazenado && !o.cancelado);
+  const dists = obrasEmp.map(o=>{
+    const gps = getEquipGPS(o.equipamentoRef||o.equipRef);
+    if(!gps) return null;
+    return haversine(gpsCandidata.lat,gpsCandidata.lng,gps.lat,gps.lng);
+  }).filter(d=>d!==null).sort((a,b)=>a-b);
+  if(!dists.length) return 0.2;
+  const dMin = dists[0];
+  const dMed = dists[Math.floor(dists.length/2)];
+  const dMinN  = Math.min(dMin/raio, 1);
+  const dMedN  = Math.min(dMed/raio, 1);
+  return alfa*(1-dMinN) + (1-alfa)*(1-dMedN);
+}
+
+// Score de equilíbrio (carga atual vs meta)
+function calcScoreEquil(emp, metaObras){
+  const ativas = obras.filter(o=>(o.empreiteira||'').toUpperCase()===emp.toUpperCase()
+    && !o.armazenado && !o.cancelado).length;
+  return Math.max(0, 1 - ativas/metaObras);
+}
+
+// Score de desligamento (chave de abertura compartilhada)
+function calcScoreDesl(equipRef, emp){
+  const desl = window._deslMap || {};
+  for(const oNum of Object.keys(desl)){
+    const entry = desl[oNum];
+    if((entry.empreiteira||'').toUpperCase()===emp.toUpperCase()){
+      // Busca GPS do desligamento e compara chave
+      const obraDesl = obras.find(o=>o.numero?.toString()===oNum);
+      if(obraDesl && (obraDesl.equipamentoRef||'').toString()===equipRef?.toString()) return 1.0;
+    }
+  }
+  // Verifica também nos desligamentos importados pelo equipRef
+  for(const [oNum, entry] of Object.entries(desl)){
+    if((entry.equipRef||'').toString()===equipRef?.toString()) return 0.5; // mesmo trecho, bonus parcial
+  }
+  return 0;
+}
+
+// Score total por empreiteira para uma obra candidata
+function calcScoreEmpreiteira(obracf, emp, configCf, uscJaAtribuido){
+  const raio  = configCf.raioProx||10;
+  const alfa  = configCf.alfaProximidade||0.6;
+  const pDist = (configCf.pesoDistancia||40)/100;
+  const pEq   = (configCf.pesoEquilibrio||40)/100;
+  const pDesl = (configCf.pesoDesligamento||20)/100;
+  const isCS  = emp.toUpperCase().includes('CS');
+  const meta  = isCS ? (configCf.metaObrasCS||150) : (configCf.metaObrasEL||130);
+
+  // Calcula mês de vencimento da obra
+  const hoje = new Date();
+  const prazo = parseInt(obracf.prazoExec)||120;
+  const venc  = new Date(hoje.getTime() + prazo*24*3600*1000);
+  const mesVenc = `${venc.getFullYear()}-${String(venc.getMonth()+1).padStart(2,'0')}`;
+
+  const gps    = getEquipGPS(obracf.equipRef) || (obracf.equipRefAlt ? getEquipGPS(obracf.equipRefAlt) : null);
+  const sDist  = calcScoreDist(gps, emp, raio, alfa);
+  const sEq    = calcScoreEquil(emp, meta);
+  const sDesl  = calcScoreDesl(obracf.equipRef, emp);
+  const carga  = calcBacklogScore(emp, mesVenc, configCf, uscJaAtribuido);
+  const pCarg  = (configCf.pesoDesligamento||20)/100; // reusa peso "desl" para carga no score
+
+  // Score por fator — carga é componente separado (não multiplicador)
+  const sDistW  = pDist * sDist;
+  const sEqW    = pEq   * sEq;
+  const sDeslW  = (configCf.pesoDesligamento||20)/100 * sDesl;
+  const sCargW  = 0.25 * carga.score; // fator carga = 25% sempre
+
+  // Ajusta pesos restantes para 75% dos originais somarem com 25% de carga
+  const scoreBruto = sDistW*0.75 + sEqW*0.75 + sDeslW*0.75 + sCargW;
+  // Se bloqueada → score total zero
+  const scoreFinal = carga.zona==='bloqueada' ? 0 : scoreBruto;
+
+  return {
+    emp, scoreFinal: Math.round(scoreFinal*100),
+    detalhes: {
+      dist:  Math.round(sDistW*0.75*100),
+      equil: Math.round(sEqW*0.75*100),
+      desl:  Math.round(sDeslW*0.75*100),
+      carga: Math.round(sCargW*100),
+    },
+    carga, mesVenc
+  };
+}
+
+// Recomenda empreiteira para uma obra da fila
+function cfRecomendarEmpreiteira(obracf, configCf, uscAtribuidoMap){
+  const empreiteiras = ['CS ELETRICIDADE','ELETELSUL'];
+  const scores = empreiteiras.map(e=>calcScoreEmpreiteira(
+    obracf, e, configCf, (uscAtribuidoMap||{})[e]||0));
+  scores.sort((a,b)=>b.scoreFinal-a.scoreFinal);
+
+  const melhor = scores[0];
+  const adiar  = scores.every(s=>s.carga.zona==='bloqueada');
+
+  return {
+    recomendada: adiar ? null : melhor.emp,
+    adiar,
+    scores,
+    motivo: adiar
+      ? 'Ambas bloqueadas: ' + scores.map(s=>s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')+' '+s.carga.zona+(s.carga.motivo?' ('+s.carga.motivo+')':'')).join(' | ')
+      : `Recomendado ${melhor.emp.replace('CS ELETRICIDADE','CS')}: dist+${melhor.detalhes.dist} eq+${melhor.detalhes.equil} carga+${melhor.detalhes.carga||0}`
+  };
+}
+
+window.cfRunSelecao = async function(){
+  await cfLoadConfig();
+  const limObras = parseInt(_cfConfig.limiteObras)||35;
+  const limUSC   = parseFloat(_cfConfig.limiteUSC)||5000;
+  toast('⏳ Executando seleção...','ok');
+
+  // ── Fila ordenada por posição (somente ativas e não abertas) ─────────────
+  const forcadas  = _cfObras.filter(o=>
+    (o.forcado||o.status==='forcada') && o.status!=='bloqueada' && o.status!=='aberta'
+  ).sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+
+  const regulares = _cfObras.filter(o=>
+    !o.forcado && o.status!=='forcada' && o.status!=='bloqueada' && o.status!=='aberta'
+  ).sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+
+  const bloqueadas = _cfObras.filter(o=>o.status==='bloqueada');
+
+  // ── Passo 1: Forçadas — sempre selecionadas, ainda precisam de empreiteira
+  const selecionadas = [];
+  let uscAcum   = 0;
+  let obrasAcum = 0;
+  // Rastreia USC já atribuído por empreiteira nesta rodada (para evitar ultrapassar limite)
+  const uscAtribuidoMap = {'CS ELETRICIDADE':0, 'ELETELSUL':0};
+
+  forcadas.forEach(o=>{
+    const rec = cfRecomendarEmpreiteira(o, _cfConfig, uscAtribuidoMap);
+    selecionadas.push({...o, selecionada:true, rodadaEstimada:1,
+      empreiteiraRec: rec.recomendada||null, adiar: rec.adiar||false,
+      scoreJSON: JSON.stringify(rec.scores.map(s=>({
+        emp:s.emp, total:s.scoreFinal,
+        dist:s.detalhes?.dist||0, eq:s.detalhes?.equil||0,
+        desl:s.detalhes?.desl||0, carga:s.detalhes?.carga||0,
+        zona:s.carga?.zona||'livre',
+        backlogFinal:Math.round(s.carga?.backlogFinal||0),
+        avgUSC:Math.round(s.carga?.avgUSC||0),
+        nAtrasadas:s.carga?.nAtrasadas||0,
+        motivo:s.carga?.motivo||null, mesVenc:s.mesVenc||''
+      }))),
+      motivo: rec.adiar
+        ? 'Forçada — ambas empreiteiras bloqueadas no mês de vencimento'
+        : `Forçada → ${rec.recomendada||'—'}`
+    });
+    const uscF = parseFloat(o.usc)||0;
+    uscAcum += uscF; obrasAcum++;
+    const empF = selecionadas[selecionadas.length-1].empreiteiraRec;
+    if(empF) uscAtribuidoMap[empF] = (uscAtribuidoMap[empF]||0) + uscF;
+  });
+
+  // ── Passo 2: Regulares — fila da mais antiga para a mais nova
+  //   Ordem: dataEntrada ASC (primário) → posicao ASC (secundário)
+  //   Para cada obra:
+  //     1. Limites globais atingidos (obras E USC) → excluída (forecast)
+  //     2. Cabe nos limites MAS ambas empreiteiras bloqueadas → adiada, CONTINUA para próxima
+  //     3. Cabe nos limites E tem empreiteira → SELECIONADA
+  const adiadas   = [];
+  const excluidas = [];
+
+  // Reordena por dataEntrada (mais antiga = prioridade) + posicao como desempate
+  // Ordem da planilha = posicao (atribuída no momento do import, preservada na fila)
+  // O drag-and-drop altera a posicao, então quem está no topo da fila tem posicao menor
+  const filaOrdenada = [...regulares].sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+
+  for(const o of filaOrdenada){
+    const usc = parseFloat(o.usc)||0;
+
+    // Limites globais TOTALMENTE atingidos → para de selecionar (excluída para forecast)
+    if(obrasAcum >= limObras && uscAcum >= limUSC){
+      excluidas.push({...o, selecionada:false});
+      continue;
+    }
+
+    // Limite de obras atingido → excluída
+    if(obrasAcum >= limObras){
+      excluidas.push({...o, selecionada:false});
+      continue;
+    }
+
+    // Esta obra excede o USC restante → pula e tenta próxima (menor pode caber)
+    if(uscAcum + usc > limUSC + 0.01){
+      // Marca como excluída por USC mas CONTINUA tentando obras menores
+      excluidas.push({...o, selecionada:false,
+        motivo:`USC insuficiente: restam ${(limUSC-uscAcum).toFixed(0)} USC, obra precisa ${usc.toFixed(0)}`});
+      continue;
+    }
+
+    // Verifica disponibilidade de empreiteira
+    const rec = cfRecomendarEmpreiteira(o, _cfConfig, uscAtribuidoMap);
+    if(rec.adiar){
+      // Ambas bloqueadas → ADIADA, não conta nos limites, CONTINUA para próxima obra
+      adiadas.push({...o, selecionada:false, adiar:true,
+        empreiteiraRec:null,
+        scoreJSON: JSON.stringify(rec.scores.map(s=>({
+          emp:s.emp, total:s.scoreFinal,
+          dist:s.detalhes?.dist||0, eq:s.detalhes?.equil||0,
+          desl:s.detalhes?.desl||0, carga:s.detalhes?.carga||0,
+          zona:s.carga?.zona||'bloqueada',
+          backlogFinal:Math.round(s.carga?.backlogFinal||0),
+          avgUSC:Math.round(s.carga?.avgUSC||0),
+          nAtrasadas:s.carga?.nAtrasadas||0,
+          motivo:s.carga?.motivo||null, mesVenc:s.mesVenc||''
+        }))),
+        motivo:'Adiada — '+rec.scores.map(s=>
+          s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')
+          +': '+(s.carga?.motivo||s.carga?.zona||'?')).join(' | ')
+      });
+      continue;  // ← pula e analisa a próxima obra da fila
+    }
+
+    // ✅ Obra selecionada com empreiteira atribuída
+    const oEmp = rec.recomendada;
+    selecionadas.push({...o, selecionada:true, rodadaEstimada:1,
+      empreiteiraRec: oEmp, adiar:false,
+      scoreJSON: JSON.stringify(rec.scores.map(s=>({
+        emp:s.emp, total:s.scoreFinal,
+        dist:s.detalhes?.dist||0, eq:s.detalhes?.equil||0,
+        desl:s.detalhes?.desl||0, carga:s.detalhes?.carga||0,
+        zona:s.carga?.zona||'livre',
+        backlogFinal:Math.round(s.carga?.backlogFinal||0),
+        avgUSC:Math.round(s.carga?.avgUSC||0),
+        nAtrasadas:s.carga?.nAtrasadas||0,
+        motivo:s.carga?.motivo||null, mesVenc:s.mesVenc||''
+      }))),
+      motivo:`${oEmp?.replace('CS ELETRICIDADE','CS')}: dist+${rec.scores[0]?.detalhes?.dist||0} eq+${rec.scores[0]?.detalhes?.equil||0}`
+    });
+    uscAcum += usc;
+    obrasAcum++;
+    if(oEmp) uscAtribuidoMap[oEmp] = (uscAtribuidoMap[oEmp]||0) + usc;
+  }
+
+  // ── Passo 3: Forecast para excluídas (rodadas futuras) ──────────────────
+  const capObrasRodada = limObras;
+  const capUSCRodada   = limUSC;
+  let restantes = [...excluidas, ...adiadas];
+  let rodadaNum = 2;
+
+  while(restantes.length>0 && rodadaNum<=36){
+    let cO=capObrasRodada, cU=capUSCRodada;
+    const proxRestantes=[];
+    restantes.forEach(o=>{
+      const usc=parseFloat(o.usc)||0;
+      if(cO>0 && cU-usc>=-0.01){ o.rodadaEstimada=rodadaNum; cO--; cU-=usc; }
+      else { o.rodadaEstimada=null; proxRestantes.push(o); }
+    });
+    restantes=proxRestantes;
+    rodadaNum++;
+  }
+
+  // ── Passo 4: Bloqueadas — limpa recomendação de empreiteira ─────────────
+  const bloqueadasLimpas = bloqueadas.map(o=>({...o,
+    selecionada:false, empreiteiraRec:null, adiar:false, scoreJSON:null, motivo:null
+  }));
+
+  // ── Passo 5: Bundling ────────────────────────────────────────────────────
+  const naoSelecionadas = [...excluidas, ...adiadas];
+  const bundlingCands = cfCalcularBundling(selecionadas, naoSelecionadas, _cfConfig);
+
+  // ── Passo 6: Salva no Firestore ──────────────────────────────────────────
+  const allObras = [...selecionadas, ...excluidas, ...adiadas, ...bloqueadasLimpas];
+  for(let i=0;i<allObras.length;i+=400){
+    const bch = writeBatch(db);
+    allObras.slice(i,i+400).forEach(o=>{
+      bch.update(doc(db,'carteira_futura',o.id),{
+        selecionada:    !!o.selecionada,
+        rodadaEstimada: o.rodadaEstimada||null,
+        empreiteiraRec: o.empreiteiraRec||null,
+        adiar:          o.adiar||false,
+        scoreJSON:      o.scoreJSON||null,
+        motivo:         o.motivo||null
+      });
+    });
+    await bch.commit();
+  }
+
+  if(bundlingCands.length){
+    const bchB = writeBatch(db);
+    bundlingCands.forEach(b=>{
+      bchB.update(doc(db,'carteira_futura',b.idExcluida),{
+        bundlingDist:b.distKm, bundlingRefNota:b.notaSelecionada
+      });
+    });
+    await bchB.commit();
+  }
+
+  // ── Passo 7: Atualiza estado local ──────────────────────────────────────
+  const mapUpdate = {};
+  allObras.forEach(o=>{ mapUpdate[o.id]=o; });
+  bundlingCands.forEach(b=>{
+    if(mapUpdate[b.idExcluida]){
+      mapUpdate[b.idExcluida].bundlingDist    = parseFloat(b.distKm);
+      mapUpdate[b.idExcluida].bundlingRefNota = b.notaSelecionada;
+    }
+  });
+  _cfObras.forEach(o=>{ if(mapUpdate[o.id]) Object.assign(o, mapUpdate[o.id]); });
+
+  cfRenderFila();
+  cfRenderEstatisticas();
+  cfAtualizarContador();
+  cfMostrarResultadoSelecao(selecionadas, adiadas);
+
+  const comEmp = selecionadas.filter(o=>o.empreiteiraRec && !o.adiar);
+  const uscSel = comEmp.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const uscPorEmp = {}; comEmp.forEach(o=>{ uscPorEmp[o.empreiteiraRec]=(uscPorEmp[o.empreiteiraRec]||0)+(parseFloat(o.usc)||0); });
+  const forcSemEmp = selecionadas.filter(o=>(o.forcado||o.status==='forcada')&&!o.empreiteiraRec);
+  const empSummary = Object.entries(uscPorEmp).map(([e,u])=>
+    e.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')+': '+u.toFixed(0)+' USC'
+  ).join(' · ');
+  toast(`✓ ${comEmp.length} obras · ${uscSel.toFixed(0)} USC total`+
+    (empSummary?` (${empSummary})`:'') +
+    (forcSemEmp.length?` · ⭐${forcSemEmp.length} forçadas s/emp`:'') +
+    (adiadas.length?` · ⏸${adiadas.length} adiadas`:''),
+    'ok');
+};
+
+
 
 
 // ── Atualiza status de um desligamento individualmente ─────────────────────
