@@ -4916,26 +4916,47 @@ window.cfRunSelecao = async function(){
     if(empF) uscAtribuidoMap[empF] = (uscAtribuidoMap[empF]||0) + uscF;
   });
 
-  // ── Passo 2: Regulares — seleciona até os limites globais
-  //   Obra só entra se:
-  //   (a) Cabe nos limites globais (obras + USC)
-  //   (b) Pelo menos uma empreiteira tem capacidade (não adiada)
-  const adiadas  = []; // dentro dos limites mas sem empreiteira disponível
-  const excluidas = []; // além dos limites globais
+  // ── Passo 2: Regulares — fila da mais antiga para a mais nova
+  //   Ordem: dataEntrada ASC (primário) → posicao ASC (secundário)
+  //   Para cada obra:
+  //     1. Limites globais atingidos (obras E USC) → excluída (forecast)
+  //     2. Cabe nos limites MAS ambas empreiteiras bloqueadas → adiada, CONTINUA para próxima
+  //     3. Cabe nos limites E tem empreiteira → SELECIONADA
+  const adiadas   = [];
+  const excluidas = [];
 
-  regulares.forEach(o=>{
+  // Reordena por dataEntrada (mais antiga = prioridade) + posicao como desempate
+  // Ordem da planilha = posicao (atribuída no momento do import, preservada na fila)
+  // O drag-and-drop altera a posicao, então quem está no topo da fila tem posicao menor
+  const filaOrdenada = [...regulares].sort((a,b)=>(a.posicao||999)-(b.posicao||999));
+
+  for(const o of filaOrdenada){
     const usc = parseFloat(o.usc)||0;
 
-    // Verificar limites globais
-    if(obrasAcum >= limObras || uscAcum + usc > limUSC + 0.01){
+    // Limites globais TOTALMENTE atingidos → para de selecionar (excluída para forecast)
+    if(obrasAcum >= limObras && uscAcum >= limUSC){
       excluidas.push({...o, selecionada:false});
-      return;
+      continue;
     }
 
-    // Verificar disponibilidade de empreiteira (com USC já atribuído nesta rodada)
+    // Limite de obras atingido → excluída
+    if(obrasAcum >= limObras){
+      excluidas.push({...o, selecionada:false});
+      continue;
+    }
+
+    // Esta obra excede o USC restante → pula e tenta próxima (menor pode caber)
+    if(uscAcum + usc > limUSC + 0.01){
+      // Marca como excluída por USC mas CONTINUA tentando obras menores
+      excluidas.push({...o, selecionada:false,
+        motivo:`USC insuficiente: restam ${(limUSC-uscAcum).toFixed(0)} USC, obra precisa ${usc.toFixed(0)}`});
+      continue;
+    }
+
+    // Verifica disponibilidade de empreiteira
     const rec = cfRecomendarEmpreiteira(o, _cfConfig, uscAtribuidoMap);
     if(rec.adiar){
-      // Ambas bloqueadas → obra adiada, NÃO conta nos limites globais
+      // Ambas bloqueadas → ADIADA, não conta nos limites, CONTINUA para próxima obra
       adiadas.push({...o, selecionada:false, adiar:true,
         empreiteiraRec:null,
         scoreJSON: JSON.stringify(rec.scores.map(s=>({
@@ -4948,19 +4969,17 @@ window.cfRunSelecao = async function(){
           nAtrasadas:s.carga?.nAtrasadas||0,
           motivo:s.carga?.motivo||null, mesVenc:s.mesVenc||''
         }))),
-        motivo: 'Ambas empreiteiras bloqueadas — '+
-          rec.scores.map(s=>s.emp.replace('CS ELETRICIDADE','CS')
-            .replace('ELETELSUL','Eletel')+': '+
-            (s.carga?.motivo||s.carga?.zona||'?')).join(' | ')
+        motivo:'Adiada — '+rec.scores.map(s=>
+          s.emp.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')
+          +': '+(s.carga?.motivo||s.carga?.zona||'?')).join(' | ')
       });
-      return;
+      continue;  // ← pula e analisa a próxima obra da fila
     }
 
-    // Obra selecionada com empreiteira
+    // ✅ Obra selecionada com empreiteira atribuída
     const oEmp = rec.recomendada;
     selecionadas.push({...o, selecionada:true, rodadaEstimada:1,
-      empreiteiraRec: oEmp,
-      adiar: false,
+      empreiteiraRec: oEmp, adiar:false,
       scoreJSON: JSON.stringify(rec.scores.map(s=>({
         emp:s.emp, total:s.scoreFinal,
         dist:s.detalhes?.dist||0, eq:s.detalhes?.equil||0,
@@ -4971,11 +4990,12 @@ window.cfRunSelecao = async function(){
         nAtrasadas:s.carga?.nAtrasadas||0,
         motivo:s.carga?.motivo||null, mesVenc:s.mesVenc||''
       }))),
-      motivo: `${rec.recomendada?.replace('CS ELETRICIDADE','CS')}: dist+${rec.scores[0]?.detalhes?.dist||0} eq+${rec.scores[0]?.detalhes?.equil||0}`
+      motivo:`${oEmp?.replace('CS ELETRICIDADE','CS')}: dist+${rec.scores[0]?.detalhes?.dist||0} eq+${rec.scores[0]?.detalhes?.equil||0}`
     });
-    uscAcum += usc; obrasAcum++;
+    uscAcum += usc;
+    obrasAcum++;
     if(oEmp) uscAtribuidoMap[oEmp] = (uscAtribuidoMap[oEmp]||0) + usc;
-  });
+  }
 
   // ── Passo 3: Forecast para excluídas (rodadas futuras) ──────────────────
   const capObrasRodada = limObras;
