@@ -4365,7 +4365,8 @@ window.cfMostrarResultadoSelecao = function(selRodada1, adiadas){
     </div>
 
     <!-- Obras com recomendação -->
-    ${comRec.length?`<div style="font-weight:700;font-size:11px;color:#22C55E;margin-bottom:6px">✅ ${comRec.length} obras atribuídas (CS: ${comRec.filter(o=>o.empreiteiraRec?.includes('CS')).length} · Eletel: ${comRec.filter(o=>o.empreiteiraRec?.includes('EL')||o.empreiteiraRec?.includes('Eletel')).length})</div>
+    ${comRec.length?`<div style="font-weight:700;font-size:11px;color:#22C55E;margin-bottom:6px">
+      ✅ ${comRec.length} obras atribuídas · ${comRec.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0)} USC (CS: ${comRec.filter(o=>o.empreiteiraRec?.includes('CS')).length} · Eletel: ${comRec.filter(o=>o.empreiteiraRec?.includes('EL')||o.empreiteiraRec?.includes('Eletel')).length})</div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px">
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
         <thead><tr style="background:var(--surface2)">
@@ -4714,7 +4715,7 @@ function cfRenderCapacidadeFieldset(empNome, empKey, c){
 }
 
 // ── Modelo de Backlog — calcula carga futura mês a mês ──────────────────────
-function calcBacklogScore(emp, mesVencimento, configCf){
+function calcBacklogScore(emp, mesVencimento, configCf, uscJaAtribuido){
   const isCS = emp.toUpperCase().includes('CS');
   const EXCLUIR = ['PODI','Mono-Tri'];
   const obrasAtivas = obras.filter(o=>
@@ -4723,7 +4724,8 @@ function calcBacklogScore(emp, mesVencimento, configCf){
     !o.conclusao && !o.armazenado && !o.cancelado &&
     !EXCLUIR.includes(o.programa)
   );
-  const backlogBase = obrasAtivas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const backlogBase = obrasAtivas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0)
+    + (parseFloat(uscJaAtribuido)||0); // USC já atribuído nesta rodada de seleção
   const avgUSC = obrasAtivas.length>0 ? backlogBase/obrasAtivas.length : 0;
   const hoje = (new Date()).toISOString().split('T')[0];
   const nAtrasadas = obrasAtivas.filter(o=>o.dataLimite&&o.dataLimite<hoje).length;
@@ -4801,7 +4803,7 @@ function calcScoreDesl(equipRef, emp){
 }
 
 // Score total por empreiteira para uma obra candidata
-function calcScoreEmpreiteira(obracf, emp, configCf){
+function calcScoreEmpreiteira(obracf, emp, configCf, uscJaAtribuido){
   const raio  = configCf.raioProx||10;
   const alfa  = configCf.alfaProximidade||0.6;
   const pDist = (configCf.pesoDistancia||40)/100;
@@ -4820,7 +4822,7 @@ function calcScoreEmpreiteira(obracf, emp, configCf){
   const sDist  = calcScoreDist(gps, emp, raio, alfa);
   const sEq    = calcScoreEquil(emp, meta);
   const sDesl  = calcScoreDesl(obracf.equipRef, emp);
-  const carga  = calcBacklogScore(emp, mesVenc, configCf);
+  const carga  = calcBacklogScore(emp, mesVenc, configCf, uscJaAtribuido);
   const pCarg  = (configCf.pesoDesligamento||20)/100; // reusa peso "desl" para carga no score
 
   // Score por fator — carga é componente separado (não multiplicador)
@@ -4847,9 +4849,10 @@ function calcScoreEmpreiteira(obracf, emp, configCf){
 }
 
 // Recomenda empreiteira para uma obra da fila
-function cfRecomendarEmpreiteira(obracf, configCf){
+function cfRecomendarEmpreiteira(obracf, configCf, uscAtribuidoMap){
   const empreiteiras = ['CS ELETRICIDADE','ELETELSUL'];
-  const scores = empreiteiras.map(e=>calcScoreEmpreiteira(obracf,e,configCf));
+  const scores = empreiteiras.map(e=>calcScoreEmpreiteira(
+    obracf, e, configCf, (uscAtribuidoMap||{})[e]||0));
   scores.sort((a,b)=>b.scoreFinal-a.scoreFinal);
 
   const melhor = scores[0];
@@ -4886,9 +4889,11 @@ window.cfRunSelecao = async function(){
   const selecionadas = [];
   let uscAcum   = 0;
   let obrasAcum = 0;
+  // Rastreia USC já atribuído por empreiteira nesta rodada (para evitar ultrapassar limite)
+  const uscAtribuidoMap = {'CS ELETRICIDADE':0, 'ELETELSUL':0};
 
   forcadas.forEach(o=>{
-    const rec = cfRecomendarEmpreiteira(o, _cfConfig);
+    const rec = cfRecomendarEmpreiteira(o, _cfConfig, uscAtribuidoMap);
     selecionadas.push({...o, selecionada:true, rodadaEstimada:1,
       empreiteiraRec: rec.recomendada||null, adiar: rec.adiar||false,
       scoreJSON: JSON.stringify(rec.scores.map(s=>({
@@ -4905,8 +4910,10 @@ window.cfRunSelecao = async function(){
         ? 'Forçada — ambas empreiteiras bloqueadas no mês de vencimento'
         : `Forçada → ${rec.recomendada||'—'}`
     });
-    uscAcum   += parseFloat(o.usc)||0;
-    obrasAcum++;
+    const uscF = parseFloat(o.usc)||0;
+    uscAcum += uscF; obrasAcum++;
+    const empF = selecionadas[selecionadas.length-1].empreiteiraRec;
+    if(empF) uscAtribuidoMap[empF] = (uscAtribuidoMap[empF]||0) + uscF;
   });
 
   // ── Passo 2: Regulares — seleciona até os limites globais
@@ -4925,8 +4932,8 @@ window.cfRunSelecao = async function(){
       return;
     }
 
-    // Verificar disponibilidade de empreiteira
-    const rec = cfRecomendarEmpreiteira(o, _cfConfig);
+    // Verificar disponibilidade de empreiteira (com USC já atribuído nesta rodada)
+    const rec = cfRecomendarEmpreiteira(o, _cfConfig, uscAtribuidoMap);
     if(rec.adiar){
       // Ambas bloqueadas → obra adiada, NÃO conta nos limites globais
       adiadas.push({...o, selecionada:false, adiar:true,
@@ -4950,8 +4957,9 @@ window.cfRunSelecao = async function(){
     }
 
     // Obra selecionada com empreiteira
+    const oEmp = rec.recomendada;
     selecionadas.push({...o, selecionada:true, rodadaEstimada:1,
-      empreiteiraRec: rec.recomendada,
+      empreiteiraRec: oEmp,
       adiar: false,
       scoreJSON: JSON.stringify(rec.scores.map(s=>({
         emp:s.emp, total:s.scoreFinal,
@@ -4965,8 +4973,8 @@ window.cfRunSelecao = async function(){
       }))),
       motivo: `${rec.recomendada?.replace('CS ELETRICIDADE','CS')}: dist+${rec.scores[0]?.detalhes?.dist||0} eq+${rec.scores[0]?.detalhes?.equil||0}`
     });
-    uscAcum   += usc;
-    obrasAcum++;
+    uscAcum += usc; obrasAcum++;
+    if(oEmp) uscAtribuidoMap[oEmp] = (uscAtribuidoMap[oEmp]||0) + usc;
   });
 
   // ── Passo 3: Forecast para excluídas (rodadas futuras) ──────────────────
@@ -5041,9 +5049,14 @@ window.cfRunSelecao = async function(){
 
   const comEmp = selecionadas.filter(o=>o.empreiteiraRec && !o.adiar);
   const uscSel = comEmp.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const uscPorEmp = {}; comEmp.forEach(o=>{ uscPorEmp[o.empreiteiraRec]=(uscPorEmp[o.empreiteiraRec]||0)+(parseFloat(o.usc)||0); });
   const forcSemEmp = selecionadas.filter(o=>(o.forcado||o.status==='forcada')&&!o.empreiteiraRec);
-  toast(`✓ ${comEmp.length} obras atribuídas · ${uscSel.toFixed(0)} USC`+
-    (forcSemEmp.length?` · ⭐${forcSemEmp.length} forçadas s/empreiteira`:'') +
+  const empSummary = Object.entries(uscPorEmp).map(([e,u])=>
+    e.replace('CS ELETRICIDADE','CS').replace('ELETELSUL','Eletel')+': '+u.toFixed(0)+' USC'
+  ).join(' · ');
+  toast(`✓ ${comEmp.length} obras · ${uscSel.toFixed(0)} USC total`+
+    (empSummary?` (${empSummary})`:'') +
+    (forcSemEmp.length?` · ⭐${forcSemEmp.length} forçadas s/emp`:'') +
     (adiadas.length?` · ⏸${adiadas.length} adiadas`:''),
     'ok');
 };
