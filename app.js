@@ -385,6 +385,46 @@ let _renderDashTimer=null;
 function renderDashDebounced(){ clearTimeout(_renderDashTimer); _renderDashTimer=setTimeout(renderDash,80); }
 window.renderDash = renderDash;  // Export para inline handlers
 
+
+// ── Favoritos ────────────────────────────────────────────────────────────────
+window.toggleFavorito = async function(obraId){
+  const obra = obras.find(o=>o.id===obraId);
+  if(!obra) return;
+  const favs = Array.isArray(obra.favorito) ? [...obra.favorito] : [];
+  const uid  = auth.currentUser?.uid||'';
+  if(!uid) return;
+  const idx  = favs.indexOf(uid);
+  if(idx>=0) favs.splice(idx,1); else favs.push(uid);
+  await updateDoc(doc(db,'obras',obraId),{favorito:favs});
+  obra.favorito = favs;
+  renderDash();
+};
+
+async function renderDashFavoritos(){
+  const uid = auth.currentUser?.uid||'';
+  if(!uid) return '';
+  const favObras = obras.filter(o=>Array.isArray(o.favorito)&&o.favorito.includes(uid)
+    &&!o.cancelado&&!o.armazenado);
+  if(!favObras.length) return '';
+  const rows = favObras.map(o=>{
+    const st  = statusOf(o);
+    const stCor = st.includes('Atrasada')||st.includes('Expirada')||st.includes('Executivo')
+      ? '#EF4444' : st.includes('Paral')||st.includes('Kaffa') ? '#F59E0B' : 'var(--muted)';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <button onclick="toggleFavorito('${o.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:#F59E0B;flex-shrink:0">⭐</button>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:700;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="openObraModal('${o.id}')">${o.numero||o.id}</div>
+        <div style="font-size:9px;color:var(--muted)">${o.cidade||o.municipio||'—'} · ${o.empreiteira||'—'}</div>
+      </div>
+      <span style="font-size:9px;color:${stCor};white-space:nowrap;font-weight:600">${st}</span>
+    </div>`;
+  }).join('');
+  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+    <div style="font-weight:700;font-size:12px;margin-bottom:8px">⭐ Obras Favoritas (${favObras.length})</div>
+    ${rows}
+  </div>`;
+}
+
 function renderDash(){
   if(window._migrando) return; // não renderiza durante migração para evitar flickering
   const listAll = obras; // todas as obras (sem filtro de perfil para o gerente navegar)
