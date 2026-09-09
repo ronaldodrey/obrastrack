@@ -5298,3 +5298,239 @@ function _renderDesligSlot(latest,allDocIds){
     ${entradasODI.length?makeTable(entradasODI,'⚡ Obras ODI','#F59E0B'):''}
     ${semTipo.length?makeTable(semTipo,'❓ Não identificadas','#6b7280'):''}`;
 }
+
+
+
+// ══ FUNÇÕES RECUPERADAS — páginas secundárias ════════════════════════════════
+
+// ── Abertura de Obras ─────────────────────────────────────────────────────
+function renderAberturaObras(){
+  const cont = document.getElementById('pgAberturaContent');
+  if(!cont) return;
+  if(me.perfil !== 'gerente'){ cont.innerHTML='<div class="loading">Sem acesso.</div>'; return; }
+  const hoje30 = new Date(); hoje30.setDate(hoje30.getDate()-30);
+  const lim30 = hoje30.toISOString().split('T')[0];
+  const recentes = obras.filter(o=>!o.cancelado&&o.dataAbertura&&o.dataAbertura>=lim30)
+    .sort((a,b)=>(b.dataAbertura||'').localeCompare(a.dataAbertura||''));
+  const pendentes = obras.filter(o=>!o.cancelado&&!o.armazenado&&!o.fiscalizacao)
+    .sort((a,b)=>(a.dataLimite||'9').localeCompare(b.dataLimite||'9'));
+  function obraRow(o){
+    const st=statusOf(o);
+    const cor=st.includes('Atrasada')||st.includes('Executivo')?'#EF4444':st.includes('Paral')?'#F59E0B':'var(--muted)';
+    return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
+      <td style="padding:6px 8px;font-weight:700;color:var(--accent)">${o.numero||'—'}</td>
+      <td style="padding:6px 8px">${o.cidade||o.municipio||'—'}</td>
+      <td style="padding:6px 8px">${o.tipo||'—'}</td>
+      <td style="padding:6px 8px">${o.empreiteira||'—'}</td>
+      <td style="padding:6px 8px">${o.dataAbertura?fmtTxt(o.dataAbertura):'—'}</td>
+      <td style="padding:6px 8px;color:${cor}">${st}</td>
+      <td style="padding:6px 8px;text-align:right">${parseFloat(o.usc||0).toFixed(1)}</td>
+    </tr>`;}
+  const hdr=`<thead><tr style="background:var(--surface2)"><th style="padding:6px 8px;text-align:left">Nota</th><th style="padding:6px 8px;text-align:left">Cidade</th><th style="padding:6px 8px;text-align:left">Tipo</th><th style="padding:6px 8px;text-align:left">Empreiteira</th><th style="padding:6px 8px;text-align:left">Abertura</th><th style="padding:6px 8px;text-align:left">Status</th><th style="padding:6px 8px;text-align:right">USC</th></tr></thead>`;
+  const tbl=(lst)=>lst.length?`<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">${hdr}<tbody>${lst.map(obraRow).join('')}</tbody></table></div></div>`:'<div style="color:var(--muted);padding:16px;font-size:12px">Nenhuma obra.</div>';
+  cont.innerHTML=`<div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📂 Abertura de Obras</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center"><div style="font-size:28px;font-weight:900;color:var(--accent)">${recentes.length}</div><div style="font-size:10px;color:var(--muted)">Abertas nos últimos 30d</div></div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center"><div style="font-size:28px;font-weight:900;color:#F59E0B">${pendentes.length}</div><div style="font-size:10px;color:var(--muted)">Aguardando fiscalização</div></div>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">📋 Abertas recentemente (30d)</div>${tbl(recentes)}
+    <div style="font-weight:700;font-size:13px;margin:16px 0 8px">⏳ Pendentes de fiscalização</div>${tbl(pendentes.slice(0,50))}`;
+}
+window.renderAberturaObras = renderAberturaObras;
+
+
+
+
+
+// ── Análise Financeira — parâmetros e render ──────────────────────────────
+let _paramsFinCache = null;
+
+async function loadParamsFinanceiros(){
+  if(_paramsFinCache) return _paramsFinCache;
+  try{
+    const snap = await getDoc(doc(db,'config','financeiro'));
+    _paramsFinCache = snap.exists() ? snap.data() : {};
+  }catch(e){ _paramsFinCache = {}; }
+  return _paramsFinCache;
+}
+window.loadParamsFinanceiros = loadParamsFinanceiros;
+
+window.saveParamsFinanceiros = async function(){
+  const g = id => document.getElementById(id)?.value;
+  const params = {
+    valorUSC_CS:    parseFloat(g('pfValorUSC_CS'))||0,
+    valorUSC_EL:    parseFloat(g('pfValorUSC_EL'))||0,
+    valorULV_CS:    parseFloat(g('pfValorULV_CS'))||0,
+    valorULV_EL:    parseFloat(g('pfValorULV_EL'))||0,
+    bonusConclCS:   parseFloat(g('pfBonusCS'))||0,
+    bonusConclEL:   parseFloat(g('pfBonusEL'))||0,
+  };
+  await setDoc(doc(db,'config','financeiro'), params);
+  _paramsFinCache = params;
+  toast('✓ Parâmetros financeiros salvos.','ok');
+  renderAnaliseFinanceira();
+};
+
+function getParamsFinanceiros(){
+  return _paramsFinCache || {};
+}
+
+function renderAnaliseFinanceira(){
+  const cont = document.getElementById('pgAnaliseContent');
+  if(!cont) return;
+  const p = getParamsFinanceiros();
+
+  const obrasFin = obras.filter(o=>
+    (o.tipo==='R1'||o.tipo==='R2') && !o.cancelado
+  );
+
+  // Por empreiteira
+  const empData = {};
+  ['CS ELETRICIDADE','ELETELSUL'].forEach(emp=>{
+    const mine = obrasFin.filter(o=>(o.empreiteira||'').toUpperCase()===emp.toUpperCase());
+    const isCS = emp.includes('CS');
+    const vUSC = isCS?(p.valorUSC_CS||0):(p.valorUSC_EL||0);
+    const vULV = isCS?(p.valorULV_CS||0):(p.valorULV_EL||0);
+    const bonus = isCS?(p.bonusConclCS||0):(p.bonusConclEL||0);
+    const uscTotal = mine.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    const ulvTotal = mine.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+    const conclCount = mine.filter(o=>o.conclusao).length;
+    const prevTotal = uscTotal*vUSC + ulvTotal*vULV + conclCount*bonus;
+    empData[emp] = {mine, uscTotal, ulvTotal, conclCount, prevTotal, vUSC, vULV, bonus};
+  });
+
+  function kpiCard(label, value, sub=''){
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
+      <div style="font-size:20px;font-weight:900;color:var(--accent)">${value}</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px">${label}</div>
+      ${sub?`<div style="font-size:9px;color:var(--muted)">${sub}</div>`:''}
+    </div>`;
+  }
+
+  const totalPrev = Object.values(empData).reduce((s,d)=>s+d.prevTotal,0);
+
+  cont.innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">💰 Análise Financeira</div>
+
+    <!-- Parâmetros -->
+    <details style="margin-bottom:16px">
+      <summary style="cursor:pointer;font-weight:700;font-size:13px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:10px;list-style:none">
+        ⚙️ Parâmetros de Valor ▾
+      </summary>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:0 0 10px 10px;padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+        ${['CS ELETRICIDADE','ELETELSUL'].map(emp=>{
+          const key = emp.includes('CS')?'CS':'EL';
+          const lbl = emp.includes('CS')?'CS Eletricidade':'Eletelsul';
+          return `<fieldset style="border:1px solid var(--border);border-radius:8px;padding:10px">
+            <legend style="font-size:10px;font-weight:700;color:var(--accent);padding:0 6px">${lbl}</legend>
+            <div class="fg" style="margin-bottom:6px"><label style="font-size:10px">Valor USC (R$)</label><input type="number" id="pfValorUSC_${key}" value="${p['valorUSC_'+key]||0}" step="0.01" style="font-size:12px"></div>
+            <div class="fg" style="margin-bottom:6px"><label style="font-size:10px">Valor ULV (R$)</label><input type="number" id="pfValorULV_${key}" value="${p['valorULV_'+key]||0}" step="0.01" style="font-size:12px"></div>
+            <div class="fg"><label style="font-size:10px">Bônus conclusão (R$)</label><input type="number" id="pfBonus${key}" value="${p['bonusConclCS']||0}" step="0.01" style="font-size:12px"></div>
+          </fieldset>`;
+        }).join('')}
+        <div style="grid-column:1/-1;display:flex;justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" onclick="window.saveParamsFinanceiros()">💾 Salvar</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- KPIs totais -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+      ${kpiCard('Previsto Total', 'R$ '+totalPrev.toLocaleString('pt-BR',{minimumFractionDigits:0}))}
+      ${kpiCard('Obras RD', obrasFin.length)}
+      ${kpiCard('USC Total', obrasFin.reduce((s,o)=>s+(parseFloat(o.usc)||0),0).toFixed(0))}
+    </div>
+
+    <!-- Por empreiteira -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      ${Object.entries(empData).map(([emp,d])=>`
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:10px">${emp.replace('CS ELETRICIDADE','CS Eletricidade')}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px">
+            <div><span style="color:var(--muted)">Obras</span><br><strong>${d.mine.length}</strong></div>
+            <div><span style="color:var(--muted)">USC Total</span><br><strong>${d.uscTotal.toFixed(0)}</strong></div>
+            <div><span style="color:var(--muted)">Concluídas</span><br><strong>${d.conclCount}</strong></div>
+            <div><span style="color:var(--muted)">Previsto</span><br><strong>R$ ${d.prevTotal.toLocaleString('pt-BR',{minimumFractionDigits:0})}</strong></div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+window.renderAnaliseFinanceira = renderAnaliseFinanceira;
+
+// ── Programas ─────────────────────────────────────────────────────────────
+function renderProgramas(){
+  const cont = document.getElementById('pgProgramasContent');
+  if(!cont) return;
+  if(me.perfil!=='gerente'){ cont.innerHTML='<div class="loading">Sem acesso.</div>'; return; }
+
+  const PROGS = ['Regulatório','PODI','Mono-Tri','Melhoria'];
+  const stats = {};
+  PROGS.forEach(prog=>{
+    const mine = obras.filter(o=>o.programa===prog&&!o.cancelado);
+    const abertas = mine.filter(o=>!o.armazenado);
+    const encerradas = mine.filter(o=>o.armazenado);
+    const atrasadas = abertas.filter(o=>o.dataLimite&&o.dataLimite<new Date().toISOString().split('T')[0]&&!o.conclusao);
+    const uscTotal = abertas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+    stats[prog] = {mine, abertas, encerradas, atrasadas, uscTotal};
+  });
+
+  const semProg = obras.filter(o=>!o.programa&&!o.cancelado);
+
+  function progCard(prog, d){
+    const pct = d.abertas.length>0 ? Math.round((d.atrasadas.length/d.abertas.length)*100) : 0;
+    const cor = pct>20?'#EF4444':pct>10?'#F59E0B':'#22C55E';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+      <div style="font-weight:800;font-size:14px;margin-bottom:12px">${prog}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px;margin-bottom:8px">
+        <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:var(--accent)">${d.abertas.length}</div><div style="color:var(--muted)">Abertas</div></div>
+        <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:#EF4444">${d.atrasadas.length}</div><div style="color:var(--muted)">Atrasadas</div></div>
+        <div style="text-align:center"><div style="font-size:20px;font-weight:900;color:#22C55E">${d.encerradas.length}</div><div style="color:var(--muted)">Encerradas</div></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted)">USC em aberto: <strong>${d.uscTotal.toFixed(0)}</strong></div>
+      ${pct>0?`<div style="margin-top:8px;height:4px;background:var(--surface2);border-radius:2px">
+        <div style="width:${Math.min(pct,100)}%;height:100%;background:${cor};border-radius:2px"></div>
+      </div><div style="font-size:9px;color:${cor};margin-top:2px">${pct}% atrasadas</div>`:''}
+    </div>`;
+  }
+
+  cont.innerHTML = `
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📋 Programas</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:16px">
+      ${PROGS.map(p=>progCard(p, stats[p])).join('')}
+    </div>
+    ${semProg.length?`<div style="font-size:12px;color:var(--muted);padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+      ⚠️ ${semProg.length} obra(s) sem programa definido</div>`:''}`;
+}
+window.renderProgramas = renderProgramas;
+
+
+// ── Otimização de Portfólio ───────────────────────────────────────────────
+function renderOtimizacaoPortfolio(){
+  const cont = document.getElementById('pgOtimPortContent');
+  if(!cont) return;
+  cont.innerHTML=`<div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:20px">📊 Otimização de Portfólio</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">🔧</div>
+      <div style="font-size:14px;font-weight:700">Em desenvolvimento</div>
+    </div>`;
+}
+window.renderOtimizacaoPortfolio = renderOtimizacaoPortfolio;
+
+// ── Fix desligamentos — garante que o slot existe no DOM ──────────────────
+(function(){
+  const _orig = typeof renderDesligamentos!=='undefined' ? renderDesligamentos : null;
+  window.renderDesligamentos = function(){
+    const cont = document.getElementById('pgDesligamentosContent');
+    if(cont && !document.getElementById('desligSlot')){
+      cont.innerHTML=`<div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:16px">📅 Desligamentos</div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+            📤 Importar Word/Excel
+            <input type="file" id="inputPdfDeslig" accept=".docx,.xlsx,.xls" style="display:none" onchange="window.uploadDesligamentos()">
+          </label>
+        </div>
+        <div id="desligSlot"><div class="loading">Carregando histórico...</div></div>`;
+    }
+    if(_orig) _orig();
+  };
+})();
