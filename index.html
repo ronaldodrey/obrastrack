@@ -210,11 +210,14 @@
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('pend_exec')">⚠️ Pendência Execução</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('conc_sem_kaffa')">📋 Conc. s/ Kaffa</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('fisc_sem_kaffa')">🔍 Fisc. s/ Kaffa</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('paral_expirada')" style="color:#DC2626">🛑 Paral. Expirada</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('prob_executivo')" style="color:#7c3aed">⚡ Prob. Executivo</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('pend_ag_conf')">⏳ Ag. Conf. Pendência</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('encerradas')">✅ Encerradas completas</button>
           <button class="btn btn-secondary btn-sm" style="border-color:rgba(168,85,247,.4);color:#A855F7" onclick="filtroRapido('proc_cancelamento')">⏸ Proc. Cancelamento</button>
         <button class="btn btn-danger btn-sm" id="btnBulkDelete" style="display:none" onclick="bulkDeleteEncerradas()">🗑️ Excluir seleção</button>
         <button class="btn btn-sm" id="btnApagarTodas" style="display:none;background:rgba(239,68,68,.1);color:#EF4444;border:1px solid rgba(239,68,68,.3);font-size:10px" onclick="apagarTodasObras()">⚠️ Apagar TODAS as obras</button>
+        <button class="btn btn-sm" id="btnLimparEquip" style="display:none;background:rgba(239,68,68,.07);color:#EF4444;border:1px solid rgba(239,68,68,.3);font-size:10px" onclick="window.limparEquipamentosDuplicados()" title="Zerar dados de transformador/equipamento de todas as obras">🗑️ Limpar Equipamentos Duplicados</button>
       </div>
     </div>
 
