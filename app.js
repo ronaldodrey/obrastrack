@@ -5,7 +5,7 @@ console.log('%c[SPPC] app.js v2608 carregado', 'color:#7c6af7;font-weight:bold;f
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
                             from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc,
+import { getFirestore, collection, doc, getDocs, getDoc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch,
          onSnapshot, serverTimestamp, query, orderBy, where }
                             from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import firebaseConfig       from "./firebase-config.js";
@@ -1481,6 +1481,8 @@ window.openObraModal=function(obraId){
   document.getElementById('obraModalTit').textContent = isEdit
     ? `Obra ${obra.numero||obraId}` : 'Nova Obra';
   document.getElementById('obraId').value=obraId||'';
+  // Sempre reseta equipamentos ao abrir o modal (evita contaminação entre obras)
+  if(!obraId){ _equipInstalados=[]; _equipRetirados=[]; renderEquipInstalados(); renderEquipRetirados(); }
   // reset
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
    'oFabricante','oKaffa','oCadastro','oFiscalizacao','oPrazoPendencia','oRegularizacao','oMedicao',
@@ -1531,7 +1533,9 @@ window.openObraModal=function(obraId){
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
     set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); set('oPrograma',obra.programa||(obra.tipo==='R1'?'Regulatório':'')); toggleEnquadramento();
-    // Transformer fields
+    // Transformer fields — inicializa arrays de equipamentos para a obra atual
+    // Garante que dados de obras anteriores não vazam para esta obra
+    initEquipFromObra(obra);
     set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
     const retChk=document.getElementById('oTemRetirado'); if(retChk){ retChk.checked=!!obra.temRetirado; toggleRetirado(); } set('oDesligamento',obra.dataDesligamento);
