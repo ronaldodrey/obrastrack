@@ -227,6 +227,10 @@ async function iniciarApp(){
     tabs.map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
 
   document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
+  if(me.perfil==='gerente'){
+    const btnLimpEq = document.getElementById('btnLimparEquip');
+    if(btnLimpEq) btnLimpEq.style.display='inline-flex';
+  }
   document.getElementById('btnImport').style.display=me.perfil==='gerente'?'inline-flex':'none';
   document.getElementById('btnBulkDelete').style.display='none'; // shown by filtroRapido when encerradas selected
   const btnApagarTodas=document.getElementById('btnApagarTodas');
@@ -6678,16 +6682,89 @@ function renderLocais(){
   const obraId = document.getElementById('obraId')?.value;
   const obra = obras.find(o=>o.id===obraId);
   const todos = [...(obra?.locaisTrabalho||[]), ..._locaisPendentes];
+  const podeEditar = ['gerente','fiscal','fiscal_adm'].includes(me.perfil);
   if(!todos.length){ container.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Nenhum local registrado.</div>'; return; }
-  container.innerHTML = todos.map(l=>`
-    <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;margin-bottom:4px">
+  container.innerHTML = todos.map(l=>{
+    const isPendente = _locaisPendentes.some(p=>p.id===l.id);
+    return `<div style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;margin-bottom:4px" id="local_row_${l.id}">
       <span style="font-size:10px;color:var(--muted);white-space:nowrap">${fmtTxt(l.data)}</span>
-      <span style="font-size:11px;flex:1">${l.descricao}</span>
-      ${_locaisPendentes.some(p=>p.id===l.id)?`<button onclick="removerLocal('${l.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px">✕</button>`:''}
-    </div>`).join('');
+      <span style="font-size:11px;flex:1" id="local_txt_${l.id}">${l.descricao}</span>
+      ${podeEditar?`<button onclick="editarLocal('${l.id}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px" title="Editar">✏️</button>`:''}
+      ${isPendente||podeEditar?`<button onclick="removerLocal('${l.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11px" title="Remover">✕</button>`:''}
+    </div>`;
+  }).join('');
 }
 
+window.editarLocal = function(id){
+  const obraId = document.getElementById('obraId')?.value;
+  const obra = obras.find(o=>o.id===obraId);
+  const todos = [...(obra?.locaisTrabalho||[]), ..._locaisPendentes];
+  const local = todos.find(l=>l.id===id);
+  if(!local) return;
+
+  const row = document.getElementById('local_row_'+id);
+  if(!row) return;
+
+  // Replace row content with inline editor
+  row.innerHTML = `
+    <span style="font-size:10px;color:var(--muted);white-space:nowrap">${fmtTxt(local.data)}</span>
+    <input type="text" id="local_edit_${id}" value="${local.descricao.replace(/"/g,'&quot;')}"
+      style="font-size:11px;flex:1;border:1px solid var(--accent);border-radius:4px;padding:2px 6px;background:var(--surface);color:inherit"
+      onkeydown="if(event.key==='Enter') salvarEdicaoLocal('${id}');if(event.key==='Escape') renderLocais();">
+    <button onclick="salvarEdicaoLocal('${id}')" style="background:var(--accent);border:none;color:#fff;cursor:pointer;border-radius:4px;padding:2px 8px;font-size:10px">✓</button>
+    <button onclick="renderLocais()" style="background:none;border:1px solid var(--border);cursor:pointer;border-radius:4px;padding:2px 6px;font-size:10px">✕</button>`;
+  document.getElementById('local_edit_'+id)?.focus();
+};
+
+window.salvarEdicaoLocal = async function(id){
+  const novaDesc = document.getElementById('local_edit_'+id)?.value?.trim();
+  if(!novaDesc){ toast('Descrição não pode estar vazia.','err'); return; }
+
+  const obraId = document.getElementById('obraId')?.value;
+  const obra = obras.find(o=>o.id===obraId);
+  if(!obra) return;
+
+  // Update in pending list (not yet saved)
+  const pendIdx = _locaisPendentes.findIndex(l=>l.id===id);
+  if(pendIdx >= 0){
+    _locaisPendentes[pendIdx].descricao = novaDesc;
+    renderLocais();
+    return;
+  }
+
+  // Update in Firestore (already saved local)
+  const novosLocais = (obra.locaisTrabalho||[]).map(l=>
+    l.id===id ? {...l, descricao:novaDesc} : l
+  );
+  try{
+    await updateDoc(doc(db,'obras',obraId), {locaisTrabalho: novosLocais});
+    obra.locaisTrabalho = novosLocais;
+    renderLocais();
+    toast('✓ Local de trabalho atualizado.','ok');
+  }catch(e){ toast('Erro ao salvar: '+e.message,'err'); }
+};
+
 window.removerLocal = function(id){
+  const obraId = document.getElementById('obraId')?.value;
+  const obra = obras.find(o=>o.id===obraId);
+
+  // If it's a pending local, just remove from array
+  if(_locaisPendentes.some(l=>l.id===id)){
+    _locaisPendentes = _locaisPendentes.filter(l=>l.id!==id);
+    renderLocais();
+    return;
+  }
+
+  // If it's a saved local (gerente/fiscal can remove)
+  if(['gerente','fiscal','fiscal_adm'].includes(me.perfil) && obra){
+    if(!confirm('Remover este local de trabalho?')) return;
+    const novosLocais = (obra.locaisTrabalho||[]).filter(l=>l.id!==id);
+    updateDoc(doc(db,'obras',obraId), {locaisTrabalho: novosLocais})
+      .then(()=>{ obra.locaisTrabalho = novosLocais; renderLocais(); toast('Local removido.','ok'); })
+      .catch(e=>toast('Erro: '+e.message,'err'));
+    return;
+  }
+
   _locaisPendentes = _locaisPendentes.filter(l=>l.id!==id);
   renderLocais();
 };
@@ -7348,8 +7425,8 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
       <!-- Lista obras saldo devedor (expansível) -->
       ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
         <div style="overflow-x:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse;font-size:9px">
-          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
-          <tbody>${devOp.map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
+          <tbody>${devOp.map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${o.conclusao?'<span style=\"color:#22C55E;font-weight:700\" title=\"Kaffa registrado em '+o.conclusao+'\">✅</span>':'<span style=\"color:#EF4444\" title=\"Sem kaffa\">❌</span>'}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
@@ -7387,6 +7464,52 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
       ${renderGraficoUSCMedido(obrasPool,cor)}
     </div>`;
 }
+
+
+// ── Limpeza de dados de equipamentos duplicados (uso único pelo gerente) ──────
+window.limparEquipamentosDuplicados = async function(){
+  if(me.perfil !== 'gerente'){ toast('Apenas gerente pode executar esta ação.','err'); return; }
+
+  const total = obras.filter(o => !o.cancelado && !o.armazenado &&
+    (o.equipamentosInstalados?.length || o.equipamentosRetirados?.length ||
+     o.sap || o.potencia || o.placas)).length;
+
+  if(!confirm(
+    `Limpar dados de transformador/equipamento de ${total} obras?\n\n` +
+    `Isso irá ZERAR os campos:\n` +
+    `• equipamentosInstalados\n• equipamentosRetirados\n` +
+    `• sap, série, fabricante, potência, placas (transformador único)\n\n` +
+    `ATENÇÃO: Esta ação não pode ser desfeita. Use somente se os dados estiverem incorretos.`
+  )) return;
+
+  toast('⏳ Limpando dados de equipamentos...','ok');
+  const CAMPOS_LIMPAR = {
+    equipamentosInstalados: [], equipamentosRetirados: [],
+    sap: null, serie: null, fabricante: null, potencia: null,
+    placas: null, dataTransf: null,
+    sapRet: null, serieRet: null, fabricanteRet: null,
+    potenciaRet: null, temRetirado: false,
+  };
+
+  const obrasMarcadas = obras.filter(o => !o.cancelado && !o.armazenado &&
+    (o.equipamentosInstalados?.length || o.equipamentosRetirados?.length ||
+     o.sap || o.potencia || o.placas));
+
+  let count = 0;
+  for(let i = 0; i < obrasMarcadas.length; i += 400){
+    const batch = writeBatch(db);
+    obrasMarcadas.slice(i, i+400).forEach(o => {
+      batch.update(doc(db,'obras',o.id), CAMPOS_LIMPAR);
+      // Atualiza local
+      Object.assign(o, CAMPOS_LIMPAR);
+    });
+    await batch.commit();
+    count += Math.min(400, obrasMarcadas.length - i);
+  }
+
+  toast(`✓ ${count} obras limpas. Os dados de transformador foram zerados.`,'ok');
+  renderObras();
+};
 
 function renderAnaliseFinanceira(){
   const cont = document.getElementById('pgAnaliseContent');
