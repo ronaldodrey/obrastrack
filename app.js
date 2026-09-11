@@ -2192,8 +2192,9 @@ window.saveObra=async function(){
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         dataTransf:g('oDataTransf')||null,
-        equipamentosInstalados:_equipInstalados,
-        equipamentosRetirados:_equipRetirados,
+        // Só escreve equipamentos se o usuário modificou; caso contrário mantém dado existente
+        equipamentosInstalados: _equipModificado ? _equipInstalados : (obraAntiga?.equipamentosInstalados||[]),
+        equipamentosRetirados:  _equipModificado ? _equipRetirados  : (obraAntiga?.equipamentosRetirados||[]),
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -2228,8 +2229,9 @@ window.saveObra=async function(){
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         equipamentoRef:g('oEquipRef')?parseInt(g('oEquipRef'))||null:null,
         dataTransf:g('oDataTransf')||null,
-        equipamentosInstalados:_equipInstalados,
-        equipamentosRetirados:_equipRetirados,
+        // Só escreve equipamentos se o usuário modificou; caso contrário mantém dado existente
+        equipamentosInstalados: _equipModificado ? _equipInstalados : (obraAntiga?.equipamentosInstalados||[]),
+        equipamentosRetirados:  _equipModificado ? _equipRetirados  : (obraAntiga?.equipamentosRetirados||[]),
         potencia: g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         temRetirado: document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet: g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
@@ -2254,8 +2256,9 @@ window.saveObra=async function(){
         cienFisc: false,
         potencia:g('oPotencia')?parseFloat(g('oPotencia'))||null:null,
         dataTransf:g('oDataTransf')||null,
-        equipamentosInstalados:_equipInstalados,
-        equipamentosRetirados:_equipRetirados,
+        // Só escreve equipamentos se o usuário modificou; caso contrário mantém dado existente
+        equipamentosInstalados: _equipModificado ? _equipInstalados : (obraAntiga?.equipamentosInstalados||[]),
+        equipamentosRetirados:  _equipModificado ? _equipRetirados  : (obraAntiga?.equipamentosRetirados||[]),
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
@@ -2307,6 +2310,7 @@ window.saveObra=async function(){
         atualizadaEm:serverTimestamp()
       };
       if(_medicoesPendentes.length > 0) _medicoesPendentes=[];
+    _equipModificado = false;
     }
 
     // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
@@ -3302,23 +3306,29 @@ function atualizarVisibilidadeDevoPend(obra){
 
 // ══ EQUIPAMENTOS DO KAFFA — múltiplos instalados e retirados ════════
 let _equipInstalados = [];   // [{id,placas,potencia,sap,serie,fabricante,dataTransf}]
-let _equipRetirados  = [];   // [{id,potencia,sap,serie,fabricante,dataTransf}]
+let _equipRetirados  = [];
+let _equipModificado  = false;   // [{id,potencia,sap,serie,fabricante,dataTransf}]
 
 window.adicionarEquipInstalado = function(){
+  _equipModificado = true;
   const id = `ei_${Date.now()}`;
   _equipInstalados.push({id,placas:'',potencia:'',sap:'',serie:'',fabricante:'',dataTransf:''});
   renderEquipInstalados();
 };
 window.adicionarEquipRetirado = function(){
+  _equipModificado = true;
   const id = `er_${Date.now()}`;
   _equipRetirados.push({id,potencia:'',sap:'',serie:'',fabricante:'',dataTransf:''});
   renderEquipRetirados();
 };
 window.removerEquipInstalado = function(id){
+  _equipModificado = true;
+  _equipModificado = true;
   _equipInstalados = _equipInstalados.filter(e=>e.id!==id);
   renderEquipInstalados();
 };
 window.removerEquipRetirado = function(id){
+  _equipModificado = true;
   _equipRetirados = _equipRetirados.filter(e=>e.id!==id);
   renderEquipRetirados();
 };
@@ -3389,6 +3399,7 @@ window.syncEquip = function(tipo, id, campo, valor){
 };
 
 function initEquipFromObra(obra){
+  _equipModificado = false;  // reset: user hasn't touched equipment yet
   _equipInstalados = obra?.equipamentosInstalados?.length ? [...obra.equipamentosInstalados] : [];
   _equipRetirados  = obra?.equipamentosRetirados?.length  ? [...obra.equipamentosRetirados]  : [];
   // Se obra tem os campos antigos (único equip), migra para array
@@ -7424,9 +7435,24 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
 
       <!-- Lista obras saldo devedor (expansível) -->
       ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
-        <div style="overflow-x:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse;font-size:9px">
+        <div style="display:flex;gap:8px;margin-bottom:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:9px;color:var(--muted)">Ordenar por:</span>
+          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='fiscal'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">👤 Fiscal</button>
+          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='usc'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">📊 USC ↓</button>
+          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='kaffa'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">✅ Kaffa</button>
+        </div>
+        <div style="overflow-x:auto;margin-top:2px"><table style="width:100%;border-collapse:collapse;font-size:9px">
           <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
-          <tbody>${devOp.map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${o.conclusao?'<span style=\"color:#22C55E;font-weight:700\" title=\"Kaffa registrado em '+o.conclusao+'\">✅</span>':'<span style=\"color:#EF4444\" title=\"Sem kaffa\">❌</span>'}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          <tbody>${(()=>{
+            const sortKey = window['_sortSaldo_'+nome.replace(/ /g,'_')]||'';
+            const sorted = [...devOp].sort((a,b)=>{
+              if(sortKey==='fiscal') return (a.fiscal||'').localeCompare(b.fiscal||'');
+              if(sortKey==='usc') return (parseFloat(b.usc)||0)-(parseFloat(a.usc)||0);
+              if(sortKey==='kafka'||sortKey==='kaffa') return (b.conclusao?1:0)-(a.conclusao?1:0);
+              return 0;
+            });
+            return sorted;
+          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${o.conclusao?'<span style=\"color:#22C55E;font-weight:700\" title=\"Kaffa registrado em '+o.conclusao+'\">✅</span>':'<span style=\"color:#EF4444\" title=\"Sem kaffa\">❌</span>'}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
