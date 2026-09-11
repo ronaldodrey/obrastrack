@@ -7437,18 +7437,18 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
       ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
         <div style="display:flex;gap:8px;margin-bottom:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
           <span style="font-size:9px;color:var(--muted)">Ordenar por:</span>
-          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='fiscal'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">👤 Fiscal</button>
-          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='usc'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">📊 USC ↓</button>
-          <button onclick="window['_sortSaldo_'+nome.replace(/ /g,'_')]='kaffa'; renderBlocoEmpreiteira(nome,cor,obrasPool,p); this.closest('details').open=true" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer">✅ Kaffa</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='fiscal'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='fiscal'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='fiscal'?'#fff':'inherit'}">👤 Fiscal</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='usc'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='usc'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='usc'?'#fff':'inherit'}">📊 USC ↓</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='kaffa'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='kaffa'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='kaffa'?'#fff':'inherit'}">✅ Kaffa</button>
         </div>
         <div style="overflow-x:auto;margin-top:2px"><table style="width:100%;border-collapse:collapse;font-size:9px">
           <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
           <tbody>${(()=>{
-            const sortKey = window['_sortSaldo_'+nome.replace(/ /g,'_')]||'';
+            const sortKey = ((window._analiseSort||{})[nome])||'';
             const sorted = [...devOp].sort((a,b)=>{
-              if(sortKey==='fiscal') return (a.fiscal||'').localeCompare(b.fiscal||'');
-              if(sortKey==='usc') return (parseFloat(b.usc)||0)-(parseFloat(a.usc)||0);
-              if(sortKey==='kafka'||sortKey==='kaffa') return (b.conclusao?1:0)-(a.conclusao?1:0);
+              if(sortKey==='fiscal') return (a.fiscal||'zzz').localeCompare(b.fiscal||'zzz');
+              if(sortKey==='usc') return (parseFloat(b.usc)||0)-(parseFloat(a.usc)||0); // maior USC primeiro
+              if(sortKey==='kaffa') return (a.kaffa?1:0)-(b.kaffa?1:0); // ❌ sem kaffa primeiro
               return 0;
             });
             return sorted;
@@ -7606,7 +7606,17 @@ function renderAnaliseFinanceira(){
     ${renderBlocoEmpreiteira('🌐 Geral — Todas as Empreiteiras', cores.Geral, obrasRD, p)}
     ${EMP.map(emp=>renderBlocoEmpreiteira('🏢 '+emp, cores[emp]||'#9ca3af', obrasRD.filter(o=>o.empreiteira===emp), p)).join('')}`;
 
+  // Preserve open state of details elements
+  const openDetails = [...(cont.querySelectorAll('details[open]')||[])].map(d=>d.dataset?.emp||'');
   cont.innerHTML = html;
+  // Restore open details
+  cont.querySelectorAll('details').forEach(d=>{
+    if(openDetails.some(k=>d.innerHTML.includes(k))) d.open = true;
+  });
+  // Keep all saldo devedor details open if sort was just changed
+  if(Object.keys(window._analiseSort||{}).length>0){
+    cont.querySelectorAll('details').forEach(d=>{ d.open = true; });
+  }
 }
 window.renderAnaliseFinanceira = renderAnaliseFinanceira;
 
