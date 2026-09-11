@@ -7437,22 +7437,26 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
       ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
         <div style="display:flex;gap:8px;margin-bottom:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
           <span style="font-size:9px;color:var(--muted)">Ordenar por:</span>
-          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='fiscal'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='fiscal'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='fiscal'?'#fff':'inherit'}">👤 Fiscal</button>
-          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='usc'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='usc'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='usc'?'#fff':'inherit'}">📊 USC ↓</button>
-          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort[nome]='kaffa'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${(window._analiseSort||{})[nome]==='kaffa'?'var(--accent)':'var(--surface)'};cursor:pointer;color:${(window._analiseSort||{})[nome]==='kaffa'?'#fff':'inherit'}">✅ Kaffa</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='fiscal'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='fiscal'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='fiscal'?'#fff':'inherit')}">👤 Fiscal</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='usc'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='usc'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='usc'?'#fff':'inherit')}">📊 USC ↓</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='kaffa'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='kaffa'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='kaffa'?'#fff':'inherit')}">✅ Kaffa</button>
         </div>
         <div style="overflow-x:auto;margin-top:2px"><table style="width:100%;border-collapse:collapse;font-size:9px">
           <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
           <tbody>${(()=>{
-            const sortKey = ((window._analiseSort||{})[nome])||'';
+            const sortKey = ((window._analiseSort||{})[''+nome])||'';
             const sorted = [...devOp].sort((a,b)=>{
               if(sortKey==='fiscal') return (a.fiscal||'zzz').localeCompare(b.fiscal||'zzz');
               if(sortKey==='usc') return (parseFloat(b.usc)||0)-(parseFloat(a.usc)||0); // maior USC primeiro
-              if(sortKey==='kaffa') return (a.kaffa?1:0)-(b.kaffa?1:0); // ❌ sem kaffa primeiro
+              if(sortKey==='kaffa'){
+                const aK=((a.kaffa&&a.kaffa!=='')||(a.kaffaEntries||[]).some(k=>k.tipo==='final'))?1:0;
+                const bK=((b.kaffa&&b.kaffa!=='')||(b.kaffaEntries||[]).some(k=>k.tipo==='final'))?1:0;
+                return aK-bK; // ❌ sem kaffa primeiro
+              }
               return 0;
             });
             return sorted;
-          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${o.conclusao?'<span style=\"color:#22C55E;font-weight:700\" title=\"Kaffa registrado em '+o.conclusao+'\">✅</span>':'<span style=\"color:#EF4444\" title=\"Sem kaffa\">❌</span>'}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
@@ -7535,6 +7539,15 @@ window.limparEquipamentosDuplicados = async function(){
 
   toast(`✓ ${count} obras limpas. Os dados de transformador foram zerados.`,'ok');
   renderObras();
+};
+
+
+window._kaffaIcon = function(o){
+  const temKaffa = (o.kaffa && o.kaffa !== '') ||
+    (o.kaffaEntries||[]).some(k => k.tipo==='final' || k.tipo==='parcial');
+  if(temKaffa)
+    return '<span style="color:#22C55E;font-weight:700" title="Kaffa: '+(o.kaffa||'registrado')+'">✅</span>';
+  return '<span style="color:#EF4444;font-weight:700" title="Sem kaffa">❌</span>';
 };
 
 function renderAnaliseFinanceira(){
