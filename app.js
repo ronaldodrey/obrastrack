@@ -7394,15 +7394,15 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
   // Saldo Devedor
   // devOp: obras concluídas SEM medição final
   // Usa o array medicoes (não o campo o.medicao que pode ter dado antigo de parciais)
+  // Saldo devedor: obras RD sem medição final (independente de kaffa)
   const devOp = obrasPool.filter(o=>
     !o.cancelado && !o.armazenado &&
-    o.conclusao &&
     !temMedicaoFinal(o) &&
     (o.tipo==='R1'||o.tipo==='R2')
   );
   const dev   = calcFinanceiro(devOp, p);
 
-  // Kaffa breakdown dentro do saldo devedor
+  // Kaffa breakdown — mesmo devOp do card KPI e da tabela
   const temKaffa = o => (o.kaffa && o.kaffa !== '') ||
     (o.kaffaEntries||[]).some(k => k.tipo==='final' || k.tipo==='parcial');
   const devComKaffa  = devOp.filter(o =>  temKaffa(o));
