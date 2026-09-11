@@ -7410,10 +7410,24 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
     (o.kaffaEntries||[]).some(k => k.tipo==='final' || k.tipo==='parcial');
   const devComKaffa  = devOp.filter(o =>  temKaffa(o));
   const devSemKaffa  = devOp.filter(o => !temKaffa(o));
-  const uscComKaffa  = devComKaffa.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-  const uscSemKaffa  = devSemKaffa.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
-  const ulvComKaffa  = devComKaffa.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-  const ulvSemKaffa  = devSemKaffa.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  // USC pendente = previsto − parciais medidos (mesma lógica de calcFinanceiro)
+  function uscPendente(o){
+    const prev = parseFloat(o.usc)||0;
+    const parcs = (o.medicoes||[]).filter(m=>m.tipo==='parcial')
+      .reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);
+    return Math.max(0, prev - Math.min(parcs, prev));
+  }
+  // ULV pendente = previsto − parciais ULV medidos
+  function ulvPendente(o){
+    const prev = parseFloat(o.ulv)||0;
+    const parcs = (o.medicoes||[]).filter(m=>m.tipo==='parcial')
+      .reduce((a,m)=>a+(parseFloat(m.ulvMedido)||0),0);
+    return Math.max(0, prev - Math.min(parcs, prev));
+  }
+  const uscComKaffa  = devComKaffa.reduce((s,o)=>s+uscPendente(o),0);
+  const uscSemKaffa  = devSemKaffa.reduce((s,o)=>s+uscPendente(o),0);
+  const ulvComKaffa  = devComKaffa.reduce((s,o)=>s+ulvPendente(o),0);
+  const ulvSemKaffa  = devSemKaffa.reduce((s,o)=>s+ulvPendente(o),0);
   // Futuro 12 meses
     // Projeto: USC imputado × valorUSC sem ajuste (por empreiteira: proporção do pool)
   // Projeto por empreiteira
