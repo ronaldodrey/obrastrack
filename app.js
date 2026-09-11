@@ -7401,6 +7401,16 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
     (o.tipo==='R1'||o.tipo==='R2')
   );
   const dev   = calcFinanceiro(devOp, p);
+
+  // Kaffa breakdown dentro do saldo devedor
+  const temKaffa = o => (o.kaffa && o.kaffa !== '') ||
+    (o.kaffaEntries||[]).some(k => k.tipo==='final' || k.tipo==='parcial');
+  const devComKaffa  = devOp.filter(o =>  temKaffa(o));
+  const devSemKaffa  = devOp.filter(o => !temKaffa(o));
+  const uscComKaffa  = devComKaffa.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const uscSemKaffa  = devSemKaffa.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
+  const ulvComKaffa  = devComKaffa.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const ulvSemKaffa  = devSemKaffa.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
   // Futuro 12 meses
     // Projeto: USC imputado × valorUSC sem ajuste (por empreiteira: proporção do pool)
   // Projeto por empreiteira
@@ -7424,6 +7434,24 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
             <div style="font-size:10px"><span style="color:var(--muted)">LM (USC ${dev.totalUSC.toFixed(0)})</span><br><strong style="color:#EF4444">${brlFmt(dev.valLM)}</strong></div>
             <div style="font-size:10px"><span style="color:var(--muted)">LV (ULV ${dev.totalULV.toFixed(0)})</span><br><strong style="color:#EF4444">${brlFmt(dev.valLV)}</strong></div>
+          </div>
+          <!-- Kaffa breakdown -->
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(239,68,68,.2)">
+            <div style="font-size:9px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">USC por situação de kaffa</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <div style="flex:1;min-width:110px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);border-radius:6px;padding:8px;text-align:center">
+                <div style="font-size:9px;color:#22C55E;font-weight:700;margin-bottom:4px">✅ Com Kaffa</div>
+                <div style="font-size:9px;color:var(--muted)">USC: <strong style="color:#22C55E">${uscComKaffa.toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted)">ULV: <strong style="color:#22C55E">${ulvComKaffa.toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted);margin-top:2px">${devComKaffa.length} obras</div>
+              </div>
+              <div style="flex:1;min-width:110px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:8px;text-align:center">
+                <div style="font-size:9px;color:#EF4444;font-weight:700;margin-bottom:4px">❌ Sem Kaffa</div>
+                <div style="font-size:9px;color:var(--muted)">USC: <strong style="color:#EF4444">${uscSemKaffa.toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted)">ULV: <strong style="color:#EF4444">${ulvSemKaffa.toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted);margin-top:2px">${devSemKaffa.length} obras</div>
+              </div>
+            </div>
           </div>
         </div>
         <div style="flex:1;min-width:160px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:12px">
