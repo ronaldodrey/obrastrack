@@ -7394,9 +7394,12 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
   // Saldo Devedor
   // devOp: obras concluídas SEM medição final
   // Usa o array medicoes (não o campo o.medicao que pode ter dado antigo de parciais)
-  // Saldo devedor: obras RD sem medição final (independente de kaffa)
+  // Saldo devedor: obras RD com conclusão informada pela empreiteira E sem medição final
+  // conclusao = empreiteira confirmou execução de campo
+  // !temMedicaoFinal = ainda não foi medida (devemos dinheiro)
   const devOp = obrasPool.filter(o=>
     !o.cancelado && !o.armazenado &&
+    o.conclusao &&
     !temMedicaoFinal(o) &&
     (o.tipo==='R1'||o.tipo==='R2')
   );
