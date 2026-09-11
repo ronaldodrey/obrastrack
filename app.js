@@ -7295,18 +7295,22 @@ function saveParamsFinanceiros(){
 window.saveParamsFinanceiros = saveParamsFinanceiros;
 
 function calcFinanceiro(obrasLista, p){
-  // USC pendente = previsto − soma(uscMedido das medições parciais), cap no previsto
-  // Medição final: obra já tem o.medicao → excluída antes desta função (não entra aqui)
-  // Fonte: apenas o.medicoes[].uscMedido (qualquer perfil que registrar)
+  // USC pendente = previsto − parciais, respeitando override manual se existir
   const totalUSC = obrasLista.reduce((s,o)=>{
+    const ov = (_overridesFinanceiros||{})[o.id];
+    if(ov && ov.usc !== undefined) return s + (parseFloat(ov.usc)||0);
     const previsto = parseFloat(o.usc)||0;
     const acumParcial = (o.medicoes||[])
       .filter(m=>m.tipo==='parcial')
       .reduce((a,m)=>a+(parseFloat(m.uscMedido)||0), 0);
-    const jaMedido = Math.min(acumParcial, previsto); // cap no previsto
+    const jaMedido = Math.min(acumParcial, previsto);
     return s + Math.max(0, previsto - jaMedido);
   },0);
-  const totalULV = obrasLista.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
+  const totalULV = obrasLista.reduce((s,o)=>{
+    const ov = (_overridesFinanceiros||{})[o.id];
+    if(ov && ov.ulv !== undefined) return s + (parseFloat(ov.ulv)||0);
+    return s + (parseFloat(o.ulv)||0);
+  },0);
   const valLM    = totalUSC * p.valorUSC * (1 + p.ajusteLM/100);
   const valLV    = totalULV * p.valorULV * (1 + p.ajusteLV/100);
   return { totalUSC, totalULV, valLM, valLV, total: valLM+valLV, qtd: obrasLista.length };
@@ -7410,15 +7414,18 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
     (o.kaffaEntries||[]).some(k => k.tipo==='final' || k.tipo==='parcial');
   const devComKaffa  = devOp.filter(o =>  temKaffa(o));
   const devSemKaffa  = devOp.filter(o => !temKaffa(o));
-  // USC pendente = previsto − parciais medidos (mesma lógica de calcFinanceiro)
+  // USC/ULV pendente — respeita override manual se existir
   function uscPendente(o){
+    const ov = (_overridesFinanceiros||{})[o.id];
+    if(ov && ov.usc !== undefined) return parseFloat(ov.usc)||0; // override manual sem ajuste
     const prev = parseFloat(o.usc)||0;
     const parcs = (o.medicoes||[]).filter(m=>m.tipo==='parcial')
       .reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);
     return Math.max(0, prev - Math.min(parcs, prev));
   }
-  // ULV pendente = previsto − parciais ULV medidos
   function ulvPendente(o){
+    const ov = (_overridesFinanceiros||{})[o.id];
+    if(ov && ov.ulv !== undefined) return parseFloat(ov.ulv)||0; // override manual sem ajuste
     const prev = parseFloat(o.ulv)||0;
     const parcs = (o.medicoes||[]).filter(m=>m.tipo==='parcial')
       .reduce((a,m)=>a+(parseFloat(m.ulvMedido)||0),0);
@@ -7501,7 +7508,7 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
               return 0;
             });
             return sorted;
-          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)"><td style="padding:3px 6px;font-weight:600;color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero}</td><td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)">`+window._ovTag(o)+`<td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
@@ -7595,9 +7602,115 @@ window._kaffaIcon = function(o){
   return '<span style="color:#EF4444;font-weight:700" title="Sem kaffa">❌</span>';
 };
 
+
+// ── Overrides manuais de USC pendente — Análise Financeira ────────────────
+// Armazenado em Firestore: config/overridesFinanceiros → {[obraId]: {usc, ulv, obs, atualizadoEm}}
+let _overridesFinanceiros = null; // cache
+
+async function loadOverridesFinanceiros(){
+  if(_overridesFinanceiros) return _overridesFinanceiros;
+  try{
+    const snap = await getDoc(doc(db,'config','overridesFinanceiros'));
+    _overridesFinanceiros = snap.exists() ? snap.data() : {};
+  }catch(e){ _overridesFinanceiros = {}; }
+  return _overridesFinanceiros;
+}
+
+window.salvarOverrideFinanceiro = async function(obraId, uscVal, ulvVal, obs){
+  await loadOverridesFinanceiros();
+  const val = {};
+  if(uscVal !== null && uscVal !== '') val.usc = parseFloat(uscVal)||0;
+  if(ulvVal !== null && ulvVal !== '') val.ulv = parseFloat(ulvVal)||0;
+  if(obs) val.obs = obs;
+  val.atualizadoEm = new Date().toISOString();
+  _overridesFinanceiros[obraId] = val;
+  await setDoc(doc(db,'config','overridesFinanceiros'), _overridesFinanceiros);
+  toast('✓ Override salvo para esta obra.','ok');
+  renderAnaliseFinanceira();
+};
+
+window.removerOverrideFinanceiro = async function(obraId){
+  if(!confirm('Remover o ajuste manual desta obra? O cálculo voltará ao automático.')) return;
+  await loadOverridesFinanceiros();
+  delete _overridesFinanceiros[obraId];
+  await setDoc(doc(db,'config','overridesFinanceiros'), _overridesFinanceiros);
+  toast('Override removido. Voltando ao cálculo automático.','ok');
+  renderAnaliseFinanceira();
+};
+
+window.abrirModalOverride = function(obraId){
+  const obra = obras.find(o=>o.id===obraId);
+  if(!obra) return;
+  const ov = (_overridesFinanceiros||{})[obraId]||{};
+  // USC auto
+  const prev = parseFloat(obra.usc)||0;
+  const parcs = (obra.medicoes||[]).filter(m=>m.tipo==='parcial')
+    .reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);
+  const uscAuto = Math.max(0, prev - Math.min(parcs, prev));
+  const ulvPrev = parseFloat(obra.ulv)||0;
+  const ulvParcs = (obra.medicoes||[]).filter(m=>m.tipo==='parcial')
+    .reduce((a,m)=>a+(parseFloat(m.ulvMedido)||0),0);
+  const ulvAuto = Math.max(0, ulvPrev - Math.min(ulvParcs, ulvPrev));
+
+  const html=`<div id="ovModalOverride" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border-radius:16px;padding:24px;width:min(460px,96vw)">
+      <div style="font-weight:900;font-size:15px;margin-bottom:4px">✏️ Ajuste Manual de USC/ULV Pendente</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px">Obra <strong>${obra.numero}</strong> — ${obra.cidade||obra.municipio||'—'}</div>
+
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;margin-bottom:14px;font-size:11px">
+        <div style="color:var(--muted);margin-bottom:4px">Valores calculados automaticamente:</div>
+        <div>USC pendente auto: <strong>${uscAuto.toFixed(2)}</strong> &nbsp;·&nbsp; ULV pendente auto: <strong>${ulvAuto.toFixed(2)}</strong></div>
+      </div>
+
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px">USC pendente (override) — deixe vazio para usar o automático</label>
+        <input type="number" id="ovUscOverride" value="${ov.usc??''}" min="0" step="0.01" placeholder="${uscAuto.toFixed(2)} (automático)" style="font-size:13px">
+      </div>
+      <div class="fg" style="margin-bottom:10px">
+        <label style="font-size:11px">ULV pendente (override) — deixe vazio para usar o automático</label>
+        <input type="number" id="ovUlvOverride" value="${ov.ulv??''}" min="0" step="0.01" placeholder="${ulvAuto.toFixed(2)} (automático)" style="font-size:13px">
+      </div>
+      <div class="fg" style="margin-bottom:16px">
+        <label style="font-size:11px">Observação (motivo do ajuste)</label>
+        <input type="text" id="ovObsOverride" value="${ov.obs||''}" placeholder="Ex: Alteração de projeto — novo quantitativo" style="font-size:12px">
+      </div>
+
+      <div style="background:rgba(124,106,247,.08);border:1px solid rgba(124,106,247,.3);border-radius:6px;padding:8px;font-size:10px;color:#7c6af7;margin-bottom:14px">
+        ℹ️ O valor override substitui o cálculo automático sem aplicar o percentual de ajuste. Somente visível na Análise Financeira.
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:space-between">
+        <div>
+          ${ov.usc!==undefined||ov.ulv!==undefined
+            ?`<button class="btn btn-sm" style="color:#EF4444;border-color:#EF444455;font-size:10px" onclick="removerOverrideFinanceiro('${obraId}');document.getElementById('ovModalOverride').remove()">🗑 Remover ajuste</button>`
+            :''}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('ovModalOverride').remove()">Cancelar</button>
+          <button class="btn btn-primary btn-sm" onclick="salvarOverrideFinanceiro('${obraId}',document.getElementById('ovUscOverride').value,document.getElementById('ovUlvOverride').value,document.getElementById('ovObsOverride').value);document.getElementById('ovModalOverride').remove()">Salvar</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend',html);
+};
+
+window._ovTag = function(o){
+  const hasOv = !!(_overridesFinanceiros||{})[o.id];
+  const id = o.id, num = o.numero;
+  const ovMark = hasOv ? `<span title="Ajuste manual ativo" style="color:#7c6af7;font-size:9px;cursor:pointer" onclick="abrirModalOverride('${id}')">✏️</span>` : '';
+  return `<td style="padding:3px 6px;font-weight:600;color:var(--accent);white-space:nowrap"><span style="cursor:pointer" onclick="openObraModal('${id}')">${num}</span>${ovMark}<button onclick="abrirModalOverride('${id}')" style="background:none;border:none;cursor:pointer;font-size:9px;color:var(--muted);padding:0 2px" title="Ajustar manualmente">⚙️</button></td>`;
+};
+
 function renderAnaliseFinanceira(){
   const cont = document.getElementById('pgAnaliseContent');
   if(!cont) return;
+  // Carrega overrides antes de renderizar (se ainda não carregou)
+  if(!_overridesFinanceiros){
+    loadOverridesFinanceiros().then(()=>renderAnaliseFinanceira());
+    cont.innerHTML='<div class="loading">Carregando...</div>';
+    return;
+  }
   const p = getParamsFinanceiros();
   const EMP = ['CS ELETRICIDADE','ELETELSUL'];
 
