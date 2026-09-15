@@ -2367,8 +2367,10 @@ window.saveObra=async function(){
         const qtdNovos   = patch.kaffaEntries.length - qtdAntigos;
         if(qtdNovos > 0){
           const novosKaffas = patch.kaffaEntries.slice(-qtdNovos);
-          for(const k of novosKaffas)
+          for(const k of novosKaffas){
+            console.log('[Email] Disparando enviarEmailKaffa tipo=',k.tipo,'data=',k.data);
             await enviarEmailKaffa({...obraAntiga,...patch}, k.tipo, k.data);
+          }
         }
       }
       // Email: obra concluída pela empreiteira → avisa fiscal
@@ -2376,8 +2378,10 @@ window.saveObra=async function(){
       // Dispara sempre que a data de conclusão MUDAR (primeira vez ou atualização)
       if(patch.conclusao &&
          patch.conclusao !== (obraAntiga?.conclusao||'') &&
-         (me.perfil==='empreiteira'||me.perfil==='gerente'))
+         (me.perfil==='empreiteira'||me.perfil==='gerente')){
+        console.log('[Email] Disparando enviarEmailConclusao — conclusao mudou de',obraAntiga?.conclusao,'para',patch.conclusao);
         await enviarEmailConclusao({...obraAntiga,...patch});
+      }
       if((me.perfil==='fiscal'||me.perfil==='fiscal_adm')&&!obraAntiga?.pendencia&&patch.pendencia){
         patch.dataPendencia = hojeStr(); // registra a data em que a pendência foi cadastrada
         await enviarEmailPendencia({...obraAntiga,...patch});
@@ -2392,8 +2396,10 @@ window.saveObra=async function(){
         if(prazoLim&&dataReg) patch.pendenciaDentroPrazo=(dataReg<=prazoLim);
       }
       // E-mail quando empreiteira regulariza pendência
-      if(me.perfil==='empreiteira'&&!obraAntiga?.regularizacaoData&&patch.regularizacaoData)
+      if(me.perfil==='empreiteira'&&!obraAntiga?.regularizacaoData&&patch.regularizacaoData){
+        console.log('[Email] Disparando enviarEmailRegularizacao');
         await enviarEmailRegularizacao({...obraAntiga,...patch});
+      }
       toast('Obra atualizada!');
     } else {
       if(!patch.numero||!patch.cidade){ toast('Preencha número e cidade.','err'); return; }
@@ -2660,8 +2666,11 @@ Aguarda medição correspondente.`,
 
 async function enviarEmailConclusao(obra){
   if(!obra.fiscal) return;
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
-  if(!fiscal?.email) return;
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  if(!fiscal?.email){
+    console.warn('[Email Conclusão] Fiscal não encontrado ou sem email. vinculo=',obra.fiscal);
+    return;
+  }
   // E-mail imediato — sem verificação de duplicata (disparado por mudança de estado)
   await enviarEmail(
     `SPPC ARLAG – Obra concluída | ${obra.numero} – ${obra.cidade}`,
@@ -2680,8 +2689,12 @@ Aguarda fiscalização.`,
 }
 
 async function enviarEmailPendencia(obra){
-  const emp = empreiteiras.find(e=>e.nome===obra.empreiteira);
-  if(!emp?.email) return;
+  // Match case-insensitive: nome da obra pode ter capitalização diferente
+  const emp = empreiteiras.find(e=>(e.nome||'').toUpperCase()===(obra.empreiteira||'').toUpperCase());
+  if(!emp?.email){
+    console.warn('[Email Pendência] Empreiteira não encontrada ou sem email. empreiteira=',obra.empreiteira,'empreiteiras=',empreiteiras.map(e=>e.nome));
+    return;
+  }
   const chave = `pendencia_${obra.id}`;
   if(await jaEnviou(chave)) return;
   const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
@@ -2702,8 +2715,8 @@ Acesse o sistema SPPC ARLAG para regularizar.`,
 }
 
 async function enviarEmailRegularizacao(obra){
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&u.perfil==='fiscal');
-  if(!fiscal?.email) return;
+  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  if(!fiscal?.email){ console.warn('[Email Regularização] Fiscal não encontrado ou sem email.'); return; }
   const chave = `regularizacao_${obra.id}`;
   if(await jaEnviou(chave)) return;
   const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
@@ -6839,12 +6852,18 @@ window.buscarPorChave = function(poolParam){
 function renderDashSummaryFiscal(minhas){
   const fimMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().split('T')[0];
   const ativas = minhas.filter(o=>!o.cancelado&&!o.armazenado);
-  // Bug 5: obra aparece em apenas 1 card (maior prioridade ganha)
   // Prioridade: med280urg > agMed > agFisc
+  // agMed: conclusão + kaffa executado + sem medição (independente de fiscalização)
   const agFisc_all  = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  const agMed_all   = ativas.filter(o=>o.fiscalizacao&&!o.medicao&&o.tipo!=='ODI');
+  const agMed_all   = ativas.filter(o=>
+    o.conclusao &&        // empreiteira informou conclusão
+    o.kaffa &&            // kaffa registrado pela empreiteira
+    !o.medicao &&         // fiscal ainda não mediu
+    o.tipo!=='ODI'
+  );
+  // med280urg: kaffa executado + medida230 aprovada + prazo med280 vence este mês
   const med280urg   = ativas.filter(o=>{
-    if(!o.medida230||!o.kaffa||o.medicao||o.medida280) return false;
+    if(!o.conclusao||!o.kaffa||!o.medida230||o.medicao||o.medida280) return false;
     const p=prazoMedida280(o);
     return p && p<=fimMes;
   });
@@ -7488,13 +7507,14 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
       <!-- Lista obras saldo devedor (expansível) -->
       ${devOp.length?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10px;color:#EF4444;font-weight:700">📋 ${devOp.length} obras no saldo devedor ▼</summary>
         <div style="display:flex;gap:8px;margin-bottom:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <input type="search" placeholder="🔍 Buscar nota..." oninput="window._sdBusca['${nome}']=this.value.trim().toLowerCase();this.closest('details').querySelector('tbody').querySelectorAll('tr').forEach(r=>{r.style.display=this.value&&!r.innerText.toLowerCase().includes(this.value.toLowerCase())?'none':''})" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:inherit;width:130px">
           <span style="font-size:9px;color:var(--muted)">Ordenar por:</span>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='fiscal'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='fiscal'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='fiscal'?'#fff':'inherit')}">👤 Fiscal</button>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='usc'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='usc'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='usc'?'#fff':'inherit')}">📊 USC ↓</button>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='kaffa'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='kaffa'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='kaffa'?'#fff':'inherit')}">✅ Kaffa</button>
         </div>
         <div style="overflow-x:auto;margin-top:2px"><table style="width:100%;border-collapse:collapse;font-size:9px">
-          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
+          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa Execução</th><th style="padding:4px 6px;text-align:center">Fisc.</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
           <tbody>${(()=>{
             const sortKey = ((window._analiseSort||{})[''+nome])||'';
             const sorted = [...devOp].sort((a,b)=>{
@@ -7508,7 +7528,7 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
               return 0;
             });
             return sorted;
-          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)">`+window._ovTag(o)+`<td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)">`+window._ovTag(o)+`<td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${window._fiscIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
@@ -7593,6 +7613,14 @@ window.limparEquipamentosDuplicados = async function(){
   renderObras();
 };
 
+
+
+window._fiscIcon = function(o){
+  const hasF = !!(o.fiscalizacao || o.dataFiscalizacao);
+  if(hasF)
+    return '<span style="color:#22C55E;font-weight:700" title="Fiscalizado em '+(o.fiscalizacao||o.dataFiscalizacao||'')+'">✅</span>';
+  return '<span style="color:#EF4444;font-weight:700" title="Sem fiscalização">❌</span>';
+};
 
 window._kaffaIcon = function(o){
   const temKaffa = (o.kaffa && o.kaffa !== '') ||
