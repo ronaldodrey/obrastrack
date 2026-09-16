@@ -546,7 +546,7 @@ function tabelaResumoFiscais(list){
     const pend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida).length;
     const agConf = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length;
     const paraFisc = minhas.filter(o=>o.conclusao&&!o.fiscalizacao).length;
-    const paraMedir = minhas.filter(o=>o.kaffa&&!o.medicao).length;
+    const paraMedir = minhas.filter(o=>o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)).length;
     const cadUrg = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length;
     const atrasadas = minhas.filter(o=>statusOf(o)==='Atrasada').length;
     const c = gc(f);
@@ -618,7 +618,7 @@ function renderDashFiscal(list, meuNome){
   const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
   const agConfPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
   const paraFisc = list.filter(o=>o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
-  const paraMedir = list.filter(o=>o.kaffa&&!o.medicao&&o.fiscal===meuNome);
+  const paraMedir = list.filter(o=>o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)&&o.fiscal===meuNome);
   const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
   const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
@@ -6855,10 +6855,13 @@ function renderDashSummaryFiscal(minhas){
   // Prioridade: med280urg > agMed > agFisc
   // agMed: conclusão + kaffa executado + sem medição (independente de fiscalização)
   const agFisc_all  = ativas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  const agMed_all   = ativas.filter(o=>
-    o.conclusao &&        // empreiteira informou conclusão
-    o.kaffa &&            // kaffa registrado pela empreiteira
-    !o.medicao &&         // fiscal ainda não mediu
+  // agMed: kaffa FINAL registrado + sem medição FINAL (inclui obras com medição parcial)
+  const temKaffaFinal = o => (o.kaffaEntries||[]).some(k=>k.tipo==='final');
+  const temMedParcial = o => (o.medicoes||[]).some(m=>m.tipo==='parcial');
+  const agMed_all = ativas.filter(o=>
+    o.conclusao &&
+    temKaffaFinal(o) &&       // kaffa final registrado pela empreiteira
+    !temMedicaoFinal(o) &&    // sem medição final ainda
     o.tipo!=='ODI'
   );
   // med280urg: kaffa executado + medida230 aprovada + prazo med280 vence este mês
@@ -6889,6 +6892,7 @@ function renderDashSummaryFiscal(minhas){
         transition:background .3s">
         <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${visto?'#22C55E':cor}"></span>
         <strong style="color:var(--accent);font-size:11px;cursor:pointer" onclick="showPage('pgObras')">${o.numero}</strong>
+        ${temMedParcial(o)?'<span style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid #F59E0B55;border-radius:4px;font-size:8px;padding:1px 5px;white-space:nowrap">Med. Parcial</span>':''}
         <span style="font-size:10px;color:var(--muted);flex:1">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
         ${!visto
           ?`<button onclick="marcarCiente('${o.id}','${tipo}')"
@@ -7733,7 +7737,9 @@ window._ovTag = function(o){
   const hasOv = !!(_overridesFinanceiros||{})[o.id];
   const id = o.id, num = o.numero;
   const ovMark = hasOv ? `<span title="Ajuste manual ativo" style="color:#7c6af7;font-size:9px;cursor:pointer" onclick="abrirModalOverride('${id}')">✏️</span>` : '';
-  return `<td style="padding:3px 6px;font-weight:600;color:var(--accent);white-space:nowrap"><span style="cursor:pointer" onclick="openObraModal('${id}')">${num}</span>${ovMark}<button onclick="abrirModalOverride('${id}')" style="background:none;border:none;cursor:pointer;font-size:9px;color:var(--muted);padding:0 2px" title="Ajustar manualmente">⚙️</button></td>`;
+  const hasPend = !!(o.pendencia && !o.pendenciaResolvida);
+  const pendMark = hasPend ? `<span title="Pendência ativa nesta obra" style="background:rgba(239,68,68,.15);color:#EF4444;border:1px solid #EF444455;border-radius:4px;font-size:8px;padding:1px 5px;cursor:pointer" onclick="openObraModal('${id}')">⚠️ Pendência</span>` : '';
+  return `<td style="padding:3px 6px;font-weight:600;color:var(--accent);white-space:nowrap"><span style="cursor:pointer" onclick="openObraModal('${id}')">${num}</span>${pendMark}${ovMark}<button onclick="abrirModalOverride('${id}')" style="background:none;border:none;cursor:pointer;font-size:9px;color:var(--muted);padding:0 2px" title="Ajustar manualmente">⚙️</button></td>`;
 };
 
 function renderAnaliseFinanceira(){
