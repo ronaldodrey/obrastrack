@@ -7488,6 +7488,12 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
                 <div style="font-size:9px;color:var(--muted)">ULV: <strong style="color:#22C55E">${ulvComKaffa.toFixed(0)}</strong></div>
                 <div style="font-size:9px;color:var(--muted);margin-top:2px">${devComKaffa.length} obras</div>
               </div>
+              <div style="flex:1;min-width:110px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:6px;padding:8px;text-align:center">
+                <div style="font-size:9px;color:#6366F1;font-weight:700;margin-bottom:4px">✅🔍 Kaffa + Fisc.</div>
+                <div style="font-size:9px;color:var(--muted)">USC: <strong style="color:#6366F1">${devComKaffa.filter(o=>!!(o.fiscalizacao||o.dataFiscalizacao)).reduce((s,o)=>s+uscPendente(o),0).toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted)">ULV: <strong style="color:#6366F1">${devComKaffa.filter(o=>!!(o.fiscalizacao||o.dataFiscalizacao)).reduce((s,o)=>s+ulvPendente(o),0).toFixed(0)}</strong></div>
+                <div style="font-size:9px;color:var(--muted);margin-top:2px">${devComKaffa.filter(o=>!!(o.fiscalizacao||o.dataFiscalizacao)).length} obras</div>
+              </div>
               <div style="flex:1;min-width:110px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:8px;text-align:center">
                 <div style="font-size:9px;color:#EF4444;font-weight:700;margin-bottom:4px">❌ Sem Kaffa</div>
                 <div style="font-size:9px;color:var(--muted)">USC: <strong style="color:#EF4444">${uscSemKaffa.toFixed(0)}</strong></div>
