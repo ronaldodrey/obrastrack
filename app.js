@@ -133,12 +133,20 @@ function statusOf(o){
 
 // Segundo status: pendência com regularização aguardando conf. fiscal, ou pendência ativa
 function statusSecundario(o){
+  let extra = '';
+  // Desligamento programado via SIMO importado
+  const deslEntry = (window._deslMap||{})[String(o.numero||'').trim()];
+  if(deslEntry && deslEntry.dataProgram){
+    const dtDesl = deslEntry.dataProgram.slice(0,10);
+    extra += `<span class="st" style="color:#7c6af7;background:rgba(124,106,247,.15);border-color:#7c6af744;margin-left:4px"><span style="background:#7c6af7"></span>⚡ Desl. ${fmtTxt(dtDesl)}</span>`;
+  }
   if(o.pendencia && !o.pendenciaResolvida){
     if(o.regularizacaoData)
-      return `<span class="st" style="color:#F59E0B;background:rgba(245,158,11,.15);border-color:#F59E0B44;margin-left:4px"><span style="background:#F59E0B"></span>Ag. Conf. Pend.</span>`;
-    return `<span class="st" style="color:#F97316;background:rgba(249,115,22,.15);border-color:#F9731644;margin-left:4px"><span style="background:#F97316"></span>Pendência</span>`;
+      extra += `<span class="st" style="color:#F59E0B;background:rgba(245,158,11,.15);border-color:#F59E0B44;margin-left:4px"><span style="background:#F59E0B"></span>Ag. Conf. Pend.</span>`;
+    else
+      extra += `<span class="st" style="color:#F97316;background:rgba(249,115,22,.15);border-color:#F9731644;margin-left:4px"><span style="background:#F97316"></span>Pendência</span>`;
   }
-  return '';
+  return extra;
 }
 
 function statusHtml(o){
@@ -1795,6 +1803,77 @@ window.openObraModal=function(obraId){
   document.getElementById('ovObra').classList.add('open');
   }catch(err){ console.error('openObraModal error:',err); alert('Erro ao abrir modal: '+err.message+' (linha '+err.stack?.split('\n')[1]+')'); }
 };
+
+// ══ CHAT DE AVISOS — comentários por obra ══════════════════════════════════
+let _chatObraId = null;
+let _chatUnsub  = null;
+
+async function abrirChatObra(obraId){
+  _chatObraId = obraId;
+  // Unsubscribe from previous listener
+  if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
+  const box = document.getElementById('chatBox');
+  if(!box) return;
+  box.innerHTML = '<div style="font-size:10px;color:var(--muted)">Carregando...</div>';
+
+  // Real-time listener on subcollection
+  const colRef = collection(db, 'obras', obraId, 'comentarios');
+  const q = query(colRef, orderBy('criadoEm','asc'));
+  _chatUnsub = onSnapshot(q, snap=>{
+    const msgs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderChatMsgs(msgs);
+  }, err=>{
+    if(box) box.innerHTML = '<div style="font-size:10px;color:#EF4444">Erro: '+err.message+'</div>';
+  });
+}
+
+function renderChatMsgs(msgs){
+  const box = document.getElementById('chatBox');
+  if(!box) return;
+  if(!msgs.length){
+    box.innerHTML = '<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Nenhum aviso ainda. Seja o primeiro a comentar.</div>';
+    return;
+  }
+  const perfColors = {gerente:'#7c6af7',fiscal:'#3B82F6',fiscal_adm:'#3B82F6',empreiteira:'#F59E0B',estagiario:'#22C55E'};
+  box.innerHTML = msgs.map(m=>{
+    const ts = m.criadoEm?.toDate ? m.criadoEm.toDate() : new Date(m.criadoEm||Date.now());
+    const tsStr = ts.toLocaleDateString('pt-BR')+' '+ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+    const cor = perfColors[m.perfilAutor]||'#6b7280';
+    const isMine = m.uid === auth.currentUser?.uid;
+    return `<div style="display:flex;${isMine?'flex-direction:row-reverse':''};gap:8px;margin-bottom:10px">
+      <div style="width:28px;height:28px;border-radius:50%;background:${cor};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;font-weight:700">${(m.autor||'?')[0].toUpperCase()}</div>
+      <div style="max-width:80%;${isMine?'align-items:flex-end':''};display:flex;flex-direction:column;gap:2px">
+        <div style="font-size:9px;color:var(--muted)">${isMine?'Você':m.autor} · ${tsStr}</div>
+        <div style="background:${isMine?'var(--accent)':'var(--surface2)'};color:${isMine?'#fff':'inherit'};padding:8px 12px;border-radius:${isMine?'12px 2px 12px 12px':'2px 12px 12px 12px'};font-size:12px;word-break:break-word">${m.texto}</div>
+      </div>
+    </div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+window.enviarMsgChat = async function(){
+  const inp = document.getElementById('chatInput');
+  const txt = inp?.value?.trim();
+  if(!txt || !_chatObraId) return;
+  inp.value = '';
+  inp.disabled = true;
+  try{
+    await addDoc(collection(db,'obras',_chatObraId,'comentarios'),{
+      texto: txt,
+      autor: me.nome || me.email || 'Usuário',
+      perfilAutor: me.perfil,
+      uid: auth.currentUser?.uid||'',
+      criadoEm: serverTimestamp()
+    });
+  }catch(e){ toast('Erro ao enviar: '+e.message,'err'); }
+  finally{ inp.disabled = false; inp.focus(); }
+};
+
+window.fecharChatObra = function(){
+  if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
+  _chatObraId = null;
+};
+
 window.closeObraModal=function(){ document.getElementById('ovObra').classList.remove('open'); };
 
 function atualizarInfoLimite(){
