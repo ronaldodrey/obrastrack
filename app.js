@@ -1823,7 +1823,10 @@ let _chatObraId = null;
 let _chatUnsub  = null;
 
 async function abrirChatObra(obraId){
-  _chatObraId = obraId;
+  // Also accept ID from the modal's hidden field as fallback
+  const id = obraId || document.getElementById('obraId')?.value?.trim();
+  _chatObraId = id || null;
+  if(!id){ return; }
   // Unsubscribe from previous listener
   if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
   const box = document.getElementById('chatBox');
@@ -1875,13 +1878,16 @@ window.enviarMsgChat = async function(){
   const inp = document.getElementById('chatInput');
   const txt = inp?.value?.trim();
   if(!txt){ toast('Digite um comentário antes de enviar.','warn'); return; }
-  if(!_chatObraId){ toast('Salve a obra primeiro para usar o chat.','warn'); return; }
+  // Use _chatObraId or fall back to the modal's hidden obraId field
+  const obraIdParaChat = _chatObraId || document.getElementById('obraId')?.value?.trim();
+  if(!obraIdParaChat){ toast('Abra uma obra existente para usar o chat.','warn'); return; }
   if(!auth.currentUser){ toast('Você precisa estar logado.','err'); return; }
+  _chatObraId = obraIdParaChat; // garante sincronização
   inp.value = '';
   inp.disabled = true;
   try{
     const autorNome = me.nome || me.email || me.vinculo || auth.currentUser.email || 'Usuário';
-    await addDoc(collection(db,'obras',_chatObraId,'comentarios'),{
+    await addDoc(collection(db,'obras',obraIdParaChat,'comentarios'),{
       texto: txt,
       autor: autorNome,
       perfilAutor: me.perfil || 'desconhecido',
