@@ -197,6 +197,20 @@ window.doLogout=()=>signOut(auth);
 
 // ── APP INIT ──────────────────────────────────────────
 async function iniciarApp(){
+  // Carrega o último desligamento importado para preencher _deslMap imediatamente
+  (async ()=>{
+    try{
+      const snap = await getDocs(collection(db,'desligamentos'));
+      if(!snap.empty){
+        const latest = snap.docs.sort((a,b)=>b.id.localeCompare(a.id))[0];
+        const entradas = latest.data().entradas||[];
+        window._deslMap = {};
+        entradas.forEach(e=>{ if(e.obraNumero) window._deslMap[e.obraNumero]={
+          dataProgram:e.dataProgram, status:e.status, inicioHora:e.inicioHora||''
+        }; });
+      } else { window._deslMap = {}; }
+    }catch(e){ window._deslMap = {}; }
+  })();
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
@@ -1823,7 +1837,13 @@ async function abrirChatObra(obraId){
     const msgs = snap.docs.map(d=>({id:d.id,...d.data()}));
     renderChatMsgs(msgs);
   }, err=>{
-    if(box) box.innerHTML = '<div style="font-size:10px;color:#EF4444">Erro: '+err.message+'</div>';
+    console.error('[Chat] onSnapshot error:', err.code, err.message);
+    if(box){
+      if(err.code==='permission-denied')
+        box.innerHTML='<div style="font-size:10px;color:#F59E0B;padding:8px">⚠️ Regras do Firestore precisam ser atualizadas para habilitar o chat. Publique o firestore.rules no Firebase Console.</div>';
+      else
+        box.innerHTML='<div style="font-size:10px;color:#EF4444;padding:8px">Erro: '+err.message+'</div>';
+    }
   });
 }
 
@@ -1854,18 +1874,25 @@ function renderChatMsgs(msgs){
 window.enviarMsgChat = async function(){
   const inp = document.getElementById('chatInput');
   const txt = inp?.value?.trim();
-  if(!txt || !_chatObraId) return;
+  if(!txt){ toast('Digite um comentário antes de enviar.','warn'); return; }
+  if(!_chatObraId){ toast('Salve a obra primeiro para usar o chat.','warn'); return; }
+  if(!auth.currentUser){ toast('Você precisa estar logado.','err'); return; }
   inp.value = '';
   inp.disabled = true;
   try{
+    const autorNome = me.nome || me.email || me.vinculo || auth.currentUser.email || 'Usuário';
     await addDoc(collection(db,'obras',_chatObraId,'comentarios'),{
       texto: txt,
-      autor: me.nome || me.email || 'Usuário',
-      perfilAutor: me.perfil,
-      uid: auth.currentUser?.uid||'',
+      autor: autorNome,
+      perfilAutor: me.perfil || 'desconhecido',
+      uid: auth.currentUser.uid,
       criadoEm: serverTimestamp()
     });
-  }catch(e){ toast('Erro ao enviar: '+e.message,'err'); }
+  }catch(e){
+    console.error('[Chat] Erro ao salvar comentário:', e);
+    toast('Erro ao enviar: '+e.message,'err');
+    inp.value = txt; // restore text
+  }
   finally{ inp.disabled = false; inp.focus(); }
 };
 
