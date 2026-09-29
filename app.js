@@ -1821,33 +1821,46 @@ window.openObraModal=function(obraId){
 // ══ CHAT DE AVISOS — comentários por obra ══════════════════════════════════
 let _chatObraId = null;
 let _chatUnsub  = null;
+window._chatPollTimer = null;
+window._chatReload = null;
 
 async function abrirChatObra(obraId){
-  // Also accept ID from the modal's hidden field as fallback
   const id = obraId || document.getElementById('obraId')?.value?.trim();
   _chatObraId = id || null;
-  if(!id){ return; }
-  // Unsubscribe from previous listener
-  if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
   const box = document.getElementById('chatBox');
-  if(!box) return;
-  box.innerHTML = '<div style="font-size:10px;color:var(--muted)">Carregando...</div>';
+  if(!id || !box){
+    if(box) box.innerHTML='<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Salve a obra para usar o chat.</div>';
+    return;
+  }
+  if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
+  if(window._chatPollTimer){ clearInterval(window._chatPollTimer); window._chatPollTimer = null; }
+  box.innerHTML = '<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Carregando...</div>';
 
-  // Real-time listener on subcollection
-  const colRef = collection(db, 'obras', obraId, 'comentarios');
-  const q = query(colRef, orderBy('criadoEm','asc'));
-  _chatUnsub = onSnapshot(q, snap=>{
-    const msgs = snap.docs.map(d=>({id:d.id,...d.data()}));
-    renderChatMsgs(msgs);
-  }, err=>{
-    console.error('[Chat] onSnapshot error:', err.code, err.message);
-    if(box){
-      if(err.code==='permission-denied')
-        box.innerHTML='<div style="font-size:10px;color:#F59E0B;padding:8px">⚠️ Regras do Firestore precisam ser atualizadas para habilitar o chat. Publique o firestore.rules no Firebase Console.</div>';
-      else
-        box.innerHTML='<div style="font-size:10px;color:#EF4444;padding:8px">Erro: '+err.message+'</div>';
+  async function carregarMsgs(){
+    try{
+      const snap = await getDocs(collection(db,'obras',id,'comentarios'));
+      const msgs = snap.docs
+        .map(d=>({id:d.id,...d.data()}))
+        .sort((a,b)=>{
+          const ta = a.criadoEm?.toDate ? a.criadoEm.toDate().getTime() : (a.criadoEm||0);
+          const tb = b.criadoEm?.toDate ? b.criadoEm.toDate().getTime() : (b.criadoEm||0);
+          return ta - tb;
+        });
+      renderChatMsgs(msgs);
+    }catch(e){
+      console.error('[Chat] Erro ao carregar:', e.code, e.message);
+      if(document.getElementById('chatBox')){
+        if(e.code==='permission-denied')
+          document.getElementById('chatBox').innerHTML='<div style="font-size:10px;color:#F59E0B;padding:8px">⚠️ Publique o <strong>firestore.rules</strong> no Firebase Console para habilitar o chat.</div>';
+        else
+          document.getElementById('chatBox').innerHTML='<div style="font-size:10px;color:#EF4444;padding:8px">Erro: '+e.message+'</div>';
+      }
     }
-  });
+  }
+
+  await carregarMsgs();
+  window._chatPollTimer = setInterval(carregarMsgs, 5000);
+  window._chatReload = carregarMsgs;
 }
 
 function renderChatMsgs(msgs){
@@ -1894,9 +1907,14 @@ window.enviarMsgChat = async function(){
       uid: auth.currentUser.uid,
       criadoEm: serverTimestamp()
     });
+    // Reload chat immediately after sending
+    if(window._chatReload) await window._chatReload();
   }catch(e){
-    console.error('[Chat] Erro ao salvar comentário:', e);
-    toast('Erro ao enviar: '+e.message,'err');
+    console.error('[Chat] Erro ao salvar:', e.code, e.message);
+    if(e.code==='permission-denied')
+      toast('Sem permissão — publique as regras do Firestore.','err');
+    else
+      toast('Erro ao enviar: '+e.message,'err');
     inp.value = txt; // restore text
   }
   finally{ inp.disabled = false; inp.focus(); }
@@ -1904,7 +1922,9 @@ window.enviarMsgChat = async function(){
 
 window.fecharChatObra = function(){
   if(_chatUnsub){ _chatUnsub(); _chatUnsub = null; }
+  if(_chatPollTimer){ clearInterval(_chatPollTimer); _chatPollTimer = null; }
   _chatObraId = null;
+  window._chatReload = null;
 };
 
 window.closeObraModal=function(){ document.getElementById('ovObra').classList.remove('open'); };
