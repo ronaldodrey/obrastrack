@@ -2610,6 +2610,24 @@ window.saveObra=async function(){
       };
       if(_medicoesPendentes.length > 0) _medicoesPendentes=[];
     _equipModificado = false;
+
+      // ── ODI: preservar campos das ações ODI (salvos via odiSalvarCampo) ──
+      // O branch fiscal lê campos do form RD (ocultos para ODI) → sobrescreveria com vazio
+      if(obraAntiga?.tipo === 'ODI'){
+        ['conclusao','fiscalizacao','kaffaODI',
+         'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
+         'dataCadastro','cadastroConfirmado',
+         'nfEnviadaFlag','nfEnviadaData','nfLancadaData',
+         'medida70','medida230','medida280',
+         'devolucaoFinanceiraData','armazenado','locaisTrabalho'
+        ].forEach(f=>{
+          if(obraAntiga[f] !== undefined) patch[f] = obraAntiga[f];
+          else delete patch[f];
+        });
+        // Remover campos RD que não se aplicam a obras ODI
+        ['kaffa','kaffaEntries','medicao','medicoes','regularizacaoData',
+         'medida280Motivo'].forEach(f=>delete patch[f]);
+      }
     }
 
     // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
