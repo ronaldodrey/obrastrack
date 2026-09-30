@@ -281,7 +281,7 @@ async function iniciarApp(){
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
     ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
-    ...((isAdmOdi||me.perfil==='gerente')?[['pgDashOdi','🏗️ Painel ODI']]:[]),
+    ...((isAdmOdi||me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm')?[['pgDashOdi','🏗️ Painel ODI']]:[]),
     ['pgDesligamentos','🔌 Desligamentos'],
   ];
   // Otimização tabs
@@ -1572,6 +1572,12 @@ window.openObraModal=function(obraId){
     // Hide ODI sections for new obra (will show when ODI type is selected)
     const s1=document.getElementById('secODI'); if(s1) s1.style.display='none';
     const s2=document.getElementById('secODIAcoes'); if(s2) s2.innerHTML='';
+    // Ensure save button is visible for new obras
+    const btnS=document.getElementById('btnSalvarObra'); if(btnS) btnS.style.display='';
+    ['oNum','oTipo','oCidade','oEmp','oFiscalNome','oAbertura','oPrazo','oPrazoOpcao',
+     'oUSC','oULV','oEquipRef','oDescricao','oEnquadramento','oPrograma'].forEach(id=>{
+      const el=document.getElementById(id); if(el){ el.disabled=false; el.style.opacity=''; }
+    });
   }
   // reset
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
@@ -1650,10 +1656,31 @@ window.openObraModal=function(obraId){
       ].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
       // Render ODI action panel
       setTimeout(()=>renderAcoesODI(obra),50);
+
+      // Fiscal: identification fields are read-only in ODI obras
+      if(p==='fiscal'||p==='fiscal_adm'){
+        const ID_FIELDS = ['oNum','oTipo','oCidade','oEmp','oFiscalNome','oAbertura',
+          'oPrazo','oPrazoOpcao','oUSC','oULV','oEquipRef','oDescricao',
+          'oEnquadramento','oPrograma','oDescricaoODI','oDescricaoLivreODI'];
+        ID_FIELDS.forEach(id=>{
+          const el = document.getElementById(id);
+          if(el){ el.disabled=true; el.style.opacity='0.6'; }
+        });
+        // Hide save button — fiscal uses action buttons directly
+        const btnSalvar = document.getElementById('btnSalvarObra');
+        if(btnSalvar){ btnSalvar.style.display='none'; }
+      }
     } else {
       // RD obra — hide ODI sections completely; restore RD sections
       if(secODIEl) secODIEl.style.display='none';
       if(secODIAc) secODIAc.innerHTML='';
+      // RD obra: restaura save button e campos que podem ter sido desabilitados
+      const btnSalvarRD = document.getElementById('btnSalvarObra');
+      if(btnSalvarRD) btnSalvarRD.style.display='';
+      ['oNum','oTipo','oCidade','oEmp','oFiscalNome','oAbertura','oPrazo','oPrazoOpcao',
+       'oUSC','oULV','oEquipRef','oDescricao','oEnquadramento','oPrograma'].forEach(id=>{
+        const el=document.getElementById(id); if(el){ el.disabled=false; el.style.opacity=''; }
+      });
       // RD obra: restaura todas as seções que podem ter sido ocultadas numa obra ODI anterior
       ['secExec','secConclusaoExtra',
        'secFisc',
@@ -9346,7 +9373,10 @@ function renderDashAdmOdi(){
     return setTimeout(renderDashAdmOdi,100);
   }
 
-  const odiObras = obras.filter(o=>o.tipo==='ODI'&&!o.cancelado);
+  // Fiscal vê somente suas obras ODI; adm_odi e gerente veem todas
+  const isFiscalODI = me.perfil==='fiscal'||me.perfil==='fiscal_adm';
+  const odiObras = obras.filter(o=>o.tipo==='ODI'&&!o.cancelado&&
+    (!isFiscalODI || o.fiscal===me.vinculo||o.fiscal===me.nome));
   const hoje = new Date().toISOString().split('T')[0];
 
   // Card data
