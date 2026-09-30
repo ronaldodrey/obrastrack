@@ -1404,9 +1404,19 @@ window.toggleEnquadramento = function(){
   // Show/hide ODI section
   const secODI = document.getElementById('secODI');
   if(secODI) secODI.style.display = isODI ? '' : 'none';
-  // Update label for ODI type description selector
+  // Update label
   const lblDescODI = document.getElementById('lblDescricaoODI');
-  if(lblDescODI) lblDescODI.textContent = 'Tipo de Obra ODI';
+  if(lblDescODI) lblDescODI.textContent = isODI ? 'Tipo de Obra ODI' : 'Tipo de Descrição';
+  // Auto-prazo 18 meses ao selecionar ODI
+  if(isODI){
+    const daEl = document.getElementById('oDataAbertura');
+    if(daEl?.value){
+      const d = new Date(daEl.value+'T00:00:00');
+      d.setMonth(d.getMonth()+18);
+      const prazoEl = document.getElementById('oPrazo');
+      if(prazoEl && !prazoEl.value) prazoEl.value = d.toISOString().split('T')[0];
+    }
+  }
   // Auto-set prazo 18 meses for ODI
   if(isODI){
     const daEl = document.getElementById('oDataAbertura');
@@ -1828,9 +1838,18 @@ window.openObraModal=function(obraId){
   // 2. Mostrar só o que cada perfil precisa — ignorado para obras ODI (têm secODIAcoes próprio)
   function showSec(id){ const el=document.getElementById(id); if(el) el.style.display='block'; }
 
-  // Para obras ODI: secções já configuradas acima — pular bloco de showSec RD
+  // secIdentif sempre visível (cabeçalho da obra) — exceto genesis/estagiario
+  if(!isGenesis && !isEstagiario){
+    showSec('secIdentif');
+    // USC/ULV medido: só gerente/adm_odi com medições parciais
+    if((p==='gerente'||p==='adm_odi') && isEdit){
+      const temMed = obra?.medicoes?.some(m=>m.tipo==='parcial');
+      document.getElementById('fgUSCMedido') && (document.getElementById('fgUSCMedido').style.display = temMed?'grid':'none');
+    }
+  }
+  // Para obras ODI: pular bloco de showSec RD (ODI tem suas próprias seções)
   if(obra?.tipo === 'ODI'){
-    // ODI: nada a fazer aqui, as seções foram configuradas no bloco ODI acima
+    // ODI: secIdentif já mostrada acima; ações ODI renderizadas no bloco anterior
   } else {
   if(isGenesis){
     // Genesis: SOMENTE secCadastro (data envio + toggle confirmação)
@@ -1966,8 +1985,6 @@ window.openObraModal=function(obraId){
         const d = new Date(daEl.value+'T00:00:00'); d.setMonth(d.getMonth()+18);
         const prazoEl = document.getElementById('oPrazo');
         if(prazoEl) prazoEl.value = d.toISOString().split('T')[0];
-        const prazoOpcEl = document.getElementById('oPrazoOpcao');
-        if(prazoOpcEl){ prazoOpcEl.value='outro'; if(typeof togglePrazoCustom==='function') togglePrazoCustom(); }
       });
     }
   },100);
@@ -2539,6 +2556,23 @@ window.saveObra=async function(){
       };
       if(_kaffasPendentes.length>0)  _kaffasPendentes=[];
       if(_medicoesPendentes.length>0) _medicoesPendentes=[];
+
+      // ── ODI: campos específicos e preservação de ações ────────────────────
+      if(patch.tipo==='ODI' || obraAntiga?.tipo==='ODI'){
+        patch.descricaoODI      = g('oDescricaoODI')      || obraAntiga?.descricaoODI      || null;
+        patch.descricaoLivreODI = g('oDescricaoLivreODI') || obraAntiga?.descricaoLivreODI || null;
+        // Ações ODI são salvas via odiSalvarCampo (updateDoc direto) — preservar aqui
+        ['conclusao','fiscalizacao','kaffaODI','nfEnviadaFlag','nfEnviadaData',
+         'nfLancadaData','medida70','medida230','medida280','pendenciasDocODI',
+         'devolucaoFinanceiraData','locaisTrabalho'
+        ].forEach(f=>{
+          if(obraAntiga?.[f] !== undefined) patch[f] = obraAntiga[f];
+          else delete patch[f];
+        });
+        // Remover campos exclusivos de obras RD
+        ['kaffa','kaffaEntries','medicao','medicoes','medida280Motivo',
+         'regularizacaoData'].forEach(f=>delete patch[f]);
+      }
     } else if(me.perfil==='empreiteira'){
       // Build kaffaEntries right here for empreiteira
       const existingKaffasEmp = obraAntiga?.kaffaEntries||[];
@@ -8871,7 +8905,7 @@ function renderAcoesODI(obra){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">`;
 
   // ── Conclusão da obra (Empreiteira / Adm_ODI / Gerente) ──
-  if(isEmp||isAdm) html += `
+  if(isEmp||isAdm||isFisc) html += `
     <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
       <div style="font-size:10px;font-weight:700;margin-bottom:6px">Conclusão da Obra</div>
       ${obra.conclusao?badge(true,'Informada em '+fmtD(obra.conclusao)):`
