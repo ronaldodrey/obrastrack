@@ -245,7 +245,10 @@
     <div id="pgOtimPortContent"><div class="loading">Carregando...</div></div>
   </div>
 
-  <div class="page" id="pgDesligamentos">
+  <div class="page" id="pgDashOdi">
+  <div id="pgDashOdiContent"></div>
+</div>
+<div class="page" id="pgDesligamentos">
     <div id="pgDesligamentosContent"><div class="loading">Carregando...</div></div>
   </div>
 
@@ -377,6 +380,28 @@
           <option value="Obra Grupo A">Obra Grupo A</option>
         </select>
       </div>
+      <!-- ── Seção ODI (aparece somente quando tipo=ODI) ─────────── -->
+      <div id="secODI" style="display:none;border-top:2px solid #F59E0B;margin-top:12px;padding-top:12px">
+        <div style="font-size:11px;font-weight:800;color:#F59E0B;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">⚡ Campos específicos — Obra ODI</div>
+        <div class="fg-grid">
+          <div class="fg">
+            <label>Tipo de Descrição</label>
+            <select id="oDescricaoODI" onchange="toggleDescricaoODI()">
+              <option value="">— selecione —</option>
+              <option value="Loteamento">🏘️ Loteamento</option>
+              <option value="Livre">✏️ Livre</option>
+            </select>
+          </div>
+          <div class="fg" id="fgDescricaoLivre" style="display:none">
+            <label>Descrição livre da obra</label>
+            <textarea id="oDescricaoLivreODI" rows="2" placeholder="Descreva o objeto da obra..."></textarea>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;padding:6px 10px;background:rgba(245,158,11,.08);border-radius:6px;border:1px solid rgba(245,158,11,.3)">
+          ℹ️ O prazo de execução será automaticamente definido como <strong>18 meses</strong> a partir da data de abertura (prazo contratual máximo ODI).
+        </div>
+      </div>
+
       <div class="fg"><label>Descrição <span style="font-size:10px;color:var(--muted)">(ex: Obra BRO05)</span></label>
         <input type="text" id="oDescricao" placeholder="Breve descrição da obra…" maxlength="80">
       </div>
@@ -584,6 +609,10 @@
       <div class="fg" id="fgPendenciaOutro" style="display:none">
         <label>Descreva o tipo (Outro)</label><input type="text" id="oPendenciaOutro" placeholder="Ex: Vegetação">
       </div>
+      <div id="msgSAPODI" style="display:none;margin-top:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:10px">
+        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:4px">⚠️ Ação obrigatória — Obra ODI</div>
+        <div style="font-size:11px;color:#DC2626"><strong>Favor imputar a medida 321 dentro do sistema SAP.</strong></div>
+      </div>
       <div class="fg"><label>Prazo para Regularização da Pendência</label>
         <select id="oPrazoPendenciaOpcao" onchange="calcularPrazoPendencia()">
           <option value="">— selecione —</option>
@@ -762,6 +791,9 @@
     <button class="btn btn-primary" id="btnSalvarObra" onclick="saveObra()">Salvar</button>
   </div>
 
+  <!-- ODI Ações Section -->
+  <div id="secODIAcoes"></div>
+
   <!-- Chat de Avisos -->
   <div style="border-top:1px solid var(--border);padding:16px">
     <div style="font-weight:700;font-size:12px;margin-bottom:10px;display:flex;align-items:center;gap:6px">
@@ -803,6 +835,7 @@
             <option value="fiscal_adm">Fiscal Administrativo</option>
       <option value="empreiteira">Empreiteira</option>
       <option value="genesis">Genesis</option>
+              <option value="adm_odi">Adm. ODI</option>
       <option value="estagiario">Estagiário</option>
     </select>
   </div>
