@@ -293,7 +293,7 @@ async function iniciarApp(){
   document.getElementById('tabBar').innerHTML =
     tabs.map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
 
-  document.getElementById('btnNovaObra').style.display=me.perfil==='gerente'?'inline-flex':'none';
+  document.getElementById('btnNovaObra').style.display=(me.perfil==='gerente'||me.perfil==='adm_odi')?'inline-flex':'none';
   if(me.perfil==='gerente'){
     const btnLimpEq = document.getElementById('btnLimparEquip');
     if(btnLimpEq) btnLimpEq.style.display='inline-flex';
@@ -688,10 +688,10 @@ function renderDashFiscal(list, meuNome){
   const minhas = list.filter(o=>o.fiscal===meuNome);
   const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
   const ulvTotal = minhas.reduce((s,o)=>s+(parseFloat(o.ulv)||0),0);
-  const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
+  const comPend = minhas.filter(o=>o.tipo!=='ODI'&&o.pendencia&&!o.pendenciaResolvida);
   const agConfPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
-  const paraFisc = list.filter(o=>o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
-  const paraMedir = list.filter(o=>o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)&&o.fiscal===meuNome);
+  const paraFisc = list.filter(o=>o.tipo!=='ODI'&&o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
+  const paraMedir = list.filter(o=>o.tipo!=='ODI'&&o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)&&o.fiscal===meuNome);
   const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
   const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
@@ -741,7 +741,7 @@ function renderDashEmpreiteira(minhas){
   // Aguarda Kaffa: empreiteira informou conclusão mas ainda não registrou kaffa
   const aguardKaffa = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.kaffa);
   const aguardMed = minhas.filter(o=>o.kaffa&&!o.medicao);
-  const comPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida);
+  const comPend = minhas.filter(o=>o.tipo!=='ODI'&&o.pendencia&&!o.pendenciaResolvida);
   const tempoKaffa = avgDiffConclusaoKaffaFinal(minhas); // só kaffa FINAL conta para este KPI
   const tempoReg = avgDiff(minhas.filter(o=>o.pendencia&&o.regularizacaoData),'prazoPendencia','regularizacaoData');
 
@@ -2534,7 +2534,8 @@ window.saveObra=async function(){
          'nfLancadaData','medida70','medida230','medida280','pendenciasDocODI',
          'devolucaoFinanceiraData','locaisTrabalho',
          // Pendência construtiva ODI (salva via odiRegistrarPendencia/odiResolverPendencia)
-         'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida'
+         'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
+         'armazenado','armazenamentoData','dataCadastro','cadastroConfirmado'
         ].forEach(f=>{
           if(obraAntiga?.[f] !== undefined) patch[f] = obraAntiga[f];
           else delete patch[f];
@@ -7285,7 +7286,10 @@ window.toggleEnquadramento = function(){
   if(isODI){
     // Auto-select "18 meses" prazo option
     const prazoOpcEl = document.getElementById('oPrazoOpcao');
-    if(prazoOpcEl && !prazoOpcEl.value) { prazoOpcEl.value='548'; if(typeof togglePrazoCustom==='function') togglePrazoCustom(); }
+    if(prazoOpcEl) {
+      prazoOpcEl.value='548';
+      if(typeof window.togglePrazoCustom==='function') window.togglePrazoCustom();
+    }
     // Also auto-calc date from abertura if available
     const daEl = document.getElementById('oDataAbertura');
     if(daEl?.value){
@@ -8902,6 +8906,77 @@ window.odiResolverPendencia = async function(obraId){
     renderDashDebounced();
   }catch(e){ toast('Erro: '+e.message,'err'); }
 };
+
+// ── Equipamentos ODI — funções com containers específicos (IDs únicos) ──────
+function renderEquipInstaladosODI(){
+  const cont = document.getElementById('listaEquipInstaladosODI');
+  if(!cont) return;
+  if(!_equipInstalados.length){
+    cont.innerHTML='<div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado.</div>'; return;
+  }
+  cont.innerHTML = _equipInstalados.map((e,i)=>`
+    <div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2)">
+        <span style="font-size:10px;font-weight:700">Equip. ${i+1}</span>
+        <span style="font-size:9px;color:var(--muted);flex:1">${e.potencia?e.potencia+'kVA':''} ${e.sap?'SAP:'+e.sap:''}</span>
+        <button onclick="_remEquipODI('ins','${e.id}')" style="background:none;border:none;color:#EF4444;cursor:pointer;font-size:12px">✕</button>
+      </div>
+      <div style="padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div class="fg"><label style="font-size:9px">SAP</label><input type="text" value="${e.sap||''}" oninput="_updEquipODI('ins','${e.id}','sap',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Série</label><input type="text" value="${e.serie||''}" oninput="_updEquipODI('ins','${e.id}','serie',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Fabricante</label><input type="text" value="${e.fabricante||''}" oninput="_updEquipODI('ins','${e.id}','fabricante',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Potência (kVA)</label><input type="number" value="${e.potencia||''}" oninput="_updEquipODI('ins','${e.id}','potencia',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Placas</label><input type="text" value="${e.placas||''}" oninput="_updEquipODI('ins','${e.id}','placas',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Data Transf.</label><input type="date" value="${e.dataTransf||''}" oninput="_updEquipODI('ins','${e.id}','dataTransf',this.value)"></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderEquipRetiradosODI(){
+  const cont = document.getElementById('listaEquipRetiradosODI');
+  if(!cont) return;
+  if(!_equipRetirados.length){
+    cont.innerHTML='<div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado.</div>'; return;
+  }
+  cont.innerHTML = _equipRetirados.map((e,i)=>`
+    <div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2)">
+        <span style="font-size:10px;font-weight:700">Retirado ${i+1}</span>
+        <span style="font-size:9px;color:var(--muted);flex:1">${e.potencia?e.potencia+'kVA':''} ${e.sap?'SAP:'+e.sap:''}</span>
+        <button onclick="_remEquipODI('ret','${e.id}')" style="background:none;border:none;color:#EF4444;cursor:pointer;font-size:12px">✕</button>
+      </div>
+      <div style="padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div class="fg"><label style="font-size:9px">SAP</label><input type="text" value="${e.sap||''}" oninput="_updEquipODI('ret','${e.id}','sap',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Série</label><input type="text" value="${e.serie||''}" oninput="_updEquipODI('ret','${e.id}','serie',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Fabricante</label><input type="text" value="${e.fabricante||''}" oninput="_updEquipODI('ret','${e.id}','fabricante',this.value)"></div>
+        <div class="fg"><label style="font-size:9px">Potência (kVA)</label><input type="number" value="${e.potencia||''}" oninput="_updEquipODI('ret','${e.id}','potencia',this.value)"></div>
+      </div>
+    </div>`).join('');
+}
+
+window.adicionarEquipInstaladoODI = function(){
+  _equipModificado = true;
+  _equipInstalados.push({id:`ei_${Date.now()}`,placas:'',potencia:'',sap:'',serie:'',fabricante:'',dataTransf:''});
+  renderEquipInstaladosODI();
+};
+window.adicionarEquipRetiradoODI = function(){
+  _equipModificado = true;
+  _equipRetirados.push({id:`er_${Date.now()}`,potencia:'',sap:'',serie:'',fabricante:''});
+  renderEquipRetiradosODI();
+};
+window._updEquipODI = function(tipo, id, campo, val){
+  _equipModificado = true;
+  const arr = tipo==='ins' ? _equipInstalados : _equipRetirados;
+  const item = arr.find(e=>e.id===id);
+  if(item) item[campo] = val;
+};
+window._remEquipODI = function(tipo, id){
+  _equipModificado = true;
+  if(tipo==='ins') _equipInstalados = _equipInstalados.filter(e=>e.id!==id);
+  else _equipRetirados = _equipRetirados.filter(e=>e.id!==id);
+  renderEquipInstaladosODI();
+  renderEquipRetiradosODI();
+};
 // Abre seção de ações ODI no modal (chamado por openObraModal quando tipo=ODI)
 function renderAcoesODI(obra){
   const cont = document.getElementById('secODIAcoes');
@@ -9071,7 +9146,16 @@ function renderAcoesODI(obra){
     ));
   }
 
-  // ── 11. Armazenamento (Adm / Gerente) ───────────────────────────────
+  // ── 11. Envio para Cadastro — PS (Fiscal / Adm / Gerente) ──────────
+  if(isFisc||isAdm){
+    sections.push(card('📁 Envio para Cadastro (PS)',
+      obra.dataCadastro ? badge(true,'Enviado em '+fmtD(obra.dataCadastro))
+      : dateField('odiCadastroData','Data de envio para cadastro','Registrar Envio Cadastro',
+          `odiSalvarCampo('${oId}','dataCadastro',document.getElementById('odiCadastroData')?.value)`)
+    ));
+  }
+
+  // ── 12. Armazenamento (Adm / Gerente) ────────────────────────────────
   if(isAdm && obra.medida280){
     sections.push(card('📦 Armazenamento',
       obra.armazenado ? badge(true,'Armazenada')
@@ -9090,20 +9174,20 @@ function renderAcoesODI(obra){
       <div style="margin-bottom:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <span style="font-size:9px;color:var(--muted);font-weight:700">INSTALADO</span>
-          <button type="button" onclick="adicionarEquipInstalado()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
+          <button type="button" onclick="adicionarEquipInstaladoODI()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
         </div>
-        <div id="listaEquipInstalados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado.</div></div>
+        <div id="listaEquipInstaladosODI"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado.</div></div>
       </div>
       <div style="padding-top:8px;border-top:1px solid var(--border)">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <span style="font-size:9px;color:var(--muted);font-weight:700">RETIRADO</span>
-          <button type="button" onclick="adicionarEquipRetirado()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
+          <button type="button" onclick="adicionarEquipRetiradoODI()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
         </div>
-        <div id="listaEquipRetirados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado.</div></div>
+        <div id="listaEquipRetiradosODI"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado.</div></div>
       </div>`;
     sections.push(card('🔩 Equipamentos / Transformadores', equipBody));
-    // Render into freshly created containers
-    setTimeout(()=>{ renderEquipInstalados(); renderEquipRetirados(); }, 60);
+    // Render into ODI-specific containers (avoid ID conflict with secExec)
+    setTimeout(()=>{ renderEquipInstaladosODI(); renderEquipRetiradosODI(); }, 60);
   }
 
   // ── 13. Locais de Trabalho (todos) ──────────────────────────────────
@@ -9147,14 +9231,25 @@ window.odiAdicionarLocal = async function(obraId){
 
 // ── ODI action helpers ────────────────────────────────────────────────────
 window.odiSalvarCampo = async function(obraId, campo, valor){
-  if(!valor){ toast('Informe a data antes de salvar.','warn'); return; }
+  // Allow boolean true for armazenado, but reject empty strings/null for dates
+  if(valor==='' || valor===null || valor===undefined){ toast('Informe o valor antes de salvar.','warn'); return; }
   try{
-    await updateDoc(doc(db,'obras',obraId),{[campo]:valor});
+    const patch = {[campo]: valor};
+    // If armazenado, also set armazenamentoData
+    if(campo==='armazenado' && valor===true) patch.armazenamentoData = hojeStr();
+    await updateDoc(doc(db,'obras',obraId), patch);
     const o = obras.find(x=>x.id===obraId);
-    if(o){ o[campo]=valor; renderAcoesODI(o); }
+    if(o){
+      o[campo] = valor;
+      if(patch.armazenamentoData) o.armazenamentoData = patch.armazenamentoData;
+      renderAcoesODI(o);
+    }
     toast('✓ Registrado com sucesso.','ok');
     renderDashDebounced();
-  }catch(e){ toast('Erro: '+e.message,'err'); }
+  }catch(e){
+    console.error('[ODI] odiSalvarCampo error:', campo, e.code, e.message);
+    toast('Erro ao salvar: '+e.message,'err');
+  }
 };
 
 window.odiSalvarNFEnvio = async function(obraId){
@@ -9272,7 +9367,7 @@ function renderDashAdmOdi(){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px">
       ${kpiOdi('Total ODI', odiObras.filter(o=>!o.armazenado).length,'#7c6af7')}
       ${kpiOdi('Ag. Fisc/Kaffa', agFiscKaffa.length,'#F59E0B')}
-      ${kpiOdi('Ag. Notas Fiscais', agNF.length,'#F97316', agNF.length?'Máx: '+Math.max(...agNF.map(o=>diasEntre(o.kaffaODI)))+'d':'')}
+      ${kpiOdi('Ag. Receb. NF', agNF.length,'#F97316', agNF.length?'Máx: '+Math.max(...agNF.map(o=>diasEntre(o.kaffaODI)))+'d':'')}
       ${kpiOdi('Ag. Lançamento', agLancamento.length,'#EF4444', agLancamento.length?'Máx: '+Math.max(...agLancamento.map(o=>diasEntre(o.nfEnviadaData)))+'d':'')}
       ${kpiOdi('Com Pendência', comPendencia.length,'#DC2626')}
       ${kpiOdi('Ag. Med. 70/230', ag7030.length,'#3B82F6')}
@@ -9281,7 +9376,7 @@ function renderDashAdmOdi(){
 
     <!-- Tabelas -->
     ${tabelaOdi(agFiscKaffa,'⏳ Aguardando Fiscalização / Kaffa','#F59E0B',false,null)}
-    ${tabelaOdi(agNF,'📋 Aguardando Envio de Notas Fiscais','#F97316',true,o=>diasEntre(o.kaffaODI))}
+    ${tabelaOdi(agNF,'📋 Aguardando Recebimento de NF pela Empreiteira','#F97316',true,o=>diasEntre(o.kaffaODI))}
     ${tabelaOdi(agLancamento,'🧾 Aguardando Lançamento de Notas','#EF4444',true,o=>diasEntre(o.nfEnviadaData))}
     ${tabelaOdi(comPendencia,'⚠️ Obras com Pendência','#DC2626',false,null)}
     
