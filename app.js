@@ -151,16 +151,10 @@ function statusOf(o){
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
   // Medição (final) só avança status se obra já concluída pela empreiteira
   if(o.medicao&&o.conclusao) return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
-  // Cadastro urgente: 2 condições
-  // 1. Fiscalizada há +7 dias sem encaminhar cadastro
+  // Cadastro urgente 1: Fiscalizada +7d sem encaminhar cadastro
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
-  }
-  // 2. Concluída pela empreiteira há +15 dias sem fiscalização
-  if(o.conclusao && !o.fiscalizacao){
-    const d=diff(o.conclusao, new Date().toISOString().split('T')[0]);
-    if(d!==null && d>15) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa){
     // Se já tem medição parcial registrada (qualquer capitalização) e sem conclusão → Em Execução
@@ -170,6 +164,11 @@ function statusOf(o){
     const soConcluída = o.conclusao;
     if((temMedParcial || !kafkaFinal) && !soConcluída) return 'Em Execução';
     return 'Aguard. Medição';
+  }
+  // Cadastro urgente 2: Concluída +15d sem fiscalização (ANTES de retornar Em Execução/Atrasada)
+  if(o.conclusao && !o.fiscalizacao){
+    const _d15=diff(o.conclusao, new Date().toISOString().split('T')[0]);
+    if(_d15!==null && _d15>15) return 'Encaminhar Cadastro Urgente';
   }
   if(o.fiscalizacao) return 'Aguardando Kaffa';
   if(o.impedimento)  return 'Prob. Executivo – Celesc';
@@ -7355,25 +7354,31 @@ function renderDashSummaryFiscal(minhas){
 
   function hexRgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)].join(','); }
 
-  function listaComCiente(list, campo, tipo, cor){
+  function listaComCiente(list, campo, tipo, cor, dataCampoDias=null){
     if(!list.length) return `<div style="font-size:11px;color:var(--muted)">Nenhuma obra. ✓</div>`;
+    const hoje_s = hojeStr();
     // Mostra TODAS as obras (sem limite) — Bug 3 fix
     return list.map(o=>{
       const visto = !!o[campo];
+      const diasVal = dataCampoDias && o[dataCampoDias] ? diff(o[dataCampoDias], hoje_s) : null;
+      const diasBadge = diasVal!==null
+        ? `<span style="background:${diasVal>15?'rgba(239,68,68,.2)':diasVal>7?'rgba(245,158,11,.2)':'rgba(59,130,246,.15)'};color:${diasVal>15?'#EF4444':diasVal>7?'#F59E0B':'#3B82F6'};border-radius:4px;font-size:9px;padding:1px 6px;font-weight:700;white-space:nowrap;margin-right:2px">${diasVal}d</span>`
+        : '';
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;
         background:${visto?'rgba(34,197,94,.08)':'rgba('+hexRgb(cor)+',.07)'};
         border:1px solid ${visto?'#22C55E55':cor+'55'};border-radius:6px;
         transition:background .3s">
-        <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${visto?'#22C55E':cor}"></span>
-        <strong style="color:var(--accent);font-size:11px;cursor:pointer" onclick="showPage('pgObras')">${o.numero}</strong>
+        <span style="width:7px;height:7px;border-radius:50%;background:${cor};flex-shrink:0"></span>
+        <strong style="color:var(--accent);font-size:11px;cursor:pointer;white-space:nowrap" onclick="openObraModal('${o.id}')">${o.numero}</strong>
         ${temMedParcial(o)?'<span style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid #F59E0B55;border-radius:4px;font-size:8px;padding:1px 5px;white-space:nowrap">Med. Parcial</span>':''}
-        <span style="font-size:10px;color:var(--muted);flex:1">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
-        ${!visto
-          ?`<button onclick="marcarCiente('${o.id}','${tipo}')"
-              style="background:${cor};color:#fff;border:none;border-radius:4px;padding:2px 10px;font-size:9px;font-weight:700;cursor:pointer;white-space:nowrap">
-              ✓ Ciente
-            </button>`
-          :`<span style="font-size:9px;color:#22C55E;font-weight:700;white-space:nowrap">✓ Ciente</span>`}
+        ${diasBadge}
+        <span style="font-size:10px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
+        <button onclick="toggleFavorito('${o.id}','${campo}')" 
+          style="background:none;border:none;cursor:pointer;font-size:10px;white-space:nowrap;
+            color:${visto?'#22C55E':'var(--muted)'};flex-shrink:0" 
+          title="${visto?'Marcado como ciente':'Marcar como ciente'}">
+          ${visto?'✓ Ciente':'○ Ciente'}
+        </button>
       </div>`;
     }).join('');
   }
