@@ -156,6 +156,11 @@ function statusOf(o){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
   }
+  // Cadastro urgente 2: Concluída +15d sem fiscalização (antes do kaffa para garantir precedência)
+  if(o.conclusao && !o.fiscalizacao){
+    const _d15=diff(o.conclusao, new Date().toISOString().split('T')[0]);
+    if(_d15!==null && _d15>15) return 'Encaminhar Cadastro Urgente';
+  }
   if(o.kaffa){
     // Se já tem medição parcial registrada (qualquer capitalização) e sem conclusão → Em Execução
     const temMedParcial = (o.medicoes||[]).some(m=>(m.tipo||'').toLowerCase()==='parcial');
@@ -164,11 +169,6 @@ function statusOf(o){
     const soConcluída = o.conclusao;
     if((temMedParcial || !kafkaFinal) && !soConcluída) return 'Em Execução';
     return 'Aguard. Medição';
-  }
-  // Cadastro urgente 2: Concluída +15d sem fiscalização (ANTES de retornar Em Execução/Atrasada)
-  if(o.conclusao && !o.fiscalizacao){
-    const _d15=diff(o.conclusao, new Date().toISOString().split('T')[0]);
-    if(_d15!==null && _d15>15) return 'Encaminhar Cadastro Urgente';
   }
   if(o.fiscalizacao) return 'Aguardando Kaffa';
   if(o.impedimento)  return 'Prob. Executivo – Celesc';
@@ -7373,7 +7373,7 @@ function renderDashSummaryFiscal(minhas){
         ${temMedParcial(o)?'<span style="background:rgba(245,158,11,.15);color:#F59E0B;border:1px solid #F59E0B55;border-radius:4px;font-size:8px;padding:1px 5px;white-space:nowrap">Med. Parcial</span>':''}
         ${diasBadge}
         <span style="font-size:10px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.cidade||'—'} · ${o.empreiteira||'—'}</span>
-        <button onclick="toggleFavorito('${o.id}','${campo}')" 
+        <button onclick="window.marcarCiente('${o.id}','${tipo}')" 
           style="background:none;border:none;cursor:pointer;font-size:10px;white-space:nowrap;
             color:${visto?'#22C55E':'var(--muted)'};flex-shrink:0" 
           title="${visto?'Marcado como ciente':'Marcar como ciente'}">
@@ -7391,14 +7391,14 @@ function renderDashSummaryFiscal(minhas){
         <div><span style="font-weight:700;font-size:12px">🔍 Aguardando Fiscalização</span>${badge(agFisc.filter(o=>!o.cienFisc).length,'#3B82F6')}</div>
         <span style="background:#3B82F6;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agFisc.length}</span>
       </div>
-      ${listaComCiente(agFisc,'cienFisc','fisc','#3B82F6')}
+      ${listaComCiente(agFisc,'cienFisc','fisc','#3B82F6','conclusao')}
     </div>
     <div style="${cardStyle};border-left:3px solid #F59E0B">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div><span style="font-weight:700;font-size:12px">📐 Aguardando Medição</span>${badge(agMed.filter(o=>!o.cienMed).length,'#F59E0B')}</div>
         <span style="background:#F59E0B;color:#000;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">${agMed.length}</span>
       </div>
-      ${listaComCiente(agMed,'cienMed','med','#F59E0B')}
+      ${listaComCiente(agMed,'cienMed','med','#F59E0B','kaffa')}
     </div>
     <div style="${cardStyle};border-left:3px solid #EF4444">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
