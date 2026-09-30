@@ -281,7 +281,7 @@ async function iniciarApp(){
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
     ...(me.perfil==='gerente'?[['pgCarteiraFutura','📅 Carteira Futura']]:[]),
-    ...(isAdmOdi?[['pgDashOdi','🏗️ Painel ODI']]:[]),
+    ...((isAdmOdi||me.perfil==='gerente')?[['pgDashOdi','🏗️ Painel ODI']]:[]),
     ['pgDesligamentos','🔌 Desligamentos'],
   ];
   // Otimização tabs
@@ -485,7 +485,9 @@ function renderDash(){
     if(dashPerspectiva === 'gerente'){
       html += renderDashGerente(list, listAll);
     } else if(dashPerspectiva === 'adm_odi'){
-      html += '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Use o <strong>🏗️ Painel ODI</strong> para suas obras ODI.</div>';
+      // Redirect adm_odi to Painel ODI directly
+      setTimeout(()=>showPage('pgDashOdi'),50);
+      html += '<div style="text-align:center;padding:40px;color:var(--muted);font-size:12px">Redirecionando para o 🏗️ Painel ODI...</div>';
     } else if(dashPerspectiva === 'genesis'){
       html += '<div class="modal-note" style="margin-bottom:16px">👁️ Perspectiva <strong>Genesis</strong></div>';
       html += renderDashGenesis(listAll);
@@ -1588,7 +1590,12 @@ window.openObraModal=function(obraId){
     ? `Obra ${obra.numero||obraId}` : 'Nova Obra';
   document.getElementById('obraId').value=obraId||'';
   // Sempre reseta equipamentos ao abrir o modal (evita contaminação entre obras)
-  if(!obraId){ _equipInstalados=[]; _equipRetirados=[]; renderEquipInstalados(); renderEquipRetirados(); }
+  if(!obraId){
+    _equipInstalados=[]; _equipRetirados=[]; renderEquipInstalados(); renderEquipRetirados();
+    // Hide ODI sections for new obra (will show when ODI type is selected)
+    const s1=document.getElementById('secODI'); if(s1) s1.style.display='none';
+    const s2=document.getElementById('secODIAcoes'); if(s2) s2.innerHTML='';
+  }
   // reset
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
    'oFabricante','oKaffa','oCadastro','oFiscalizacao','oPrazoPendencia','oRegularizacao','oMedicao',
@@ -1639,18 +1646,35 @@ window.openObraModal=function(obraId){
       else { selPrazo.value='outro'; inpPrazo.style.display='block'; inpPrazo.value=prazoStr; }
     }
     set('oUSC',obra.usc); set('oULV',obra.ulv); set('oEquipRef',obra.equipamentoRef||''); set('oDescricao',obra.descricao||''); set('oEnquadramento',obra.enquadramento||''); set('oPrograma',obra.programa||(obra.tipo==='R1'?'Regulatório':'')); toggleEnquadramento();
-    // ODI fields
+    // ODI fields — only show ODI section for ODI obras
+    const secODIEl  = document.getElementById('secODI');
+    const secODIAc  = document.getElementById('secODIAcoes');
     if(obra.tipo==='ODI'){
-      const sODI = document.getElementById('secODI');
-      if(sODI) sODI.style.display='';
+      if(secODIEl) secODIEl.style.display='';
       const dEl=document.getElementById('oDescricaoODI');
       if(dEl) dEl.value=obra.descricaoODI||'';
       const lEl=document.getElementById('oDescricaoLivreODI');
       if(lEl) lEl.value=obra.descricaoLivreODI||'';
       const fgLivre=document.getElementById('fgDescricaoLivre');
       if(fgLivre) fgLivre.style.display=obra.descricaoODI==='Livre'?'':'none';
+      // Hide only RD-exclusive sections for ODI obras
+      // Shared sections (conclusão, fiscalização, equipamentos, pendência, etc.) remain visible
+      ['secMedicao','secMedicaoParcialFields',   // medição RD → não existe em ODI
+       'secMedidas','secMedida280Motivo',         // medidas 70/230/280 RD → ODI tem as próprias
+       'secRegularizacao',                        // regularização → só RD
+       'secConfPendencia',                        // confirmação pendência → só RD
+       'secUSCMedidoGerente','fgUSCMedido','fgULVMedido' // campos USC/ULV medido → só RD
+      ].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
       // Render ODI action panel
       setTimeout(()=>renderAcoesODI(obra),50);
+    } else {
+      // RD obra — hide ODI sections completely; restore RD sections
+      if(secODIEl) secODIEl.style.display='none';
+      if(secODIAc) secODIAc.innerHTML='';
+      // Restore all RD sections that might have been hidden while viewing an ODI obra
+      ['secMedicao','secMedicaoParcialFields','secMedidas','secMedida280Motivo',
+       'secRegularizacao','secConfPendencia','secUSCMedidoGerente','fgUSCMedido','fgULVMedido'
+      ].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=''; });
     }
     // Transformer fields — inicializa arrays de equipamentos para a obra atual
     // Garante que dados de obras anteriores não vazam para esta obra
