@@ -1658,7 +1658,7 @@ window.openObraModal=function(obraId){
       setTimeout(()=>renderAcoesODI(obra),50);
 
       // Fiscal: identification fields are read-only in ODI obras
-      if(p==='fiscal'||p==='fiscal_adm'){
+      if(me.perfil==='fiscal'||me.perfil==='fiscal_adm'){
         const ID_FIELDS = ['oNum','oTipo','oCidade','oEmp','oFiscalNome','oAbertura',
           'oPrazo','oPrazoOpcao','oUSC','oULV','oEquipRef','oDescricao',
           'oEnquadramento','oPrograma','oDescricaoODI','oDescricaoLivreODI'];
