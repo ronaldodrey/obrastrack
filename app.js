@@ -9418,8 +9418,23 @@ function renderDashAdmOdi(){
 
   // Fiscal vê somente suas obras ODI; adm_odi e gerente veem todas
   const isFiscalODI = me.perfil==='fiscal'||me.perfil==='fiscal_adm';
-  const odiObras = obras.filter(o=>o.tipo==='ODI'&&!o.cancelado&&
+
+  // Filtros ativos (persistidos em window._odiDashFiltros)
+  window._odiDashFiltros = window._odiDashFiltros || {empreiteira:'', fiscal:''};
+  const f_emp  = window._odiDashFiltros.empreiteira;
+  const f_fisc = window._odiDashFiltros.fiscal;
+
+  // Listas únicas para os selects
+  const todasODI = obras.filter(o=>o.tipo==='ODI'&&!o.cancelado);
+  const empreiteirasODI = [...new Set(todasODI.map(o=>o.empreiteira||'').filter(Boolean))].sort();
+  const fiscaisODI      = [...new Set(todasODI.map(o=>o.fiscal||'').filter(Boolean))].sort();
+
+  const odiObrasBase = obras.filter(o=>o.tipo==='ODI'&&!o.cancelado&&
     (!isFiscalODI || o.fiscal===me.vinculo||o.fiscal===me.nome));
+  const odiObras = odiObrasBase
+    .filter(o=>!f_emp  || o.empreiteira===f_emp)
+    .filter(o=>!f_fisc || o.fiscal===f_fisc);
+
   const hoje = new Date().toISOString().split('T')[0];
 
   // Card data
@@ -9477,9 +9492,43 @@ function renderDashAdmOdi(){
     </div>`;
   }
 
+  // Filter controls HTML
+  const filtroHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--surface);
+      border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+      <span style="font-size:11px;font-weight:700;color:var(--muted)">🔽 Filtrar por:</span>
+
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:10px;color:var(--muted)">Empreiteira</label>
+        <select id="odiFilterEmp" onchange="window._odiDashFiltros.empreiteira=this.value;renderDashAdmOdi()"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);
+            background:var(--surface);color:inherit;cursor:pointer">
+          <option value="">Todas</option>
+          ${empreiteirasODI.map(e=>`<option value="${e}" ${f_emp===e?'selected':''}>${e}</option>`).join('')}
+        </select>
+      </div>
+
+      ${!isFiscalODI ? `<div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:10px;color:var(--muted)">Fiscal</label>
+        <select id="odiFilterFisc" onchange="window._odiDashFiltros.fiscal=this.value;renderDashAdmOdi()"
+          style="font-size:10px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);
+            background:var(--surface);color:inherit;cursor:pointer">
+          <option value="">Todos</option>
+          ${fiscaisODI.map(f=>`<option value="${f}" ${f_fisc===f?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </div>` : ''}
+
+      ${(f_emp||f_fisc) ? `<button onclick="window._odiDashFiltros={empreiteira:'',fiscal:''};renderDashAdmOdi()"
+        style="font-size:10px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);
+          background:none;cursor:pointer;color:#EF4444">✕ Limpar filtros</button>
+        <span style="font-size:10px;color:#F59E0B;font-weight:600">
+          Mostrando ${odiObras.length} de ${odiObrasBase.length} obras
+        </span>` : ''}
+    </div>`;
+
   cont.innerHTML = `
     <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:900;margin-bottom:16px">🏗️ Painel ODI</div>
-    
+    ${filtroHTML}
     <!-- KPIs -->
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:20px">
       ${kpiOdi('Total ODI', odiObras.filter(o=>!o.armazenado).length,'#7c6af7')}
