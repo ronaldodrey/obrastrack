@@ -552,13 +552,30 @@ window.setDashPerspectiva = function(p){
 
 function renderDashGerente(list, listAll){
   let html = '';
+  const listRD = list.filter(o=>o.tipo!=='ODI');
+  const listODI= list.filter(o=>o.tipo==='ODI');
+  function kpiSplit(label, fnRD, fnODI, cor){
+    const nRD = fnRD(listRD), nODI = fnODI(listODI);
+    return `<div class="kpi-card" style="border-top:3px solid ${cor}">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">${label}</div>
+      <div style="display:flex;gap:8px;align-items:baseline">
+        <span style="font-size:24px;font-weight:900;color:${cor}">${nRD+nODI}</span>
+        <span style="font-size:10px;color:var(--muted)">total</span>
+      </div>
+      <div style="font-size:10px;margin-top:4px">
+        <span style="color:#3B82F6">RD: ${nRD}</span>
+        <span style="color:var(--muted);margin:0 4px">·</span>
+        <span style="color:#F59E0B">ODI: ${nODI}</span>
+      </div>
+    </div>`;
+  }
   html += `<div class="kpi-strip">
-    ${kpiCard('Total',list.length,'obras','#00e5a0')}
-    ${kpiCard('Em Execução',list.filter(o=>statusOf(o)==='Em Execução').length,'no prazo','#3B82F6')}
-    ${kpiCard('Atrasadas',list.filter(o=>statusOf(o)==='Atrasada').length,'fora do prazo','#EF4444')}
-    ${kpiCard('Paralisadas',list.filter(o=>o.paralisada).length,'paralisadas','#DC2626')}
-    ${kpiCard('Prob. Executivo',list.filter(o=>o.impedimento&&!o.conclusao).length,'Celesc verificar','#B91C1C')}
-    ${kpiCard('Pendências Ativas',list.filter(o=>o.pendencia&&!o.pendenciaResolvida).length,'aguardando resolução','#F97316')}
+    ${kpiSplit('Total',r=>r.length,o=>o.length,'#00e5a0')}
+    ${kpiSplit('Em Execução',r=>r.filter(x=>statusOf(x)==='Em Execução').length,o=>o.filter(x=>statusOfODI(x)==='Em Execução').length,'#3B82F6')}
+    ${kpiSplit('Atrasadas',r=>r.filter(x=>statusOf(x)==='Atrasada').length,o=>o.filter(x=>x.dataLimite&&x.dataLimite<new Date().toISOString().split('T')[0]&&!x.armazenado&&!x.cancelado&&!x.conclusao).length,'#EF4444')}
+    ${kpiSplit('Paralisadas',r=>r.filter(x=>x.paralisada).length,o=>o.filter(x=>x.paralisada).length,'#DC2626')}
+    ${kpiSplit('Prob. Executivo',r=>r.filter(x=>x.impedimento&&!x.conclusao).length,o=>o.filter(x=>x.impedimento&&!x.conclusao).length,'#B91C1C')}
+    ${kpiSplit('Pendências Ativas',r=>r.filter(x=>x.pendencia&&!x.pendenciaResolvida).length,o=>o.filter(x=>x.pendencia&&!x.pendenciaResolvida).length,'#F97316')}
     ${kpiCard('Ag. Conf. Pend.',list.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length,'fiscal conferir','#F59E0B')}
     ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+7d sem cadastro','#EF4444')}
     ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
@@ -691,6 +708,7 @@ function renderDashFiscal(list, meuNome){
   const comPend = minhas.filter(o=>o.tipo!=='ODI'&&o.pendencia&&!o.pendenciaResolvida);
   const agConfPend = minhas.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
   const paraFisc = list.filter(o=>o.tipo!=='ODI'&&o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
+  const paraFiscODI = list.filter(o=>o.tipo==='ODI'&&o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
   const paraMedir = list.filter(o=>o.tipo!=='ODI'&&o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)&&o.fiscal===meuNome);
   const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
@@ -699,10 +717,10 @@ function renderDashFiscal(list, meuNome){
   const tempoMed = avgDiffKaffaMedicao(minhas); // pareia kaffa parcial/final com medição parcial/final
   const tempoCad = avgDiff(minhas,'fiscalizacao','dataCadastro');
   let html = `<div class="kpi-strip">
-    ${kpiCard('Obras',minhas.length,'atribuídas','#00e5a0')}
+    ${kpiCard('Obras',minhas.length,'RD: '+(minhas.filter(o=>o.tipo!=='ODI').length)+' · ODI: '+(minhas.filter(o=>o.tipo==='ODI').length),'#00e5a0')}
     ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
     ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
-    ${kpiCard('Para Fiscalizar',paraFisc.length,'aguardando vistoria','#EAB308')}
+    ${kpiCard('Para Fiscalizar',paraFisc.length+paraFiscODI.length,'RD: '+paraFisc.length+' · ODI: '+paraFiscODI.length,'#EAB308')}
     ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
     ${kpiCard('Fisc. s/ Kaffa',list.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscal===meuNome&&o.fiscalizacao&&!o.kaffa).length,'após fisc. — urgente','#EF4444')}
     ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
@@ -9043,6 +9061,28 @@ window._remEquipODI = function(tipo, id){
   renderEquipInstaladosODI();
   renderEquipRetiradosODI();
 };
+
+window.odiApagarCampo = async function(obraId, campos){
+  if(me.perfil!=='gerente'&&me.perfil!=='adm_odi'){
+    toast('Somente gerente ou adm_odi pode desfazer registros ODI.','err'); return;
+  }
+  const lista = Array.isArray(campos) ? campos : [campos];
+  const labels = lista.join(', ');
+  if(!confirm('Desfazer registro de: '+labels+'?\nEssa ação remove o dado registrado.')) return;
+  try{
+    const patch = {};
+    lista.forEach(f=>{ patch[f]=null; });
+    // Special resets
+    if(lista.includes('nfEnviadaFlag')){ patch.nfEnviadaFlag=false; patch.nfEnviadaData=null; }
+    if(lista.includes('armazenado')){ patch.armazenado=false; patch.armazenamentoData=null; }
+    if(lista.includes('pendencia')){ patch.pendencia=false; patch.tiposPendencia=[]; patch.pendenciaOutro=null; }
+    await updateDoc(doc(db,'obras',obraId), patch);
+    const o = obras.find(x=>x.id===obraId);
+    if(o){ lista.forEach(f=>{ o[f]=null; }); if(patch.nfEnviadaFlag===false) o.nfEnviadaFlag=false; renderAcoesODI(o); }
+    toast('✓ Registro desfeito.','ok');
+    renderDashDebounced();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
 // Abre seção de ações ODI no modal (chamado por openObraModal quando tipo=ODI)
 function renderAcoesODI(obra){
   const cont = document.getElementById('secODIAcoes');
@@ -9052,8 +9092,11 @@ function renderAcoesODI(obra){
   const isAdm  = me.perfil==='adm_odi'||me.perfil==='gerente';
   const oId    = obra.id;
   const fmtD = d => d ? fmtTxt(d) : '—';
-  const badge = (ok,label,sub='') => ok
-    ? `<div style="color:#22C55E;font-size:10px;font-weight:700">✅ ${label}${sub?'<span style="font-weight:400;color:var(--muted)"> ('+sub+')</span>':''}</div>`
+  const badge = (ok,label,sub='',delCampos=null) => ok
+    ? `<div style="display:flex;align-items:center;gap:8px;color:#22C55E;font-size:10px;font-weight:700">
+        ✅ ${label}${sub?'<span style="font-weight:400;color:var(--muted)"> ('+sub+')</span>':''}
+        ${delCampos&&isAdm?`<button onclick="odiApagarCampo('${oId}','${delCampos}')" title="Desfazer registro" style="background:none;border:none;cursor:pointer;color:#EF4444;font-size:11px;opacity:.7;padding:0">🗑</button>`:''}
+      </div>`
     : `<div style="font-size:10px;color:var(--muted)">⏳ ${label}</div>`;
   const card = (title, body) =>
     `<div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">`+
@@ -9068,7 +9111,7 @@ function renderAcoesODI(obra){
   // ── 1. Conclusão (Empreiteira / Fiscal / Adm / Gerente) ──────────────
   if(isEmp||isFisc||isAdm){
     sections.push(card('🏁 Conclusão da Obra',
-      obra.conclusao ? badge(true,'Informada em '+fmtD(obra.conclusao))
+      obra.conclusao ? badge(true,'Informada em '+fmtD(obra.conclusao),'','conclusao')
       : dateField('odiConclusao','Data de conclusão','Registrar Conclusão',
           `odiSalvarCampo('${oId}','conclusao',document.getElementById('odiConclusao')?.value)`)
     ));
@@ -9078,7 +9121,7 @@ function renderAcoesODI(obra){
   if(isFisc||isAdm){
     const bloqueado = !obra.conclusao;
     sections.push(card('🔍 Fiscalização em Campo',
-      obra.fiscalizacao ? badge(true,'Fiscalizada em '+fmtD(obra.fiscalizacao))
+      obra.fiscalizacao ? badge(true,'Fiscalizada em '+fmtD(obra.fiscalizacao),'','fiscalizacao')
       : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda conclusão informada.</div>'
       : dateField('odiFiscData','Data da fiscalização','Registrar Fiscalização',
           `odiSalvarCampo('${oId}','fiscalizacao',document.getElementById('odiFiscData')?.value)`)
@@ -9089,7 +9132,7 @@ function renderAcoesODI(obra){
   if(isFisc||isAdm){
     const bloqueado = !obra.conclusao;
     sections.push(card('✅ Kaffa (registrado pelo fiscal)',
-      obra.kaffaODI ? badge(true,'Registrado em '+fmtD(obra.kaffaODI))
+      obra.kaffaODI ? badge(true,'Registrado em '+fmtD(obra.kaffaODI),'','kaffaODI')
       : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda conclusão informada.</div>'
       : dateField('odiKaffaData','Data do kaffa','Registrar Kaffa',
           `odiSalvarCampo('${oId}','kaffaODI',document.getElementById('odiKaffaData')?.value)`)
@@ -9142,7 +9185,7 @@ function renderAcoesODI(obra){
   if(isEmp||isAdm){
     const bloqueado = !obra.kaffaODI;
     sections.push(card('📋 Envio de Notas Fiscais',
-      obra.nfEnviadaFlag ? badge(true,'Enviadas em '+fmtD(obra.nfEnviadaData))
+      obra.nfEnviadaFlag ? badge(true,'Enviadas em '+fmtD(obra.nfEnviadaData),'','nfEnviadaFlag')
       : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda kaffa registrado pelo fiscal.</div>'
       : dateField('odiNfData','Data do envio das NF','Registrar Envio de NF',
           `odiSalvarNFEnvio('${oId}')`)
@@ -9152,7 +9195,7 @@ function renderAcoesODI(obra){
   // ── 6. Lançamento NF (Adm / Gerente) ────────────────────────────────
   if(isAdm && obra.nfEnviadaFlag){
     sections.push(card('🧾 Lançamento de Notas Fiscais',
-      obra.nfLancadaData ? badge(true,'Lançadas em '+fmtD(obra.nfLancadaData))
+      obra.nfLancadaData ? badge(true,'Lançadas em '+fmtD(obra.nfLancadaData),'','nfLancadaData')
       : dateField('odiNfLancData','Data do lançamento','Registrar Lançamento',
           `odiSalvarCampo('${oId}','nfLancadaData',document.getElementById('odiNfLancData')?.value)`)
     ));
@@ -9183,7 +9226,7 @@ function renderAcoesODI(obra){
     && !(obra.pendenciasDocODI||[]).length && !(obra.pendencia&&!obra.pendenciaResolvida);
   if(podeDevFin){
     sections.push(card('💰 Encaminhamento Devolução Financeira',
-      obra.devolucaoFinanceiraData ? badge(true,'Encaminhado em '+fmtD(obra.devolucaoFinanceiraData))
+      obra.devolucaoFinanceiraData ? badge(true,'Encaminhado em '+fmtD(obra.devolucaoFinanceiraData),'','devolucaoFinanceiraData')
       : dateField('odiDevFinData','Data do encaminhamento','Registrar Encaminhamento',
           `odiSalvarCampo('${oId}','devolucaoFinanceiraData',document.getElementById('odiDevFinData')?.value)`)
     ));
@@ -9196,7 +9239,7 @@ function renderAcoesODI(obra){
     const ambas = obra.medida70 && obra.medida230;
     const umaFalta = (obra.medida70&&!obra.medida230)||(!obra.medida70&&obra.medida230);
     sections.push(card('📐 Medidas 70 + 230 (lançadas juntas)',
-      ambas ? badge(true,'Med. 70: '+fmtD(obra.medida70)+' / Med. 230: '+fmtD(obra.medida230))
+      ambas ? badge(true,'Med. 70: '+fmtD(obra.medida70)+' / Med. 230: '+fmtD(obra.medida230),'','medida70')
       : `${umaFalta?'<div style="color:#EF4444;font-size:9px;font-weight:700;margin-bottom:6px">⚠️ Uma medida sem a outra — registre ambas!</div>':''}`+
         dateField('odiMed70230Data','Data (mesma para Med. 70 e Med. 230)','Registrar Med. 70 + 230',
           `odiSalvarMedidas70230('${oId}')`)
@@ -9206,7 +9249,7 @@ function renderAcoesODI(obra){
   // ── 10. Medida 280 — somente após 70+230 ────────────────────────────
   if(isAdm && obra.medida70 && obra.medida230){
     sections.push(card('📐 Medida 280',
-      obra.medida280 ? badge(true,'Registrada em '+fmtD(obra.medida280))
+      obra.medida280 ? badge(true,'Registrada em '+fmtD(obra.medida280),'','medida280')
       : dateField('odiMed280Data','Data da Medida 280','Registrar Medida 280',
           `odiSalvarCampo('${oId}','medida280',document.getElementById('odiMed280Data')?.value)`)
     ));
@@ -9215,7 +9258,7 @@ function renderAcoesODI(obra){
   // ── 11. Envio para Cadastro — PS (Fiscal / Adm / Gerente) ──────────
   if(isFisc||isAdm){
     sections.push(card('📁 Envio para Cadastro (PS)',
-      obra.dataCadastro ? badge(true,'Enviado em '+fmtD(obra.dataCadastro))
+      obra.dataCadastro ? badge(true,'Enviado em '+fmtD(obra.dataCadastro),'','dataCadastro')
       : dateField('odiCadastroData','Data de envio para cadastro','Registrar Envio Cadastro',
           `odiSalvarCampo('${oId}','dataCadastro',document.getElementById('odiCadastroData')?.value)`)
     ));
@@ -9449,6 +9492,39 @@ function renderDashAdmOdi(){
     </div>
 
     <!-- Tabelas -->
+    <!-- Métricas de tempo adm_odi -->
+    ${(()=>{
+      const concluidas = odiObras.filter(o=>o.nfLancadaData);
+      function avgDiasODI(lista, c1, c2){
+        const diffs = lista.map(o=>{ if(!o[c1]||!o[c2]) return null;
+          const d1=new Date(o[c1]+'T00:00:00'), d2=new Date(o[c2]+'T00:00:00');
+          return Math.round((d2-d1)/(1000*60*60*24));
+        }).filter(x=>x!==null&&x>=0);
+        return diffs.length ? Math.round(diffs.reduce((a,b)=>a+b,0)/diffs.length) : null;
+      }
+      const tKaffaNF = avgDiasODI(odiObras,'kaffaODI','nfEnviadaData');
+      const tNFLanc  = avgDiasODI(odiObras,'nfEnviadaData','nfLancadaData');
+      const tLancMed = avgDiasODI(odiObras,'nfLancadaData','medida70');
+      const fmt = v => v!==null ? v+'d' : '—';
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+        <div style="font-weight:800;font-size:13px;margin-bottom:10px">⏱️ Tempo Médio de Processamento (Adm. ODI)</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">
+          <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:20px;font-weight:900;color:#F97316">${fmt(tKaffaNF)}</div>
+            <div style="font-size:9px;color:var(--muted)">Kaffa → Envio NF (empreiteira)</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:20px;font-weight:900;color:#EF4444">${fmt(tNFLanc)}</div>
+            <div style="font-size:9px;color:var(--muted)">Recebimento → Lançamento NF</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:20px;font-weight:900;color:#3B82F6">${fmt(tLancMed)}</div>
+            <div style="font-size:9px;color:var(--muted)">Lançamento → Medidas 70/230</div>
+          </div>
+        </div>
+      </div>`;
+    })()}
+
     ${tabelaOdi(agFiscKaffa,'⏳ Aguardando Fiscalização / Kaffa','#F59E0B',false,null)}
     ${tabelaOdi(agNF,'📋 Aguardando Recebimento de NF pela Empreiteira','#F97316',true,o=>diasEntre(o.kaffaODI))}
     ${tabelaOdi(agLancamento,'🧾 Aguardando Lançamento de Notas','#EF4444',true,o=>diasEntre(o.nfEnviadaData))}
