@@ -145,7 +145,12 @@ function statusOf(o){
   if(o.armazenado)   return 'Encerrada';
   if(o.medida280)    return 'Aguard. Armazenamento';
   // Fix #7: medidas só avançam o status SE a fiscalização já foi confirmada
-  if(o.conclusao && !o.fiscalizacao) return 'Aguard. Fiscalização'; // persiste até fiscal confirmar
+  if(o.conclusao && !o.fiscalizacao){
+    // +15 dias sem fiscalizar → cadastro urgente
+    const _dCU = diff(o.conclusao, new Date().toISOString().split('T')[0]);
+    if(_dCU !== null && _dCU > 15) return 'Encaminhar Cadastro Urgente';
+    return 'Aguard. Fiscalização'; // persiste até fiscal confirmar
+  }
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70&&o.conclusao) return 'Aguard. Medida 230'; // conclusão obrigatória para Ag. Medida 230
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
@@ -155,11 +160,6 @@ function statusOf(o){
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
-  }
-  // Cadastro urgente 2: Concluída +15d sem fiscalização (antes do kaffa para garantir precedência)
-  if(o.conclusao && !o.fiscalizacao){
-    const _d15=diff(o.conclusao, new Date().toISOString().split('T')[0]);
-    if(_d15!==null && _d15>15) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa){
     // Se já tem medição parcial registrada (qualquer capitalização) e sem conclusão → Em Execução
