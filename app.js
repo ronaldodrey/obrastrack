@@ -151,9 +151,16 @@ function statusOf(o){
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
   // Medição (final) só avança status se obra já concluída pela empreiteira
   if(o.medicao&&o.conclusao) return o.tipo==='R2' ? 'Aguard. Medida 230' : 'Aguard. Medida 70';
+  // Cadastro urgente: 2 condições
+  // 1. Fiscalizada há +7 dias sem encaminhar cadastro
   if(o.fiscalizacao && !o.dataCadastro){
     const d=diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
     if(d!==null && d>7) return 'Encaminhar Cadastro Urgente';
+  }
+  // 2. Concluída pela empreiteira há +15 dias sem fiscalização
+  if(o.conclusao && !o.fiscalizacao){
+    const d=diff(o.conclusao, new Date().toISOString().split('T')[0]);
+    if(d!==null && d>15) return 'Encaminhar Cadastro Urgente';
   }
   if(o.kaffa){
     // Se já tem medição parcial registrada (qualquer capitalização) e sem conclusão → Em Execução
@@ -746,6 +753,8 @@ function renderDashFiscal(list, meuNome){
   const paraFiscODI = list.filter(o=>o.tipo==='ODI'&&o.conclusao&&!o.fiscalizacao&&o.fiscal===meuNome);
   const paraMedir = list.filter(o=>o.tipo!=='ODI'&&o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o)&&o.fiscal===meuNome);
   const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
+  const cadUrgFisc = cadUrgente.filter(o=> o.fiscalizacao && !o.dataCadastro); // fiscalizada +7d sem cadastro
+  const cadUrgConc = cadUrgente.filter(o=>!o.fiscalizacao && o.conclusao);      // concluída +15d sem fiscalizar
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
   const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
   const tempoFisc = avgDiff(minhas,'conclusao','fiscalizacao');
@@ -767,10 +776,19 @@ function renderDashFiscal(list, meuNome){
   // Cadastro urgente para fiscal — suas obras
   if(cadUrgente.length){
     html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
-      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:8px">📋 Cadastro Urgente Pendente (+7d após fiscalização) — ${cadUrgente.length} obra(s)</div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px">
-        ${cadUrgente.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''}">${o.numero}</span>`).join('')}
-      </div>
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">🚨 Cadastro Urgente — ${cadUrgente.length} obra(s)</div>
+      ${cadUrgFisc.length ? `<div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:5px">📋 Fiscalizadas +7d sem encaminhar cadastro (${cadUrgFisc.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          ${cadUrgFisc.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Fisc: ${fmtTxt(o.fiscalizacao)}">${o.numero}</span>`).join('')}
+        </div>
+      </div>` : ''}
+      ${cadUrgConc.length ? `<div>
+        <div style="font-size:10px;font-weight:700;color:#F97316;margin-bottom:5px">⏳ Concluídas +15d sem fiscalizar (${cadUrgConc.length})</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          ${cadUrgConc.map(o=>`<span style="background:var(--surface);border:1px solid rgba(249,115,22,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Conc: ${fmtTxt(o.conclusao)}">${o.numero}</span>`).join('')}
+        </div>
+      </div>` : ''}
     </div>`;
   }
   // Monitor de prazos: exclude ODI obras for fiscal (ODI monitor is in pgDashOdi for adm_odi/gerente)
@@ -958,6 +976,66 @@ function renderDashGenesis(list){
       <tbody>${rows}</tbody>
     </table></div>`;
   }
+  // ── Seção Cadastro Urgente para Genesis ───────────────────────────────
+  const genCadUrgFisc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&o.fiscalizacao&&!o.dataCadastro&&!o.cancelado);
+  const genCadUrgConc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&!o.fiscalizacao&&o.conclusao&&!o.cancelado);
+
+  if(genCadUrgFisc.length || genCadUrgConc.length){
+    html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px;margin-top:16px">
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">
+        🚨 Atenção: Obras Pendentes de Cadastro (${genCadUrgFisc.length+genCadUrgConc.length} total)
+      </div>
+      ${genCadUrgFisc.length ? `<div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">
+          📋 Fiscalizadas há +7 dias sem encaminhar cadastro (${genCadUrgFisc.length} obras)
+        </div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:4px 8px;text-align:left">Nº</th>
+            <th style="padding:4px 8px;text-align:left">Fiscal</th>
+            <th style="padding:4px 8px;text-align:left">Cidade</th>
+            <th style="padding:4px 8px;text-align:center">Fiscalizado</th>
+            <th style="padding:4px 8px;text-align:center;color:#EF4444">Dias</th>
+          </tr></thead>
+          <tbody>${genCadUrgFisc.sort((a,b)=>a.fiscalizacao>b.fiscalizacao?1:-1).map(o=>{
+            const d=diff(o.fiscalizacao,hoje_s);
+            return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
+              <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
+              <td style="padding:4px 8px">${o.fiscal||'—'}</td>
+              <td style="padding:4px 8px">${o.cidade||'—'}</td>
+              <td style="padding:4px 8px;text-align:center">${fmt(o.fiscalizacao)}</td>
+              <td style="padding:4px 8px;text-align:center;color:#EF4444;font-weight:700">${d!==null?d+'d':'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>` : ''}
+      ${genCadUrgConc.length ? `<div>
+        <div style="font-size:10px;font-weight:700;color:#F97316;margin-bottom:6px">
+          ⏳ Concluídas há +15 dias ainda sem fiscalização (${genCadUrgConc.length} obras)
+        </div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:4px 8px;text-align:left">Nº</th>
+            <th style="padding:4px 8px;text-align:left">Fiscal</th>
+            <th style="padding:4px 8px;text-align:left">Cidade</th>
+            <th style="padding:4px 8px;text-align:center">Concluída</th>
+            <th style="padding:4px 8px;text-align:center;color:#F97316">Dias</th>
+          </tr></thead>
+          <tbody>${genCadUrgConc.sort((a,b)=>a.conclusao>b.conclusao?1:-1).map(o=>{
+            const d=diff(o.conclusao,hoje_s);
+            return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
+              <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
+              <td style="padding:4px 8px">${o.fiscal||'—'}</td>
+              <td style="padding:4px 8px">${o.cidade||'—'}</td>
+              <td style="padding:4px 8px;text-align:center">${fmt(o.conclusao)}</td>
+              <td style="padding:4px 8px;text-align:center;color:#F97316;font-weight:700">${d!==null?d+'d':'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>` : ''}
+    </div>`;
+  }
+
   return html;
 }
 
