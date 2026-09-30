@@ -701,6 +701,41 @@ function tabelaResumoEmpreiteiras(list){
   </table></div>`;
 }
 
+window._velociTableFiscal = function(minhas){
+  const minhasRD  = minhas.filter(o=>o.tipo!=='ODI');
+  const minhasODI = minhas.filter(o=>o.tipo==='ODI');
+  const tFiscRD   = avgDiff(minhasRD,'conclusao','fiscalizacao');
+  const tFiscODI  = avgDiff(minhasODI,'conclusao','fiscalizacao');
+  const tKaffaODI = avgDiff(minhasODI,'fiscalizacao','kaffaODI');
+  const tMedRD    = avgDiffKaffaMedicao(minhasRD);
+  const tCadRD    = avgDiff(minhasRD,'fiscalizacao','dataCadastro');
+  const tCadODI   = avgDiff(minhasODI,'fiscalizacao','dataCadastro');
+  const fmt = v => v!==null ? '<strong>'+v+'d</strong>' : '<span style="color:var(--muted)">—</span>';
+  const row = (label,rd,odi,ref) =>
+    '<tr style="border-bottom:1px solid var(--border)">'
+    +'<td style="padding:6px 10px">'+label+'</td>'
+    +'<td style="padding:6px 10px;text-align:center">'+rd+'</td>'
+    +'<td style="padding:6px 10px;text-align:center">'+odi+'</td>'
+    +'<td style="padding:6px 10px;font-size:9px;color:var(--muted)">'+ref+'</td>'
+    +'</tr>';
+  return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px">'
+    +'<div style="font-weight:800;font-size:13px;margin-bottom:10px">⚡ Velocidades por Tipo de Obra</div>'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+    +'<thead><tr style="background:var(--surface2)">'
+    +'<th style="padding:6px 10px;text-align:left">Indicador</th>'
+    +'<th style="padding:6px 10px;text-align:center">🔵 RD</th>'
+    +'<th style="padding:6px 10px;text-align:center">🟡 ODI</th>'
+    +'<th style="padding:6px 10px;text-align:left;color:var(--muted);font-weight:400;font-size:9px">Referência</th>'
+    +'</tr></thead><tbody>'
+    +row('⏱ Tempo médio de Fiscalização', fmt(tFiscRD), fmt(tFiscODI), 'Conclusão → Fiscalização')
+    +row('⏱ Tempo médio de Kaffa <span style="font-size:9px;color:var(--muted)">(ODI)</span>',
+         '<span style="color:var(--muted)">—</span>', fmt(tKaffaODI), 'Fiscalização → Kaffa ODI')
+    +row('⏱ Tempo médio de Medição <span style="font-size:9px;color:var(--muted)">(RD)</span>',
+         fmt(tMedRD), '<span style="color:var(--muted)">—</span>', 'Kaffa → Medição')
+    +row('⏱ Fiscalização → Cadastro', fmt(tCadRD), fmt(tCadODI), 'Fiscalização → Encaminhado Cadastro')
+    +'</tbody></table></div>';
+};
+
 function renderDashFiscal(list, meuNome){
   const minhas = list.filter(o=>o.fiscal===meuNome);
   const uscTotal = minhas.reduce((s,o)=>s+(parseFloat(o.usc)||0),0);
@@ -721,16 +756,14 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('USC Total',uscTotal.toFixed(1),'unidades','#7c6af7')}
     ${kpiCard('ULV Total',ulvTotal.toFixed(1),'unidades','#ff6b35')}
     ${kpiCard('Para Fiscalizar',paraFisc.length+paraFiscODI.length,'RD: '+paraFisc.length+' · ODI: '+paraFiscODI.length,'#EAB308')}
-    ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição','#6366F1')}
-    ${kpiCard('Fisc. s/ Kaffa',list.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscal===meuNome&&o.fiscalizacao&&!o.kaffa).length,'após fisc. — urgente','#EF4444')}
+    ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição (RD)','#6366F1')}
     ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
     ${kpiCard('Ag. Conf. Pend.',agConfPend.length,'regularizadas p/ conferir','#F59E0B')}
     ${kpiCard('Cadastro Urgente',cadUrgente.length,'+7d sem enviar','#EF4444')}
     ${kpiCard('Fiscalizadas/Mês',fiscMes.length,'mês corrente','#38bdf8')}
-    ${kpiCard('Tempo Médio Fisc.',tempoFisc!==null?tempoFisc+'d':'—','conclusão→fiscalização','#a3e635')}
-    ${kpiCard('Tempo Médio Med.',tempoMed!==null?tempoMed+'d':'—','kaffa→medição','#fb7185')}
-    ${kpiCard('Tempo Médio Cadastro',tempoCad!==null?tempoCad+'d':'—','fiscalização→cadastro','#f5c542')}
-  </div>`;
+  </div>
+  <!-- ── Velocidades por tipo ────────────────────────────────────────── -->
+  ${window._velociTableFiscal(minhas)}`;
   // Cadastro urgente para fiscal — suas obras
   if(cadUrgente.length){
     html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
