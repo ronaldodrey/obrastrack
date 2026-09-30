@@ -14,6 +14,7 @@ service cloud.firestore {
       allow create: if request.auth != null && perfil() == 'gerente';
       allow update: if request.auth != null && (
         perfil() == 'gerente' ||
+        perfil() == 'adm_odi' ||
         perfil() == 'genesis' ||
         perfil() == 'estagiario' ||
         (perfil() == 'empreiteira' && resource.data.empreiteira == vinculo()) ||
