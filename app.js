@@ -1657,13 +1657,19 @@ window.openObraModal=function(obraId){
       if(lEl) lEl.value=obra.descricaoLivreODI||'';
       const fgLivre=document.getElementById('fgDescricaoLivre');
       if(fgLivre) fgLivre.style.display=obra.descricaoODI==='Livre'?'':'none';
-      // Hide only RD-exclusive sections for ODI obras
-      // Shared sections (conclusão, fiscalização, equipamentos, pendência, etc.) remain visible
-      ['secMedicao','secMedicaoParcialFields',   // medição RD → não existe em ODI
-       'secMedidas','secMedida280Motivo',         // medidas 70/230/280 RD → ODI tem as próprias
-       'secRegularizacao',                        // regularização → só RD
-       'secConfPendencia',                        // confirmação pendência → só RD
-       'secUSCMedidoGerente','fgUSCMedido','fgULVMedido' // campos USC/ULV medido → só RD
+      // ODI: mostrar apenas cabeçalho + campos ODI + ações ODI
+      // Ocultar TODO o workflow RD (conclusão, fiscalização, locais, pendência, medições, etc.)
+      ['secExec','secConclusaoExtra',
+       'secFisc',
+       'secLocaisTrabalho',
+       'secPendenciaDetalhe','fgPendenciaOutro',
+       'secCadastro','secCadastroConfirm',
+       'secMedicao','secMedicaoParcialFields',
+       'secMedidas','secMedida280Motivo',
+       'secRegularizacao','secConfPendencia',
+       'secUSCMedidoGerente','fgUSCMedido','fgULVMedido',
+       'secImpedimento','secImpedimentoDetalhe',
+       'secDesligData','secDesligConfirm','secDesligMotivo'
       ].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
       // Render ODI action panel
       setTimeout(()=>renderAcoesODI(obra),50);
@@ -1671,9 +1677,18 @@ window.openObraModal=function(obraId){
       // RD obra — hide ODI sections completely; restore RD sections
       if(secODIEl) secODIEl.style.display='none';
       if(secODIAc) secODIAc.innerHTML='';
-      // Restore all RD sections that might have been hidden while viewing an ODI obra
-      ['secMedicao','secMedicaoParcialFields','secMedidas','secMedida280Motivo',
-       'secRegularizacao','secConfPendencia','secUSCMedidoGerente','fgUSCMedido','fgULVMedido'
+      // RD obra: restaura todas as seções que podem ter sido ocultadas numa obra ODI anterior
+      ['secExec','secConclusaoExtra',
+       'secFisc',
+       'secLocaisTrabalho',
+       'secPendenciaDetalhe','fgPendenciaOutro',
+       'secCadastro','secCadastroConfirm',
+       'secMedicao','secMedicaoParcialFields',
+       'secMedidas','secMedida280Motivo',
+       'secRegularizacao','secConfPendencia',
+       'secUSCMedidoGerente','fgUSCMedido','fgULVMedido',
+       'secImpedimento','secImpedimentoDetalhe',
+       'secDesligData','secDesligConfirm','secDesligMotivo'
       ].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=''; });
     }
     // Transformer fields — inicializa arrays de equipamentos para a obra atual
@@ -8945,9 +8960,42 @@ function renderAcoesODI(obra){
       ${(obra.medida70&&!obra.medida230)||(!obra.medida70&&obra.medida230)?'<div style="color:#EF4444;font-size:9px;margin-top:4px">⚠️ Uma das medidas sem a outra — registre ambas!</div>':''}`}
     </div>`;
 
+  // ── Locais de Trabalho ODI ──────────────────────────────────────
+  const locaisODI = obra.locaisTrabalho||[];
+  html += `
+    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border);margin-top:10px">
+      <div style="font-size:10px;font-weight:700;margin-bottom:8px">📍 Locais de Trabalho</div>
+      ${locaisODI.length
+        ? locaisODI.map(l=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--muted)">${fmtTxt(l.data)}</span>
+            <span style="flex:1;padding:0 8px">${l.descricao}</span>
+          </div>`).join('')
+        : '<div style="font-size:10px;color:var(--muted)">Nenhum local registrado.</div>'}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="odiLocalDesc" placeholder="Descrição do local..." style="flex:1;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
+        <button class="btn btn-sm btn-secondary" onclick="odiAdicionarLocal('${oId}')">+ Local</button>
+      </div>
+    </div>`;
+
   html += '</div></div>';
   cont.innerHTML = html;
 }
+
+window.odiAdicionarLocal = async function(obraId){
+  const desc = document.getElementById('odiLocalDesc')?.value?.trim();
+  if(!desc){ toast('Informe a descrição do local.','warn'); return; }
+  const o = obras.find(x=>x.id===obraId);
+  if(!o) return;
+  const hoje = new Date().toISOString().split('T')[0];
+  const novoLocal = {id:'lt_'+Date.now(), data:hoje, descricao:desc};
+  const novosLocais = [...(o.locaisTrabalho||[]), novoLocal];
+  try{
+    await updateDoc(doc(db,'obras',obraId),{locaisTrabalho:novosLocais});
+    o.locaisTrabalho = novosLocais;
+    renderAcoesODI(o);
+    toast('✓ Local registrado.','ok');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
 
 // ── ODI action helpers ────────────────────────────────────────────────────
 window.odiSalvarCampo = async function(obraId, campo, valor){
