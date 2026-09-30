@@ -7287,7 +7287,7 @@ window.toggleEnquadramento = function(){
     // Auto-select "18 meses" prazo option
     const prazoOpcEl = document.getElementById('oPrazoOpcao');
     if(prazoOpcEl) {
-      prazoOpcEl.value='548';
+      prazoOpcEl.value='540';
       if(typeof window.togglePrazoCustom==='function') window.togglePrazoCustom();
     }
     // Also auto-calc date from abertura if available
@@ -8907,6 +8907,27 @@ window.odiResolverPendencia = async function(obraId){
   }catch(e){ toast('Erro: '+e.message,'err'); }
 };
 
+
+window.salvarEquipamentosODI = async function(obraId){
+  if(!obraId){ toast('ID da obra não encontrado.','err'); return; }
+  try{
+    const patch = {
+      equipamentosInstalados: _equipInstalados,
+      equipamentosRetirados:  _equipRetirados,
+    };
+    await updateDoc(doc(db,'obras',obraId), patch);
+    const o = obras.find(x=>x.id===obraId);
+    if(o){
+      o.equipamentosInstalados = [..._equipInstalados];
+      o.equipamentosRetirados  = [..._equipRetirados];
+    }
+    _equipModificado = false;
+    toast('✓ Equipamentos salvos com sucesso.','ok');
+  }catch(e){
+    console.error('[ODI] salvarEquipamentosODI error:', e.code, e.message);
+    toast('Erro ao salvar equipamentos: '+e.message,'err');
+  }
+};
 // ── Equipamentos ODI — funções com containers específicos (IDs únicos) ──────
 function renderEquipInstaladosODI(){
   const cont = document.getElementById('listaEquipInstaladosODI');
@@ -9185,7 +9206,12 @@ function renderAcoesODI(obra){
         </div>
         <div id="listaEquipRetiradosODI"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado.</div></div>
       </div>`;
-    sections.push(card('🔩 Equipamentos / Transformadores', equipBody));
+    const equipCardBody = equipBody + `
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <button class="btn btn-primary btn-sm" onclick="salvarEquipamentosODI('${oId}')">💾 Salvar Equipamentos</button>
+        <span style="font-size:9px;color:var(--muted);margin-left:8px">Os campos acima são salvos ao clicar em Salvar Equipamentos.</span>
+      </div>`;
+    sections.push(card('🔩 Equipamentos / Transformadores', equipCardBody));
     // Render into ODI-specific containers (avoid ID conflict with secExec)
     setTimeout(()=>{ renderEquipInstaladosODI(); renderEquipRetiradosODI(); }, 60);
   }
