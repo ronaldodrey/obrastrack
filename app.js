@@ -7266,11 +7266,12 @@ function renderDashSummaryFiscal(minhas){
     return p && p<=fimMes;
   });
 
-  // Prioridade: obra aparece em apenas 1 card (mais urgente ganha)
+  // agMed: exclui apenas med280urg (urgência maior); agFisc aparece em AMBOS os cards
+  // Uma obra com kaffa final mas sem fiscalização aparece em "Ag. Fiscalização" E "Ag. Medição"
   const med280Ids = new Set(med280urg.map(o=>o.id));
-  const agMed_allIds = new Set(agMed_all.map(o=>o.id));
   const agMed  = agMed_all.filter(o=>!med280Ids.has(o.id));
-  const agFisc = agFisc_all.filter(o=>!med280Ids.has(o.id)&&!agMed_allIds.has(o.id));
+  // agFisc não exclui obras que estão em agMed — fiscal ainda precisa fiscalizar
+  const agFisc = agFisc_all.filter(o=>!med280Ids.has(o.id));
 
   const cardStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px';
 
