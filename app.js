@@ -1397,44 +1397,7 @@ window.sortObras = function(col){
   window.renderObras();
 };
 
-// Toggle ODI section + enquadramento
-window.toggleEnquadramento = function(){
-  const tipo = document.getElementById('oTipo')?.value;
-  const isODI = tipo==='ODI';
-  // Show/hide ODI section
-  const secODI = document.getElementById('secODI');
-  if(secODI) secODI.style.display = isODI ? '' : 'none';
-  // Update label
-  const lblDescODI = document.getElementById('lblDescricaoODI');
-  if(lblDescODI) lblDescODI.textContent = isODI ? 'Tipo de Obra ODI' : 'Tipo de Descrição';
-  // Auto-prazo 18 meses ao selecionar ODI
-  if(isODI){
-    const daEl = document.getElementById('oDataAbertura');
-    if(daEl?.value){
-      const d = new Date(daEl.value+'T00:00:00');
-      d.setMonth(d.getMonth()+18);
-      const prazoEl = document.getElementById('oPrazo');
-      if(prazoEl && !prazoEl.value) prazoEl.value = d.toISOString().split('T')[0];
-    }
-  }
-  // Auto-set prazo 18 meses for ODI
-  if(isODI){
-    const daEl = document.getElementById('oDataAbertura');
-    if(daEl?.value){
-      const d = new Date(daEl.value+'T00:00:00'); d.setMonth(d.getMonth()+18);
-      const prazoEl = document.getElementById('oPrazo');
-      if(prazoEl) prazoEl.value = d.toISOString().split('T')[0];
-      const prazoOpcEl = document.getElementById('oPrazoOpcao');
-      if(prazoOpcEl){ prazoOpcEl.value='outro'; if(typeof togglePrazoCustom==='function') togglePrazoCustom(); }
-    }
-  }
-  // enquadramento visibility (existing logic)
-  const fgEnq = document.getElementById('fgEnquadramento');
-  if(fgEnq) fgEnq.style.display = (tipo==='R1'||tipo==='R2') ? '' : 'none';
-  const fgProg = document.getElementById('fgPrograma');
-  if(fgProg) fgProg.style.display = tipo==='R2' ? '' : 'none';
-};
-
+// toggleEnquadramento: ver definição completa abaixo
 window.toggleDescricaoODI = function(){
   const val = document.getElementById('oDescricaoODI')?.value;
   const fgLivre = document.getElementById('fgDescricaoLivre');
@@ -1841,6 +1804,11 @@ window.openObraModal=function(obraId){
   // secIdentif sempre visível (cabeçalho da obra) — exceto genesis/estagiario
   if(!isGenesis && !isEstagiario){
     showSec('secIdentif');
+    // secTransfView: read-only view para RD; ODI usa equipamento próprio em secODIAcoes
+    if(isEdit && obra?.tipo!=='ODI' && (p==='gerente'||p==='fiscal'||p==='fiscal_adm')){
+      const temEq = (obra?.equipamentosInstalados?.length||0)>0 || (obra?.equipamentosRetirados?.length||0)>0 || obra?.sap || obra?.potencia;
+      if(temEq){ showSec('secTransfView'); renderEquipView(obra); }
+    }
     // USC/ULV medido: só gerente/adm_odi com medições parciais
     if((p==='gerente'||p==='adm_odi') && isEdit){
       const temMed = obra?.medicoes?.some(m=>m.tipo==='parcial');
@@ -2564,7 +2532,9 @@ window.saveObra=async function(){
         // Ações ODI são salvas via odiSalvarCampo (updateDoc direto) — preservar aqui
         ['conclusao','fiscalizacao','kaffaODI','nfEnviadaFlag','nfEnviadaData',
          'nfLancadaData','medida70','medida230','medida280','pendenciasDocODI',
-         'devolucaoFinanceiraData','locaisTrabalho'
+         'devolucaoFinanceiraData','locaisTrabalho',
+         // Pendência construtiva ODI (salva via odiRegistrarPendencia/odiResolverPendencia)
+         'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida'
         ].forEach(f=>{
           if(obraAntiga?.[f] !== undefined) patch[f] = obraAntiga[f];
           else delete patch[f];
@@ -7305,10 +7275,31 @@ function renderDashSummaryEmpreiteira(minhas){
 // ══════════════════════════════════════════════════════════════════════
 window.toggleEnquadramento = function(){
   const tipo = document.getElementById('oTipo')?.value;
-  // Enquadramento: apenas R1
+  const isODI = tipo === 'ODI';
+
+  // ── ODI section ──────────────────────────────────────────────────────
+  const secODI = document.getElementById('secODI');
+  if(secODI) secODI.style.display = isODI ? '' : 'none';
+  const lblDescODI = document.getElementById('lblDescricaoODI');
+  if(lblDescODI) lblDescODI.textContent = isODI ? 'Tipo de Obra ODI' : 'Tipo de Descrição';
+  if(isODI){
+    // Auto-select "18 meses" prazo option
+    const prazoOpcEl = document.getElementById('oPrazoOpcao');
+    if(prazoOpcEl && !prazoOpcEl.value) { prazoOpcEl.value='548'; if(typeof togglePrazoCustom==='function') togglePrazoCustom(); }
+    // Also auto-calc date from abertura if available
+    const daEl = document.getElementById('oDataAbertura');
+    if(daEl?.value){
+      const d = new Date(daEl.value+'T00:00:00'); d.setMonth(d.getMonth()+18);
+      const prazoEl = document.getElementById('oPrazo');
+      if(prazoEl) prazoEl.value = d.toISOString().split('T')[0];
+    }
+  }
+
+  // ── Enquadramento: apenas R1 ─────────────────────────────────────────
   const fg = document.getElementById('fgEnquadramento');
   if(fg) fg.style.display = tipo === 'R1' ? 'flex' : 'none';
-  // Programa: R1 → automático (Regulatório, campo oculto); R2 → usuário escolhe
+
+  // ── Programa: R1 → automático; R2 → usuário escolhe ─────────────────
   const fgProg = document.getElementById('fgPrograma');
   const sel    = document.getElementById('oPrograma');
   if(tipo === 'R1'){
@@ -7316,7 +7307,6 @@ window.toggleEnquadramento = function(){
     if(fgProg) fgProg.style.display = 'none';
   } else if(tipo === 'R2'){
     if(fgProg) fgProg.style.display = 'flex';
-    // Remove Regulatório from options for R2
     if(sel && sel.querySelector('option[value="Regulatório"]')){
       [...sel.querySelectorAll('option')].forEach(o=>{
         o.style.display = o.value === 'Regulatório' ? 'none' : '';
@@ -8886,6 +8876,32 @@ function _renderDesligSlot(latest, allDocIds){
 //  ODI — Ações no modal por perfil
 // ══════════════════════════════════════════════════════════
 
+
+window.odiRegistrarPendencia = async function(obraId){
+  const tipos = Array.from(document.querySelectorAll('.chk-pend-odi:checked')).map(el=>el.value);
+  if(!tipos.length){ toast('Selecione ao menos um tipo de pendência.','warn'); return; }
+  const outro = document.getElementById('oPendODIOutro')?.value?.trim()||'';
+  const patch = {pendencia:true, pendenciaResolvida:false, tiposPendencia:tipos};
+  if(outro) patch.pendenciaOutro = outro;
+  try{
+    await updateDoc(doc(db,'obras',obraId), patch);
+    const o = obras.find(x=>x.id===obraId);
+    if(o){ Object.assign(o, patch); renderAcoesODI(o); }
+    toast('⚠️ Pendência registrada.','ok');
+    renderDashDebounced();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
+window.odiResolverPendencia = async function(obraId){
+  if(!confirm('Confirmar que a pendência construtiva foi regularizada?')) return;
+  try{
+    await updateDoc(doc(db,'obras',obraId),{pendencia:false, pendenciaResolvida:true});
+    const o = obras.find(x=>x.id===obraId);
+    if(o){ o.pendencia=false; o.pendenciaResolvida=true; renderAcoesODI(o); }
+    toast('✅ Pendência marcada como resolvida.','ok');
+    renderDashDebounced();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
 // Abre seção de ações ODI no modal (chamado por openObraModal quando tipo=ODI)
 function renderAcoesODI(obra){
   const cont = document.getElementById('secODIAcoes');
@@ -8894,135 +8910,223 @@ function renderAcoesODI(obra){
   const isFisc = me.perfil==='fiscal'||me.perfil==='fiscal_adm';
   const isAdm  = me.perfil==='adm_odi'||me.perfil==='gerente';
   const oId    = obra.id;
-
   const fmtD = d => d ? fmtTxt(d) : '—';
-  const badge = (ok,label) => ok
-    ? `<span style="color:#22C55E;font-size:10px;font-weight:700">✅ ${label}</span>`
-    : `<span style="color:var(--muted);font-size:10px">⏳ ${label}</span>`;
+  const badge = (ok,label,sub='') => ok
+    ? `<div style="color:#22C55E;font-size:10px;font-weight:700">✅ ${label}${sub?'<span style="font-weight:400;color:var(--muted)"> ('+sub+')</span>':''}</div>`
+    : `<div style="font-size:10px;color:var(--muted)">⏳ ${label}</div>`;
+  const card = (title, body) =>
+    `<div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">`+
+    `<div style="font-size:10px;font-weight:700;margin-bottom:8px">${title}</div>${body}</div>`;
+  const dateField = (id, label, btnLabel, onclick) =>
+    `<div class="fg"><label style="font-size:9px">${label}</label>`+
+    `<input type="date" id="${id}" max="${hojeStr()}"></div>`+
+    `<button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="${onclick}">${btnLabel}</button>`;
 
-  let html = `<div style="border-top:2px solid #F59E0B;margin-top:12px;padding-top:12px">
-    <div style="font-size:11px;font-weight:800;color:#F59E0B;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">⚡ Ações ODI</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">`;
+  let sections = [];
 
-  // ── Conclusão da obra (Empreiteira / Adm_ODI / Gerente) ──
-  if(isEmp||isAdm||isFisc) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Conclusão da Obra</div>
-      ${obra.conclusao?badge(true,'Informada em '+fmtD(obra.conclusao)):`
-      <div class="fg"><label style="font-size:9px">Data de conclusão</label>
-        <input type="date" id="odiConclusao" value="${obra.conclusao||''}">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarCampo('${oId}','conclusao',document.getElementById('odiConclusao')?.value)">Registrar</button>`}
-    </div>`;
-
-  // ── Envio de Notas Fiscais (Empreiteira / Adm_ODI / Gerente) ──
-  if(isEmp||isAdm) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Envio de Notas Fiscais</div>
-      ${obra.nfEnviadaFlag?badge(true,'Enviadas em '+fmtD(obra.nfEnviadaData)):`
-      ${!obra.kaffaODI?'<div style="font-size:9px;color:var(--muted)">Aguarde registro do kaffa pelo fiscal.</div>':`
-      <div class="fg"><label style="font-size:9px">Data do envio</label>
-        <input type="date" id="odiNfData">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarNFEnvio('${oId}')">Registrar Envio</button>`}`}
-    </div>`;
-
-  // ── Fiscalização em campo (Fiscal) ──
-  if(isFisc||isAdm) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Fiscalização em Campo</div>
-      ${obra.fiscalizacao?badge(true,'Fiscalizada em '+fmtD(obra.fiscalizacao)):`
-      ${!obra.conclusao?'<div style="font-size:9px;color:var(--muted)">Aguarda conclusão informada primeiro.</div>':`
-      <div class="fg"><label style="font-size:9px">Data da fiscalização</label>
-        <input type="date" id="odiFiscData">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarCampo('${oId}','fiscalizacao',document.getElementById('odiFiscData')?.value)">Registrar</button>`}`}
-    </div>`;
-
-  // ── Kaffa ODI — feito pelo fiscal ──
-  if(isFisc||isAdm) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Kaffa (executado pelo fiscal)</div>
-      ${obra.kaffaODI?badge(true,'Registrado em '+fmtD(obra.kaffaODI)):`
-      ${!obra.conclusao?'<div style="font-size:9px;color:var(--muted)">Aguarda conclusão informada primeiro.</div>':`
-      <div class="fg"><label style="font-size:9px">Data do kaffa</label>
-        <input type="date" id="odiKaffaData">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarCampo('${oId}','kaffaODI',document.getElementById('odiKaffaData')?.value)">Registrar Kaffa</button>`}`}
-    </div>`;
-
-  // ── Lançamento NF + Pendências (Adm_ODI / Gerente) ──
-  if(isAdm && obra.nfEnviadaFlag) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Lançamento de Notas Fiscais</div>
-      ${obra.nfLancadaData?badge(true,'Lançadas em '+fmtD(obra.nfLancadaData)):`
-      <div class="fg"><label style="font-size:9px">Data do lançamento</label>
-        <input type="date" id="odiNfLancData">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarCampo('${oId}','nfLancadaData',document.getElementById('odiNfLancData')?.value)">Registrar Lançamento</button>`}
-    </div>`;
-
-  // ── Pendências documentais (Adm_ODI / Gerente) ──
-  if(isAdm && obra.nfLancadaData){
-    const PEND_LOTEAMENTO=['Falta de nota fiscal','Falta de devolução de material','Falta de contrato de incorporação assinado','Falta de COSIP assinada','BIM aprovado','Medida 320','Outros'];
-    const PEND_LIVRE=['Falta de nota fiscal','Falta de devolução de material','Medida 320','Outros'];
-    const pendList = obra.descricaoODI==='Loteamento' ? PEND_LOTEAMENTO : PEND_LIVRE;
-    const pendAtivas = obra.pendenciasDocODI||[];
-    html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border);grid-column:1/-1">
-      <div style="font-size:10px;font-weight:700;margin-bottom:8px">Pendências Documentais</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-        ${pendList.map(p=>`
-          <label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer">
-            <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} onchange="odiTogglePendDoc('${oId}','${p}',this.checked)"> ${p}
-          </label>`).join('')}
-      </div>
-      ${pendAtivas.length>0?`<div style="font-size:9px;color:#EF4444;font-weight:700">⚠️ ${pendAtivas.length} pendência(s) ativa(s)</div>`:'<div style="font-size:9px;color:#22C55E">✅ Sem pendências documentais</div>'}
-    </div>`;
+  // ── 1. Conclusão (Empreiteira / Fiscal / Adm / Gerente) ──────────────
+  if(isEmp||isFisc||isAdm){
+    sections.push(card('🏁 Conclusão da Obra',
+      obra.conclusao ? badge(true,'Informada em '+fmtD(obra.conclusao))
+      : dateField('odiConclusao','Data de conclusão','Registrar Conclusão',
+          `odiSalvarCampo('${oId}','conclusao',document.getElementById('odiConclusao')?.value)`)
+    ));
   }
 
-  // ── Devolução Financeira (Adm_ODI / Gerente) ──
-  if(isAdm && obra.medida230 && obra.medida70) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Encaminhamento Devolução Financeira</div>
-      ${obra.devolucaoFinanceiraData?badge(true,'Encaminhado em '+fmtD(obra.devolucaoFinanceiraData)):`
-      <div class="fg"><label style="font-size:9px">Data de encaminhamento</label>
-        <input type="date" id="odiDevFinData">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarCampo('${oId}','devolucaoFinanceiraData',document.getElementById('odiDevFinData')?.value)">Registrar</button>`}
-    </div>`;
+  // ── 2. Fiscalização em campo (Fiscal / Adm / Gerente) ────────────────
+  if(isFisc||isAdm){
+    const bloqueado = !obra.conclusao;
+    sections.push(card('🔍 Fiscalização em Campo',
+      obra.fiscalizacao ? badge(true,'Fiscalizada em '+fmtD(obra.fiscalizacao))
+      : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda conclusão informada.</div>'
+      : dateField('odiFiscData','Data da fiscalização','Registrar Fiscalização',
+          `odiSalvarCampo('${oId}','fiscalizacao',document.getElementById('odiFiscData')?.value)`)
+    ));
+  }
 
-  // ── Medidas 70 + 230 em conjunto (Adm_ODI / Gerente) ──
-  if(isAdm && obra.nfLancadaData && !(obra.pendenciasDocODI||[]).length && !obra.pendencia) html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;margin-bottom:6px">Medidas 70 + 230 (lançadas juntas)</div>
-      ${(obra.medida70&&obra.medida230)?badge(true,'Med. 70: '+fmtD(obra.medida70)+' / 230: '+fmtD(obra.medida230)):`
-      <div class="fg"><label style="font-size:9px">Data (mesma para 70 e 230)</label>
-        <input type="date" id="odiMed70230Data">
-      </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="odiSalvarMedidas70230('${oId}')">Registrar 70 + 230</button>
-      ${(obra.medida70&&!obra.medida230)||(!obra.medida70&&obra.medida230)?'<div style="color:#EF4444;font-size:9px;margin-top:4px">⚠️ Uma das medidas sem a outra — registre ambas!</div>':''}`}
-    </div>`;
+  // ── 3. Kaffa ODI — feito pelo fiscal ────────────────────────────────
+  if(isFisc||isAdm){
+    const bloqueado = !obra.conclusao;
+    sections.push(card('✅ Kaffa (registrado pelo fiscal)',
+      obra.kaffaODI ? badge(true,'Registrado em '+fmtD(obra.kaffaODI))
+      : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda conclusão informada.</div>'
+      : dateField('odiKaffaData','Data do kaffa','Registrar Kaffa',
+          `odiSalvarCampo('${oId}','kaffaODI',document.getElementById('odiKaffaData')?.value)`)
+    ));
+  }
 
-  // ── Locais de Trabalho ODI ──────────────────────────────────────
+  // ── 4. Pendência Construtiva — mesmas opções da RD (Fiscal / Adm / Gerente) ──
+  if(isFisc||isAdm){
+    const temPend = obra.pendencia && !obra.pendenciaResolvida;
+    const TIPOS_PEND = ['Poda','Aterramento de Cerca','Conexão','Estrutura','Aterramento',
+      'Transformador','Poste','Compartilhadora','Desmonte','Lixo no local','Calçada','Outro'];
+    const tiposAtivos = obra.tiposPendencia||[];
+    let pendBody = '';
+    if(temPend){
+      pendBody = `
+      <div style="background:rgba(239,68,68,.1);border-radius:6px;padding:8px;margin-bottom:8px">
+        <div style="font-size:9px;font-weight:700;color:#EF4444">⚠️ Pendência ativa: ${tiposAtivos.join(', ')||'—'}${obra.pendenciaOutro?' / '+obra.pendenciaOutro:''}</div>
+      </div>
+      <div style="font-size:10px;font-weight:700;color:#7c6af7;padding:6px 8px;background:rgba(124,106,247,.08);border-radius:6px;margin-bottom:8px">
+        ⚠️ Favor imputar a medida 321 dentro do sistema SAP.
+      </div>
+      <button class="btn btn-sm" style="background:rgba(34,197,94,.1);color:#22C55E;border-color:#22C55E55" onclick="odiResolverPendencia('${oId}')">✓ Confirmar Pendência Resolvida</button>`;
+    } else if(!obra.pendenciaResolvida){
+      pendBody = `
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        ${TIPOS_PEND.map(t=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer">
+          <input type="checkbox" class="chk-pend-odi" value="${t}"> ${t}
+        </label>`).join('')}
+      </div>
+      <div id="fgPendODIOutro" style="display:none;margin-bottom:6px">
+        <input type="text" id="oPendODIOutro" placeholder="Descreva o tipo..." style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit;width:100%">
+      </div>
+      <button class="btn btn-sm btn-secondary" style="color:#F97316" onclick="odiRegistrarPendencia('${oId}')">⚠️ Registrar Pendência</button>`;
+    } else {
+      pendBody = badge(true,'Pendência resolvida');
+    }
+    sections.push(card('⚠️ Pendência Construtiva', pendBody));
+    // Show "Outro" field when selected
+    setTimeout(()=>{
+      document.querySelectorAll('.chk-pend-odi[value="Outro"]').forEach(el=>{
+        el.onchange = ()=>{
+          const fg = document.getElementById('fgPendODIOutro');
+          if(fg) fg.style.display = el.checked ? '' : 'none';
+        };
+      });
+    },50);
+  }
+
+  // ── 5. Envio de NF (Empreiteira / Adm / Gerente) ────────────────────
+  if(isEmp||isAdm){
+    const bloqueado = !obra.kaffaODI;
+    sections.push(card('📋 Envio de Notas Fiscais',
+      obra.nfEnviadaFlag ? badge(true,'Enviadas em '+fmtD(obra.nfEnviadaData))
+      : bloqueado ? '<div style="font-size:9px;color:var(--muted)">⏸ Aguarda kaffa registrado pelo fiscal.</div>'
+      : dateField('odiNfData','Data do envio das NF','Registrar Envio de NF',
+          `odiSalvarNFEnvio('${oId}')`)
+    ));
+  }
+
+  // ── 6. Lançamento NF (Adm / Gerente) ────────────────────────────────
+  if(isAdm && obra.nfEnviadaFlag){
+    sections.push(card('🧾 Lançamento de Notas Fiscais',
+      obra.nfLancadaData ? badge(true,'Lançadas em '+fmtD(obra.nfLancadaData))
+      : dateField('odiNfLancData','Data do lançamento','Registrar Lançamento',
+          `odiSalvarCampo('${oId}','nfLancadaData',document.getElementById('odiNfLancData')?.value)`)
+    ));
+  }
+
+  // ── 7. Pendências Documentais (Adm / Gerente) ───────────────────────
+  if(isAdm && obra.nfLancadaData){
+    const PEND_LOT=['Falta de nota fiscal','Falta de devolução de material',
+      'Falta de contrato de incorporação assinado','Falta de COSIP assinada','BIM aprovado','Medida 320','Outros'];
+    const PEND_LIV=['Falta de nota fiscal','Falta de devolução de material','Medida 320','Outros'];
+    const pendList = obra.descricaoODI==='Loteamento' ? PEND_LOT : PEND_LIV;
+    const pendAtivas = obra.pendenciasDocODI||[];
+    sections.push(card('📄 Pendências Documentais',
+      `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        ${pendList.map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer">
+          <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} onchange="odiTogglePendDoc('${oId}','${p}',this.checked)"> ${p}
+        </label>`).join('')}
+      </div>
+      ${pendAtivas.length>0
+        ?`<div style="font-size:9px;color:#EF4444;font-weight:700">⚠️ ${pendAtivas.length} pendência(s) ativa(s)</div>`
+        :`<div style="font-size:9px;color:#22C55E">✅ Sem pendências documentais</div>`}`
+    ));
+  }
+
+  // ── 8. Encaminhamento Devolução Financeira (Adm / Gerente) ──────────
+  // Deve ser anterior às medidas 70/230
+  const podeDevFin = isAdm && obra.nfLancadaData
+    && !(obra.pendenciasDocODI||[]).length && !(obra.pendencia&&!obra.pendenciaResolvida);
+  if(podeDevFin){
+    sections.push(card('💰 Encaminhamento Devolução Financeira',
+      obra.devolucaoFinanceiraData ? badge(true,'Encaminhado em '+fmtD(obra.devolucaoFinanceiraData))
+      : dateField('odiDevFinData','Data do encaminhamento','Registrar Encaminhamento',
+          `odiSalvarCampo('${oId}','devolucaoFinanceiraData',document.getElementById('odiDevFinData')?.value)`)
+    ));
+  }
+
+  // ── 9. Medidas 70 + 230 — somente após devolução financeira ─────────
+  const podeMed7030 = isAdm && obra.devolucaoFinanceiraData
+    && !(obra.pendenciasDocODI||[]).length && !(obra.pendencia&&!obra.pendenciaResolvida);
+  if(podeMed7030){
+    const ambas = obra.medida70 && obra.medida230;
+    const umaFalta = (obra.medida70&&!obra.medida230)||(!obra.medida70&&obra.medida230);
+    sections.push(card('📐 Medidas 70 + 230 (lançadas juntas)',
+      ambas ? badge(true,'Med. 70: '+fmtD(obra.medida70)+' / Med. 230: '+fmtD(obra.medida230))
+      : `${umaFalta?'<div style="color:#EF4444;font-size:9px;font-weight:700;margin-bottom:6px">⚠️ Uma medida sem a outra — registre ambas!</div>':''}`+
+        dateField('odiMed70230Data','Data (mesma para Med. 70 e Med. 230)','Registrar Med. 70 + 230',
+          `odiSalvarMedidas70230('${oId}')`)
+    ));
+  }
+
+  // ── 10. Medida 280 — somente após 70+230 ────────────────────────────
+  if(isAdm && obra.medida70 && obra.medida230){
+    sections.push(card('📐 Medida 280',
+      obra.medida280 ? badge(true,'Registrada em '+fmtD(obra.medida280))
+      : dateField('odiMed280Data','Data da Medida 280','Registrar Medida 280',
+          `odiSalvarCampo('${oId}','medida280',document.getElementById('odiMed280Data')?.value)`)
+    ));
+  }
+
+  // ── 11. Armazenamento (Adm / Gerente) ───────────────────────────────
+  if(isAdm && obra.medida280){
+    sections.push(card('📦 Armazenamento',
+      obra.armazenado ? badge(true,'Armazenada')
+      : `<button class="btn btn-sm btn-secondary" onclick="odiSalvarCampo('${oId}','armazenado',true)">Registrar Armazenamento</button>`
+    ));
+  }
+
+  // ── 12. Equipamentos/Transformadores (Fiscal / Adm / Gerente) ───────
+  if(isFisc||isAdm){
+    // Initialize from obra data
+    if(!_equipModificado){
+      _equipInstalados = obra?.equipamentosInstalados?.length ? [...obra.equipamentosInstalados] : [];
+      _equipRetirados  = obra?.equipamentosRetirados?.length  ? [...obra.equipamentosRetirados]  : [];
+    }
+    const equipBody = `
+      <div style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:9px;color:var(--muted);font-weight:700">INSTALADO</span>
+          <button type="button" onclick="adicionarEquipInstalado()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
+        </div>
+        <div id="listaEquipInstalados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento instalado.</div></div>
+      </div>
+      <div style="padding-top:8px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:9px;color:var(--muted);font-weight:700">RETIRADO</span>
+          <button type="button" onclick="adicionarEquipRetirado()" class="btn btn-secondary btn-sm" style="font-size:9px">+ Adicionar</button>
+        </div>
+        <div id="listaEquipRetirados"><div style="font-size:10px;color:var(--muted)">Nenhum equipamento retirado.</div></div>
+      </div>`;
+    sections.push(card('🔩 Equipamentos / Transformadores', equipBody));
+    // Render into freshly created containers
+    setTimeout(()=>{ renderEquipInstalados(); renderEquipRetirados(); }, 60);
+  }
+
+  // ── 13. Locais de Trabalho (todos) ──────────────────────────────────
   const locaisODI = obra.locaisTrabalho||[];
-  html += `
-    <div style="background:var(--surface2);border-radius:8px;padding:10px;border:1px solid var(--border);margin-top:10px">
-      <div style="font-size:10px;font-weight:700;margin-bottom:8px">📍 Locais de Trabalho</div>
-      ${locaisODI.length
-        ? locaisODI.map(l=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;padding:4px 0;border-bottom:1px solid var(--border)">
-            <span style="color:var(--muted)">${fmtTxt(l.data)}</span>
-            <span style="flex:1;padding:0 8px">${l.descricao}</span>
-          </div>`).join('')
-        : '<div style="font-size:10px;color:var(--muted)">Nenhum local registrado.</div>'}
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <input type="text" id="odiLocalDesc" placeholder="Descrição do local..." style="flex:1;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
-        <button class="btn btn-sm btn-secondary" onclick="odiAdicionarLocal('${oId}')">+ Local</button>
-      </div>
-    </div>`;
+  sections.push(card('📍 Locais de Trabalho',
+    `${locaisODI.map(l=>`<div style="display:flex;gap:8px;font-size:10px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="color:var(--muted);white-space:nowrap">${fmtTxt(l.data)}</span>
+      <span style="flex:1">${l.descricao}</span>
+    </div>`).join('')}
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input type="text" id="odiLocalDesc" placeholder="Descrição do local..." style="flex:1;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
+      <button class="btn btn-sm btn-secondary" onclick="odiAdicionarLocal('${oId}')">+ Local</button>
+    </div>`
+  ));
 
-  html += '</div></div>';
-  cont.innerHTML = html;
+  const grid = sections.length > 1
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${sections.join('')}</div>`
+    : sections.join('');
+
+  cont.innerHTML = `<div style="border-top:2px solid #F59E0B;margin-top:12px;padding-top:12px">
+    <div style="font-size:11px;font-weight:800;color:#F59E0B;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">⚡ Ações ODI</div>
+    ${grid}
+  </div>`;
 }
 
 window.odiAdicionarLocal = async function(obraId){
