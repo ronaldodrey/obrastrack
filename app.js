@@ -1401,8 +1401,12 @@ window.sortObras = function(col){
 window.toggleEnquadramento = function(){
   const tipo = document.getElementById('oTipo')?.value;
   const isODI = tipo==='ODI';
+  // Show/hide ODI section
   const secODI = document.getElementById('secODI');
   if(secODI) secODI.style.display = isODI ? '' : 'none';
+  // Update label for ODI type description selector
+  const lblDescODI = document.getElementById('lblDescricaoODI');
+  if(lblDescODI) lblDescODI.textContent = 'Tipo de Obra ODI';
   // Auto-set prazo 18 meses for ODI
   if(isODI){
     const daEl = document.getElementById('oDataAbertura');
@@ -1821,9 +1825,13 @@ window.openObraModal=function(obraId){
   // 1. Ocultar TODAS as modal-section via querySelectorAll (robusto, não depende de lista)
   document.querySelectorAll('.modal-section').forEach(el => { el.style.display = 'none'; });
 
-  // 2. Mostrar só o que cada perfil precisa
+  // 2. Mostrar só o que cada perfil precisa — ignorado para obras ODI (têm secODIAcoes próprio)
   function showSec(id){ const el=document.getElementById(id); if(el) el.style.display='block'; }
 
+  // Para obras ODI: secções já configuradas acima — pular bloco de showSec RD
+  if(obra?.tipo === 'ODI'){
+    // ODI: nada a fazer aqui, as seções foram configuradas no bloco ODI acima
+  } else {
   if(isGenesis){
     // Genesis: SOMENTE secCadastro (data envio + toggle confirmação)
     showSec('secCadastro');
@@ -1892,6 +1900,8 @@ window.openObraModal=function(obraId){
     // Cancelamento e paralização: somente gerente
     if(p === 'gerente'){ showSec('secCancelamento'); showSec('secParalisada'); }
   }
+
+  } // end else (not ODI)
 
   // 3. Habilitar/desabilitar campos por perfil
   if(!isBasico){
