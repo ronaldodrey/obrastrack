@@ -293,6 +293,134 @@
       <div id="usersList"><div class="loading">Carregando...</div></div>
     </div>
   </div>
+
+  <div class="page" id="pgPedidos">
+    <div id="pgPedidosContent"><div class="loading">Carregando...</div></div>
+  </div>
+</div>
+
+<!-- MODAL PEDIDO -->
+<div class="overlay" id="ovPedido">
+ <div class="modal">
+  <h2 id="pedidoModalTit">Novo Pedido</h2>
+  <input type="hidden" id="pedidoId">
+  <div class="modal-section">
+    <div class="modal-section-title">📋 Identificação do Pedido</div>
+    <div class="fg-grid">
+      <div class="fg"><label>Nota (nº do projeto) *</label><input type="text" id="pdNota" placeholder="Ex: 123456"></div>
+      <div class="fg">
+        <label>Tipo de Solicitação *</label>
+        <select id="pdTipoSolicitacao" onchange="onTipoSolicitacaoChange()">
+          <option value="">— selecione —</option>
+          <option value="Alimentadores">Alimentadores</option>
+          <option value="Equipamentos Especiais">Equipamentos Especiais</option>
+          <option value="Ext. para Ilum. Pública">Ext. para Ilum. Pública</option>
+          <option value="Interligação Proj. Particular">Interligação Proj. Particular</option>
+          <option value="Ligação nova Rural">Ligação nova Rural</option>
+          <option value="Ligação Nova Urbana">Ligação Nova Urbana</option>
+          <option value="Loteamento – Conexão">Loteamento – Conexão</option>
+          <option value="Melhorias">Melhorias</option>
+          <option value="Outros (Descrever)">Outros (Descrever)</option>
+          <option value="PVNT">PVNT</option>
+          <option value="Remoção e Deslocamento">Remoção e Deslocamento</option>
+          <option value="Troca de Padrão">Troca de Padrão</option>
+        </select>
+        <div id="pdTipoPedidoPreview" style="font-size:10px;color:var(--muted);margin-top:3px">—</div>
+      </div>
+      <div class="fg"><label>Data de Abertura do Pedido *</label><input type="date" id="pdDataAbertura"></div>
+      <div class="fg">
+        <label>Município *</label>
+        <select id="pdMunicipio">
+          <option value="">— selecione —</option>
+          <option value="ANITA GARIBALDI">ANITA GARIBALDI</option>
+          <option value="BOCAINA DO SUL">BOCAINA DO SUL</option>
+          <option value="BOM JARDIM DA SERRA">BOM JARDIM DA SERRA</option>
+          <option value="BOM RETIRO">BOM RETIRO</option>
+          <option value="CAMPO BELO DO SUL">CAMPO BELO DO SUL</option>
+          <option value="CAPAO ALTO">CAPAO ALTO</option>
+          <option value="CELSO RAMOS">CELSO RAMOS</option>
+          <option value="CERRO NEGRO">CERRO NEGRO</option>
+          <option value="CORREIA PINTO">CORREIA PINTO</option>
+          <option value="CURITIBANOS">CURITIBANOS</option>
+          <option value="FREI ROGERIO">FREI ROGERIO</option>
+          <option value="LAGES">LAGES</option>
+          <option value="OTACILIO COSTA">OTACILIO COSTA</option>
+          <option value="PAINEL">PAINEL</option>
+          <option value="PALMEIRA">PALMEIRA</option>
+          <option value="PONTE ALTA">PONTE ALTA</option>
+          <option value="PONTE ALTA DO NORTE">PONTE ALTA DO NORTE</option>
+          <option value="RIO RUFINO">RIO RUFINO</option>
+          <option value="SANTA CECILIA">SANTA CECILIA</option>
+          <option value="SAO CRISTOVAO DO SUL">SAO CRISTOVAO DO SUL</option>
+          <option value="SAO JOAQUIM">SAO JOAQUIM</option>
+          <option value="SAO JOSE DO CERRITO">SAO JOSE DO CERRITO</option>
+          <option value="URUBICI">URUBICI</option>
+          <option value="URUPEMA">URUPEMA</option>
+        </select>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:8px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="pdFlagOrgaoPublico" style="width:auto">
+        Pedido envolve município / órgão público (exige Ofício no checklist)
+      </label>
+    </div>
+  </div>
+
+  <div class="modal-section">
+    <div class="modal-section-title">🧑‍💼 Ação do Analista</div>
+    <div class="fg-grid">
+      <div class="fg">
+        <label>Ação *</label>
+        <select id="pdAcaoAnalista" onchange="onAcaoAnalistaChange()">
+          <option value="">— selecione —</option>
+          <option value="Enviado para Projeto">Enviado para Projeto</option>
+          <option value="Liberado sem Obra">Liberado sem Obra</option>
+          <option value="Cancelado">Cancelado</option>
+          <option value="Abertura de Obra (Loteamento)">Abertura de Obra (Loteamento)</option>
+          <option value="Abertura de Obra (Iluminação Pública)">Abertura de Obra (Iluminação Pública)</option>
+        </select>
+      </div>
+      <div class="fg" id="fgProjetista" style="display:none">
+        <label>Projetista</label>
+        <select id="pdProjetista">
+          <option value="">— selecione —</option>
+          <option value="Tonimar">Tonimar</option>
+          <option value="Valdir">Valdir</option>
+          <option value="Claudionei">Claudionei</option>
+          <option value="Não informado">Não informado</option>
+          <option value="Copia">Copia</option>
+          <option value="Jucimar Outro">Jucimar Outro</option>
+        </select>
+      </div>
+      <div class="fg" id="fgDataEncaminhamento" style="display:none">
+        <label>Data de Encaminhamento ao Projetista</label>
+        <input type="date" id="pdDataEncaminhamento">
+      </div>
+      <div class="fg" id="fgMotivoCancelamento" style="display:none">
+        <label>Motivo do Cancelamento</label>
+        <input type="text" id="pdMotivoCancelamento" placeholder="Descreva o motivo">
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-section" id="pedidoMedida34Wrap" style="display:none">
+    <div class="modal-section-title">⏸️ Medida 34</div>
+    <div id="secMedida34Analista" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
+      <span>Medida 34 (Analista): <span id="medida34AnalistaStatus">—</span></span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Analista" onclick="toggleMedida34('analista')">Ativar</button>
+    </div>
+    <div id="secMedida34Gerente" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
+      <span>Medida 34 (Gerente): <span id="medida34GerenteStatus">—</span></span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Gerente" onclick="toggleMedida34('gerente')">Ativar</button>
+    </div>
+  </div>
+
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closePedidoModal()">Fechar</button>
+    <button class="btn btn-primary" id="btnSalvarPedido" onclick="savePedido()">Salvar</button>
+  </div>
+ </div>
 </div>
 
 <!-- ══ MODAL IMPORT EXCEL ══ -->
@@ -838,6 +966,7 @@
       <option value="genesis">Genesis</option>
               <option value="adm_odi">Adm. ODI</option>
       <option value="estagiario">Estagiário</option>
+      <option value="analista">Analista</option>
     </select>
   </div>
   <div class="fg" id="fgVincEmp" style="display:none">
