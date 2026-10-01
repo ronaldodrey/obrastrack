@@ -1305,6 +1305,31 @@ function celulaPrazo(dias){
 }
 
 // ── MONITOR DE PRAZOS ─────────────────────────────────────────────────
+window._exportMonitorCSV = function(btn){
+  // Find the closest table in the card
+  const card = btn.closest('div[style*="border-radius:10px"]');
+  if(!card) return;
+  const titulo = btn.dataset.titulo || 'monitor';
+  const rows = card.querySelectorAll('tbody tr');
+  let csv = '\uFEFFNota,Prazo,Situação,Cidade,Fiscal,Empreiteira\n';
+  rows.forEach(tr=>{
+    const cells = tr.querySelectorAll('td');
+    if(cells.length >= 6){
+      const row = Array.from(cells).slice(0,6).map(td=>{
+        const text = td.innerText||td.textContent||'';
+        return '"'+text.trim().replace(/"/g,'""')+'"';
+      });
+      csv += row.join(',')+',\n';
+    }
+  });
+  const filename = 'monitor_'+titulo.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase()+'.csv';
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download = filename;
+  a.click();
+  toast('✓ CSV exportado: '+filename,'ok');
+};
+
 function renderMonitorPrazos(list){
   const ativas    = list.filter(o => !o.cancelado && !o.armazenado);
   const ativasRD  = ativas.filter(o => o.tipo !== 'ODI');
@@ -1367,13 +1392,13 @@ function renderMonitorPrazosTipo_inner(list){
       cnt.hoje  ? `<span style="background:#F97316;color:#fff;padding:1px 7px;border-radius:10px;font-size:9px">❗ ${cnt.hoje} hoje</span>` : '',
       cnt.breve ? `<span style="background:#FBBF24;color:#000;padding:1px 7px;border-radius:10px;font-size:9px">⚡ ${cnt.breve} ≤5d</span>` : '',
     ].filter(Boolean).join(' ');
-    const linhas = lista.slice(0,12).map(x => {
+    const ROW_LIMIT = 15; // primeiras linhas visíveis
+    const mkRow = x => {
       const d = x.dias;
       const cor2 = d < 0 ? '#EF4444' : d === 0 ? '#F97316' : d <= 5 ? '#FBBF24' : d <= 15 ? '#F59E0B' : '#6b7280';
       const txt  = d < 0 ? `⚠️ Vencida há ${Math.abs(d)}d` : d === 0 ? '🔴 Vence hoje!' : `${d}d restantes`;
-      const prazoData = fnPrazo(x.o);
-      const prazoFmt  = prazoData ? fmtTxt(prazoData) : '—';
-      return `<tr style="border-bottom:1px solid var(--border)">
+      const prazoFmt = fnPrazo(x.o) ? fmtTxt(fnPrazo(x.o)) : '—';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${x.o.id}')">
         <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent);white-space:nowrap">${x.o.numero}</td>
         <td style="padding:5px 10px;font-weight:700;font-size:12px;color:${cor2};white-space:nowrap">${prazoFmt}</td>
         <td style="padding:5px 10px;font-size:10px;color:${cor2};white-space:nowrap">${txt}</td>
@@ -1381,16 +1406,32 @@ function renderMonitorPrazosTipo_inner(list){
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
       </tr>`;
-    }).join('');
-    const maisTxt = lista.length > 12 ? `<tr><td colspan="6" style="padding:5px 10px;font-size:10px;color:var(--muted)">... e mais ${lista.length-12} obra(s)</td></tr>` : '';
+    };
+    const linhas = lista.slice(0, ROW_LIMIT).map(mkRow).join('');
+    const maisTxt = lista.length > ROW_LIMIT
+      ? `<tr><td colspan="6" style="padding:0">
+          <details style="padding:0">
+            <summary style="padding:6px 10px;font-size:10px;color:var(--accent);cursor:pointer;list-style:none">
+              ▼ Ver mais ${lista.length - ROW_LIMIT} obra(s)
+            </summary>
+            <table style="width:100%;border-collapse:collapse">
+              ${lista.slice(ROW_LIMIT).map(mkRow).join('')}
+            </table>
+          </details>
+        </td></tr>`
+      : '';
     return `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow-x:auto">
         <div style="padding:10px 14px;background:${cor}12;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <div>
             <span style="font-weight:700;font-size:12px">${titulo}</span>
+            <span style="font-size:10px;color:var(--muted);margin-left:6px">${lista.length} obra(s)</span>
             ${subtitulo ? `<span style="font-size:9px;color:var(--muted);margin-left:6px">${subtitulo}</span>` : ''}
           </div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">${badges}</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            ${badges}
+            ${me.perfil==='gerente'?`<button onclick="window._exportMonitorCSV(this)" data-titulo="${titulo}" data-tipo="${tipo}" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;white-space:nowrap">⬇️ Exportar CSV</button>`:''}
+          </div>
         </div>
         ${!linhas
           ? `<div style="padding:10px 14px;font-size:11px;color:var(--muted)">Nenhuma obra pendente.</div>`
