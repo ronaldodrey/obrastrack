@@ -416,6 +416,34 @@
     </div>
   </div>
 
+  <div class="modal-section" id="pedidoChecklistWrap" style="display:none">
+    <div class="modal-section-title">✅ Checklist Documental (Estagiário)</div>
+    <div id="checklistItemsList"></div>
+    <div id="checklistAddWrap" style="display:flex;gap:8px;margin-top:10px">
+      <input type="text" id="pdNovoDocumentoChecklist" placeholder="Nome do documento a adicionar" style="flex:1">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="addChecklistItemAdHoc()">+ Adicionar</button>
+    </div>
+    <div class="fg-grid" style="margin-top:12px">
+      <div class="fg"><label>Data de Retorno do Projetista</label><input type="date" id="pdDataRetornoProjetista"></div>
+      <div class="fg" id="fgLatLong" style="display:none">
+        <label>Latitude / Longitude do Transformador</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="pdLatitude" placeholder="Latitude">
+          <input type="text" id="pdLongitude" placeholder="Longitude">
+        </div>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:8px">
+      <label>Feedback do Checklist Documental (o que está faltando)</label>
+      <textarea id="pdChecklistFeedback" rows="2" style="width:100%;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+      <span id="checklistConcluidoStatus">—</span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnConcluirChecklist" onclick="toggleChecklistConcluido()">Concluir Checklist</button>
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="btnSalvarChecklist" style="margin-top:10px" onclick="salvarAcompanhamentoChecklist()">Salvar Acompanhamento</button>
+  </div>
+
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closePedidoModal()">Fechar</button>
     <button class="btn btn-primary" id="btnSalvarPedido" onclick="savePedido()">Salvar</button>
