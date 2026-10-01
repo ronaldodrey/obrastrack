@@ -58,6 +58,13 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && perfil() == 'gerente';
     }
+    match /pedidos/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
+      // Etapa 1: estagiario e adm_odi ainda não escrevem em pedidos (entra nas próximas etapas).
+      allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
+      allow delete: if request.auth != null && perfil() == 'gerente';
+    }
     // Comentários/avisos por obra
     match /obras/{obraId}/comentarios/{commentId} {
       allow read: if request.auth != null;
