@@ -264,7 +264,7 @@ async function iniciarApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
   const rb=document.getElementById('hRole');
-  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário'};
+  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário','analista':'Analista','adm_odi':'Adm. ODI'};
   rb.textContent=perfilLabels[me.perfil]||me.perfil;
   rb.className='role-badge role-'+me.perfil;
   // Ensure role badge color for new profiles
@@ -280,9 +280,11 @@ async function iniciarApp(){
   const canSeeAbertura   = me.perfil==='gerente' || isAdmOdi;
   const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='empreiteira'||isAdmOdi;
   const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
+  const canSeePedidos = ['analista','estagiario','adm_odi','gerente'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
+    ...(canSeePedidos?[['pgPedidos','📋 Pedidos']]:[]),
     ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
@@ -346,6 +348,7 @@ window.showPage=function(id){
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
+  if(id==='pgPedidos') renderPedidos();
   if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
@@ -9779,3 +9782,258 @@ function renderDashAdmOdi(){
     </div>`;
 }
 window.renderDashAdmOdi = renderDashAdmOdi;
+
+// ══════════════════════════════════════════════════════
+//  MÓDULO: GERENCIAMENTO DE PEDIDOS  — Etapa 1
+//  (Abertura de Pedido pelo Analista + Medida 34)
+// ══════════════════════════════════════════════════════
+const MUNICIPIOS_ARLAG = ['ANITA GARIBALDI','BOCAINA DO SUL','BOM JARDIM DA SERRA','BOM RETIRO',
+  'CAMPO BELO DO SUL','CAPAO ALTO','CELSO RAMOS','CERRO NEGRO','CORREIA PINTO','CURITIBANOS',
+  'FREI ROGERIO','LAGES','OTACILIO COSTA','PAINEL','PALMEIRA','PONTE ALTA','PONTE ALTA DO NORTE',
+  'RIO RUFINO','SANTA CECILIA','SAO CRISTOVAO DO SUL','SAO JOAQUIM','SAO JOSE DO CERRITO','URUBICI','URUPEMA'];
+
+const TIPOS_SOLICITACAO = {
+  'Alimentadores':                 {tipoPedido:'R2', prazoDias:60},
+  'Equipamentos Especiais':        {tipoPedido:'R2', prazoDias:60},
+  'Ext. para Ilum. Pública':       {tipoPedido:'R1', prazoDias:45},
+  'Interligação Proj. Particular': {tipoPedido:'R1', prazoDias:30},
+  'Ligação nova Rural':            {tipoPedido:'R1', prazoDias:30},
+  'Ligação Nova Urbana':           {tipoPedido:'R1', prazoDias:30},
+  'Loteamento – Conexão':          {tipoPedido:'R1', prazoDias:30},
+  'Melhorias':                     {tipoPedido:'R2', prazoDias:60},
+  'Outros (Descrever)':            {tipoPedido:'R1', prazoDias:30},
+  'PVNT':                          {tipoPedido:'R2', prazoDias:30},
+  'Remoção e Deslocamento':        {tipoPedido:'R1', prazoDias:45},
+  'Troca de Padrão':               {tipoPedido:'R1', prazoDias:30},
+};
+
+// Checklist padrão por tipo de solicitação — editável pelo Gerente nas próximas etapas.
+// Mantido aqui como referência de dados para a Etapa 2 (checklist do Estagiário).
+const CHECKLIST_PADRAO = {
+  'PVNT':                    ['Relatório CQDE'],
+  'Ext. para Ilum. Pública': ['Ofício Prefeitura','Lei de Criação da Via'],
+  'Ligação nova Rural':      ['Declaração de Não APP','Autorização de Passagem do Solicitante','Autorização de Passagem de Terceiros','Matrícula Georreferenciada'],
+};
+
+const PROJETISTAS_PEDIDO = ['Tonimar','Valdir','Claudionei','Não informado','Copia','Jucimar Outro'];
+
+const ACOES_ANALISTA = ['Enviado para Projeto','Liberado sem Obra','Cancelado','Abertura de Obra (Loteamento)','Abertura de Obra (Iluminação Pública)'];
+
+let pedidos=[], unsubPedidos=null;
+
+function podeGerenciarPedidos(){ return me && ['analista','gerente'].includes(me.perfil); }
+
+function statusInicialPedido(acao){
+  const map={
+    'Enviado para Projeto':'Analista Verificando',
+    'Liberado sem Obra':'Encerrado – Liberado sem Obra',
+    'Cancelado':'Encerrado – Cancelado',
+    'Abertura de Obra (Loteamento)':'Encaminhado ODI – Loteamento',
+    'Abertura de Obra (Iluminação Pública)':'Encaminhado ODI – Iluminação Pública',
+  };
+  return map[acao]||'Analista Verificando';
+}
+function statusEhEncerrado(status){ return !!status && status.indexOf('Encerrado')===0; }
+
+function periodosMedida34(p){ return [...(p.medida34Analista||[]),...(p.medida34Gerente||[])]; }
+function medida34Ativa(p){ return periodosMedida34(p).some(x=>!x.fim); }
+function diasPausadosPedido(p){
+  let dias=0;
+  periodosMedida34(p).forEach(per=>{
+    const fim = per.fim || hoje().toISOString().split('T')[0];
+    const d = diff(per.inicio, fim);
+    if(d>0) dias+=d;
+  });
+  return dias;
+}
+function prazoLimitePedido(p){
+  const cfg=TIPOS_SOLICITACAO[p.tipoSolicitacao];
+  if(!cfg||!p.dataAberturaPedido) return null;
+  const base=addDias(p.dataAberturaPedido, cfg.prazoDias);
+  return addDias(base, diasPausadosPedido(p));
+}
+
+function loadPedidosListener(){
+  if(unsubPedidos) return;
+  const q=query(collection(db,'pedidos'), orderBy('dataAberturaPedido','desc'));
+  unsubPedidos=onSnapshot(q,snap=>{
+    pedidos=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const active=document.querySelector('.page.active');
+    if(active?.id==='pgPedidos') renderPedidos();
+  });
+}
+
+function renderPedidos(){
+  loadPedidosListener();
+  const cont=document.getElementById('pgPedidosContent');
+  if(!cont) return;
+  const podeCriar=podeGerenciarPedidos();
+  const hojeStr=hoje().toISOString().split('T')[0];
+  const rows=pedidos.map(p=>{
+    const prazo=prazoLimitePedido(p);
+    const pausado=medida34Ativa(p);
+    const encerrado=statusEhEncerrado(p.status);
+    const atraso=!encerrado && prazo && !pausado && prazo<hojeStr;
+    return `<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="openPedidoModal('${p.id}')">
+      <td style="padding:8px">${p.nota||'—'}</td>
+      <td style="padding:8px">${p.tipoSolicitacao||'—'}</td>
+      <td style="padding:8px">${p.municipio||'—'}${p.flagOrgaoPublico?' 🏛️':''}</td>
+      <td style="padding:8px">${p.status||'—'}${pausado?' <span style="color:#F59E0B;font-weight:700">⏸️ Medida 34</span>':''}</td>
+      <td style="padding:8px;${atraso?'color:#EF4444;font-weight:700':''}">${prazo?fmtTxt(prazo):'—'}</td>
+    </tr>`;
+  }).join('');
+  cont.innerHTML=`
+    <div class="tbl-head">
+      <div class="page-title">Gerenciamento de Pedidos</div>
+      ${podeCriar?'<button class="btn btn-primary btn-sm" onclick="openPedidoModal()">+ Novo Pedido</button>':''}
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:8px;text-align:left">Nota</th>
+          <th style="padding:8px;text-align:left">Solicitação</th>
+          <th style="padding:8px;text-align:left">Município</th>
+          <th style="padding:8px;text-align:left">Status</th>
+          <th style="padding:8px;text-align:left">Prazo Enquadramento</th>
+        </tr></thead>
+        <tbody>${rows||'<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--muted)">Nenhum pedido cadastrado.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+window.renderPedidos=renderPedidos;
+
+window.onTipoSolicitacaoChange=function(){
+  const t=document.getElementById('pdTipoSolicitacao').value;
+  const cfg=TIPOS_SOLICITACAO[t];
+  document.getElementById('pdTipoPedidoPreview').textContent=cfg?`${cfg.tipoPedido} · prazo base: ${cfg.prazoDias} dias`:'—';
+};
+window.onAcaoAnalistaChange=function(){
+  const a=document.getElementById('pdAcaoAnalista').value;
+  document.getElementById('fgProjetista').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgDataEncaminhamento').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgMotivoCancelamento').style.display=a==='Cancelado'?'flex':'none';
+};
+
+function renderMedida34Status(p){
+  const ativaA=(p?.medida34Analista||[]).some(x=>!x.fim);
+  const ativaG=(p?.medida34Gerente||[]).some(x=>!x.fim);
+  const elA=document.getElementById('medida34AnalistaStatus');
+  const elG=document.getElementById('medida34GerenteStatus');
+  if(elA) elA.innerHTML=ativaA?'<span style="color:#F59E0B;font-weight:700">⏸️ Ativa</span>':'<span style="color:#22C55E">Inativa</span>';
+  if(elG) elG.innerHTML=ativaG?'<span style="color:#F59E0B;font-weight:700">⏸️ Ativa</span>':'<span style="color:#22C55E">Inativa</span>';
+  const btnA=document.getElementById('btnToggleMedida34Analista'); if(btnA) btnA.textContent=ativaA?'Desativar':'Ativar';
+  const btnG=document.getElementById('btnToggleMedida34Gerente'); if(btnG) btnG.textContent=ativaG?'Desativar':'Ativar';
+  const secA=document.getElementById('secMedida34Analista'); if(secA) secA.style.display=['analista','gerente'].includes(me.perfil)?'block':'none';
+  const secG=document.getElementById('secMedida34Gerente'); if(secG) secG.style.display=me.perfil==='gerente'?'block':'none';
+}
+
+window.toggleMedida34=async function(quem){
+  const id=document.getElementById('pedidoId').value;
+  if(!id){ toast('Salve o pedido antes de usar a Medida 34.','err'); return; }
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const campo=quem==='analista'?'medida34Analista':'medida34Gerente';
+  const lista=[...(p[campo]||[])];
+  const ativa=lista.find(x=>!x.fim);
+  const hojeStr=hoje().toISOString().split('T')[0];
+  if(ativa){
+    ativa.fim=hojeStr;
+  } else {
+    const motivo=prompt('Motivo da Medida 34:');
+    if(motivo===null) return;
+    lista.push({inicio:hojeStr, fim:null, motivo:(motivo||'').trim(), registradoPor:me.nome});
+  }
+  try{
+    await updateDoc(doc(db,'pedidos',id), {[campo]:lista, atualizadaEm:serverTimestamp()});
+    toast(ativa?'Medida 34 removida.':'Medida 34 ativada.');
+  }catch(e){ console.error(e); toast('Erro ao atualizar Medida 34.','err'); }
+};
+
+window.openPedidoModal=function(id){
+  const isEdit=!!id;
+  document.getElementById('pedidoId').value=id||'';
+  document.getElementById('pedidoModalTit').textContent=isEdit?'Pedido':'Novo Pedido';
+  document.getElementById('pdNota').value='';
+  document.getElementById('pdTipoSolicitacao').value='';
+  document.getElementById('pdDataAbertura').value='';
+  document.getElementById('pdMunicipio').value='';
+  document.getElementById('pdFlagOrgaoPublico').checked=false;
+  document.getElementById('pdAcaoAnalista').value='';
+  document.getElementById('pdProjetista').value='';
+  document.getElementById('pdDataEncaminhamento').value='';
+  document.getElementById('pdMotivoCancelamento').value='';
+  const medidaSec=document.getElementById('pedidoMedida34Wrap');
+  let p=null;
+  if(isEdit){
+    p=pedidos.find(x=>x.id===id);
+    if(p){
+      document.getElementById('pdNota').value=p.nota||'';
+      document.getElementById('pdTipoSolicitacao').value=p.tipoSolicitacao||'';
+      document.getElementById('pdDataAbertura').value=p.dataAberturaPedido||'';
+      document.getElementById('pdMunicipio').value=p.municipio||'';
+      document.getElementById('pdFlagOrgaoPublico').checked=!!p.flagOrgaoPublico;
+      document.getElementById('pdAcaoAnalista').value=p.acaoAnalista||'';
+      document.getElementById('pdProjetista').value=p.projetista||'';
+      document.getElementById('pdDataEncaminhamento').value=p.dataEncaminhamentoProjetista||'';
+      document.getElementById('pdMotivoCancelamento').value=p.motivoCancelamento||'';
+    }
+    medidaSec.style.display='block';
+  } else {
+    medidaSec.style.display='none';
+  }
+  onTipoSolicitacaoChange(); onAcaoAnalistaChange(); renderMedida34Status(p);
+  const podeEditar=podeGerenciarPedidos();
+  document.querySelectorAll('#ovPedido input, #ovPedido select').forEach(el=>el.disabled=!podeEditar);
+  document.getElementById('btnSalvarPedido').style.display=podeEditar?'inline-flex':'none';
+  document.getElementById('ovPedido').classList.add('open');
+};
+window.closePedidoModal=function(){ document.getElementById('ovPedido').classList.remove('open'); };
+
+window.savePedido=async function(){
+  const btn=document.getElementById('btnSalvarPedido');
+  btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const id=document.getElementById('pedidoId').value;
+    const nota=document.getElementById('pdNota').value.trim();
+    const tipoSolicitacao=document.getElementById('pdTipoSolicitacao').value;
+    const dataAberturaPedido=document.getElementById('pdDataAbertura').value;
+    const municipio=document.getElementById('pdMunicipio').value;
+    const flagOrgaoPublico=document.getElementById('pdFlagOrgaoPublico').checked;
+    const acaoAnalista=document.getElementById('pdAcaoAnalista').value;
+    if(!nota||!tipoSolicitacao||!dataAberturaPedido||!municipio||!acaoAnalista){
+      toast('Preencha todos os campos obrigatórios.','err'); return;
+    }
+    if(acaoAnalista==='Cancelado' && !document.getElementById('pdMotivoCancelamento').value.trim()){
+      toast('Informe o motivo do cancelamento.','err'); return;
+    }
+    if(acaoAnalista==='Enviado para Projeto' && (!document.getElementById('pdProjetista').value||!document.getElementById('pdDataEncaminhamento').value)){
+      toast('Informe o projetista e a data de encaminhamento.','err'); return;
+    }
+    const cfg=TIPOS_SOLICITACAO[tipoSolicitacao];
+    const dados={
+      nota, tipoSolicitacao, tipoPedido:cfg?cfg.tipoPedido:'', dataAberturaPedido, municipio, flagOrgaoPublico,
+      acaoAnalista, status:statusInicialPedido(acaoAnalista),
+      projetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdProjetista').value:null,
+      dataEncaminhamentoProjetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdDataEncaminhamento').value:null,
+      motivoCancelamento: acaoAnalista==='Cancelado'?document.getElementById('pdMotivoCancelamento').value.trim():null,
+      atualizadaEm:serverTimestamp(),
+    };
+    if(id){
+      await updateDoc(doc(db,'pedidos',id), dados);
+      toast('Pedido atualizado!');
+    } else {
+      dados.criadaEm=serverTimestamp();
+      dados.criadaPor=me.nome;
+      dados.medida34Analista=[];
+      dados.medida34Gerente=[];
+      dados.checklistDocumental=[];
+      await addDoc(collection(db,'pedidos'), dados);
+      toast('Pedido criado!');
+    }
+    closePedidoModal();
+  }catch(e){
+    console.error(e); toast('Erro ao salvar pedido.','err');
+  } finally {
+    btn.disabled=false; btn.textContent='Salvar';
+  }
+};
