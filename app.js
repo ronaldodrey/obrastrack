@@ -9854,8 +9854,22 @@ function computeStatusPedido(p){
 }
 function statusEhEncerrado(status){ return !!status && status.indexOf('Encerrado')===0; }
 
+// Template do checklist por tipo de solicitação — armazenado em config/checklistTemplates,
+// editável só pelo Gerente (tela de configuração). CHECKLIST_PADRAO serve de valor inicial
+// até o Gerente configurar/alterar pela tela do sistema.
+let checklistTemplates={...CHECKLIST_PADRAO};
+let _templatesLoaded=false;
+async function loadChecklistTemplates(){
+  try{
+    const snap=await getDoc(doc(db,'config','checklistTemplates'));
+    if(snap.exists()) checklistTemplates={...CHECKLIST_PADRAO, ...snap.data()};
+  }catch(e){ console.warn('Checklist templates: usando valores padrão.', e); }
+}
+function ensureChecklistTemplatesLoaded(){ if(_templatesLoaded) return; _templatesLoaded=true; loadChecklistTemplates(); }
+function getChecklistTemplate(tipo){ return checklistTemplates[tipo]||[]; }
+
 function buildChecklistFromTemplate(tipo, flagOrgaoPublico){
-  const docs=[...(CHECKLIST_PADRAO[tipo]||[])];
+  const docs=[...getChecklistTemplate(tipo)];
   if(flagOrgaoPublico && !docs.includes('Ofício')) docs.push('Ofício');
   return docs.map(d=>({documento:d, status:'pendente', dataEntrega:null, conferidoPor:null}));
 }
@@ -9891,9 +9905,11 @@ function loadPedidosListener(){
 
 function renderPedidos(){
   loadPedidosListener();
+  ensureChecklistTemplatesLoaded();
   const cont=document.getElementById('pgPedidosContent');
   if(!cont) return;
   const podeCriar=podeGerenciarPedidos();
+  const podeConfigurarChecklist=me.perfil==='gerente';
   const hojeStr=hoje().toISOString().split('T')[0];
   const rows=pedidos.map(p=>{
     const prazo=prazoLimitePedido(p);
@@ -9911,7 +9927,10 @@ function renderPedidos(){
   cont.innerHTML=`
     <div class="tbl-head">
       <div class="page-title">Gerenciamento de Pedidos</div>
-      ${podeCriar?'<button class="btn btn-primary btn-sm" onclick="openPedidoModal()">+ Novo Pedido</button>':''}
+      <div style="display:flex;gap:8px">
+        ${podeConfigurarChecklist?'<button class="btn btn-secondary btn-sm" onclick="openChecklistConfigModal()">⚙️ Configurar Checklist</button>':''}
+        ${podeCriar?'<button class="btn btn-primary btn-sm" onclick="openPedidoModal()">+ Novo Pedido</button>':''}
+      </div>
     </div>
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -9980,18 +9999,13 @@ function renderChecklistItems(p){
   const el=document.getElementById('checklistItemsList');
   if(!el) return;
   const editavel=podeEditarChecklist();
-  if(!lista.length){ el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum documento no checklist.</div>'; return; }
+  if(!lista.length){ el.innerHTML='<div style="font-size:11px;color:var(--muted)">Este tipo de solicitação não tem documentos configurados no checklist. (Gerente pode configurar em "⚙️ Configurar Checklist".)</div>'; return; }
   el.innerHTML=lista.map((item,idx)=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-      <div style="font-size:12px">
-        ${item.status==='entregue'?'✅':'⏳'} ${item.documento}
-        ${item.status==='entregue'&&item.dataEntrega?`<span style="color:var(--muted);font-size:10px"> — ${fmtTxt(item.dataEntrega)}${item.conferidoPor?' · '+item.conferidoPor:''}</span>`:''}
-      </div>
-      ${editavel?`<div style="display:flex;gap:6px">
-        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleChecklistItem(${idx})">${item.status==='entregue'?'Marcar Pendente':'Marcar Entregue'}</button>
-        <button type="button" class="btn btn-danger btn-sm" onclick="removeChecklistItem(${idx})">🗑️</button>
-      </div>`:''}
-    </div>`).join('');
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:${editavel?'pointer':'default'}">
+      <input type="checkbox" style="width:auto" ${item.status==='entregue'?'checked':''} ${editavel?'':'disabled'} onchange="toggleChecklistItem(${idx})">
+      <span style="font-size:12px;flex:1">${item.documento}</span>
+      ${item.status==='entregue'&&item.dataEntrega?`<span style="color:var(--muted);font-size:10px">${fmtTxt(item.dataEntrega)}${item.conferidoPor?' · '+item.conferidoPor:''}</span>`:''}
+    </label>`).join('');
 }
 
 window.toggleChecklistItem=async function(idx){
@@ -10009,30 +10023,53 @@ window.toggleChecklistItem=async function(idx){
   }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
 };
 
-window.removeChecklistItem=async function(idx){
-  const id=document.getElementById('pedidoId').value;
-  const p=pedidos.find(x=>x.id===id);
-  if(!p) return;
-  if(!confirm('Remover este documento do checklist deste pedido?')) return;
-  const lista=[...(p.checklistDocumental||[])];
-  lista.splice(idx,1);
-  try{
-    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
-  }catch(e){ console.error(e); toast('Erro ao remover documento.','err'); }
+// ── Configuração do checklist (Gerente) ────────────────
+window.openChecklistConfigModal=function(){
+  document.getElementById('cfgTipoSolicitacao').value='';
+  document.getElementById('cfgChecklistDocsList').innerHTML='';
+  document.getElementById('ovChecklistConfig').classList.add('open');
+};
+window.closeChecklistConfigModal=function(){ document.getElementById('ovChecklistConfig').classList.remove('open'); };
+
+window.renderConfigChecklistDocs=function(){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  const el=document.getElementById('cfgChecklistDocsList');
+  if(!tipo){ el.innerHTML=''; return; }
+  const docs=getChecklistTemplate(tipo);
+  el.innerHTML=docs.length
+    ? docs.map((d,idx)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:12px">${d}</span>
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeDocFromTemplate(${idx})">🗑️</button>
+      </div>`).join('')
+    : '<div style="font-size:11px;color:var(--muted)">Nenhum documento configurado para este tipo.</div>';
 };
 
-window.addChecklistItemAdHoc=async function(){
-  const id=document.getElementById('pedidoId').value;
-  const p=pedidos.find(x=>x.id===id);
-  if(!p) return;
-  const input=document.getElementById('pdNovoDocumentoChecklist');
+window.addDocToTemplate=async function(){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  if(!tipo){ toast('Selecione o tipo de solicitação.','err'); return; }
+  const input=document.getElementById('cfgNovoDocumento');
   const nome=(input.value||'').trim();
   if(!nome){ toast('Informe o nome do documento.','err'); return; }
-  const lista=[...(p.checklistDocumental||[]), {documento:nome, status:'pendente', dataEntrega:null, conferidoPor:null}];
+  const docs=[...getChecklistTemplate(tipo), nome];
+  checklistTemplates[tipo]=docs;
   try{
-    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
+    await setDoc(doc(db,'config','checklistTemplates'), {[tipo]:docs}, {merge:true});
     input.value='';
-  }catch(e){ console.error(e); toast('Erro ao adicionar documento.','err'); }
+    renderConfigChecklistDocs();
+    toast('Documento adicionado ao checklist deste tipo!');
+  }catch(e){ console.error(e); toast('Erro ao salvar configuração.','err'); }
+};
+
+window.removeDocFromTemplate=async function(idx){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  const docs=[...getChecklistTemplate(tipo)];
+  docs.splice(idx,1);
+  checklistTemplates[tipo]=docs;
+  try{
+    await setDoc(doc(db,'config','checklistTemplates'), {[tipo]:docs}, {merge:true});
+    renderConfigChecklistDocs();
+    toast('Documento removido do checklist deste tipo.');
+  }catch(e){ console.error(e); toast('Erro ao salvar configuração.','err'); }
 };
 
 window.toggleChecklistConcluido=async function(){
@@ -10115,8 +10152,6 @@ window.openPedidoModal=function(id){
       document.getElementById('pdLatitude').disabled=!editavel;
       document.getElementById('pdLongitude').disabled=!editavel;
     } else { latLongWrap.style.display='none'; }
-    const addWrap=document.getElementById('checklistAddWrap');
-    addWrap.style.display=editavel?'flex':'none';
     const btnConcluir=document.getElementById('btnConcluirChecklist');
     btnConcluir.style.display=editavel?'inline-flex':'none';
     btnConcluir.textContent=p.checklistConcluido?'Reabrir Checklist':'Concluir Checklist';
