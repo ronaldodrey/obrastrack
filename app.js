@@ -9823,17 +9823,43 @@ let pedidos=[], unsubPedidos=null;
 
 function podeGerenciarPedidos(){ return me && ['analista','gerente'].includes(me.perfil); }
 
-function statusInicialPedido(acao){
-  const map={
-    'Enviado para Projeto':'Analista Verificando',
-    'Liberado sem Obra':'Encerrado – Liberado sem Obra',
-    'Cancelado':'Encerrado – Cancelado',
-    'Abertura de Obra (Loteamento)':'Encaminhado ODI – Loteamento',
-    'Abertura de Obra (Iluminação Pública)':'Encaminhado ODI – Iluminação Pública',
-  };
-  return map[acao]||'Analista Verificando';
+// Status dinâmico — recalculado a cada salvamento a partir dos dados atuais do pedido.
+// Segue exatamente a esteira de 9 estados + 4 encerramentos definida para o módulo.
+function statusNecessitaAnaliseDocumental(p){ return p.tipoSolicitacao==='Ligação nova Rural'; }
+function computeStatusPedido(p){
+  if(!p.acaoAnalista) return 'Analista Verificando';
+  if(p.acaoAnalista==='Liberado sem Obra') return 'Encerrado – Liberado sem Obra';
+  if(p.acaoAnalista==='Cancelado') return 'Encerrado – Cancelado';
+  if(p.acaoAnalista==='Abertura de Obra (Loteamento)') return 'Encaminhado ODI – Loteamento';
+  if(p.acaoAnalista==='Abertura de Obra (Iluminação Pública)') return 'Encaminhado ODI – Iluminação Pública';
+  // acaoAnalista === 'Enviado para Projeto' — segue a esteira dinâmica
+  const despachado=!!p.dataEncaminhamentoProjetista;
+  if(!despachado) return 'Analista Verificando';
+  const checklistOk=!!p.checklistConcluido;
+  const precisaAnalise=statusNecessitaAnaliseDocumental(p);
+  const analiseOk=!precisaAnalise || !!p.analiseDocumentalConcluida;
+  const projetoEntregue=!!p.dataRetornoProjetista;
+  const gerenteValidou=!!p.validacaoGerenteOk;
+  const enquadrado=!!p.dataEnquadramento;
+  if(enquadrado) return 'Pedido atendido – Orçamento encaminhado';
+  if(gerenteValidou) return 'Aguardando Enquadramento';
+  if(projetoEntregue){
+    if(!checklistOk) return 'Aguardando check-list documental e análise documental';
+    if(!analiseOk) return 'Aguardando análise documental';
+    return 'Aguardando Validação do projeto';
+  }
+  if(!checklistOk) return 'Aguardando Projeto e check-list documental';
+  if(!analiseOk) return 'Aguardando Projeto sem análise documental';
+  return 'Aguardando Projeto com análise documental';
 }
 function statusEhEncerrado(status){ return !!status && status.indexOf('Encerrado')===0; }
+
+function buildChecklistFromTemplate(tipo, flagOrgaoPublico){
+  const docs=[...(CHECKLIST_PADRAO[tipo]||[])];
+  if(flagOrgaoPublico && !docs.includes('Ofício')) docs.push('Ofício');
+  return docs.map(d=>({documento:d, status:'pendente', dataEntrega:null, conferidoPor:null}));
+}
+function podeEditarChecklist(){ return me && ['estagiario','analista','gerente'].includes(me.perfil); }
 
 function periodosMedida34(p){ return [...(p.medida34Analista||[]),...(p.medida34Gerente||[])]; }
 function medida34Ativa(p){ return periodosMedida34(p).some(x=>!x.fim); }
@@ -9949,6 +9975,97 @@ window.toggleMedida34=async function(quem){
   }catch(e){ console.error(e); toast('Erro ao atualizar Medida 34.','err'); }
 };
 
+function renderChecklistItems(p){
+  const lista=p.checklistDocumental||[];
+  const el=document.getElementById('checklistItemsList');
+  if(!el) return;
+  const editavel=podeEditarChecklist();
+  if(!lista.length){ el.innerHTML='<div style="font-size:11px;color:var(--muted)">Nenhum documento no checklist.</div>'; return; }
+  el.innerHTML=lista.map((item,idx)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:12px">
+        ${item.status==='entregue'?'✅':'⏳'} ${item.documento}
+        ${item.status==='entregue'&&item.dataEntrega?`<span style="color:var(--muted);font-size:10px"> — ${fmtTxt(item.dataEntrega)}${item.conferidoPor?' · '+item.conferidoPor:''}</span>`:''}
+      </div>
+      ${editavel?`<div style="display:flex;gap:6px">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleChecklistItem(${idx})">${item.status==='entregue'?'Marcar Pendente':'Marcar Entregue'}</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeChecklistItem(${idx})">🗑️</button>
+      </div>`:''}
+    </div>`).join('');
+}
+
+window.toggleChecklistItem=async function(idx){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const lista=[...(p.checklistDocumental||[])];
+  const item={...lista[idx]};
+  if(!item) return;
+  if(item.status==='entregue'){ item.status='pendente'; item.dataEntrega=null; item.conferidoPor=null; }
+  else { item.status='entregue'; item.dataEntrega=hoje().toISOString().split('T')[0]; item.conferidoPor=me.nome; }
+  lista[idx]=item;
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
+  }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
+};
+
+window.removeChecklistItem=async function(idx){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  if(!confirm('Remover este documento do checklist deste pedido?')) return;
+  const lista=[...(p.checklistDocumental||[])];
+  lista.splice(idx,1);
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
+  }catch(e){ console.error(e); toast('Erro ao remover documento.','err'); }
+};
+
+window.addChecklistItemAdHoc=async function(){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const input=document.getElementById('pdNovoDocumentoChecklist');
+  const nome=(input.value||'').trim();
+  if(!nome){ toast('Informe o nome do documento.','err'); return; }
+  const lista=[...(p.checklistDocumental||[]), {documento:nome, status:'pendente', dataEntrega:null, conferidoPor:null}];
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
+    input.value='';
+  }catch(e){ console.error(e); toast('Erro ao adicionar documento.','err'); }
+};
+
+window.toggleChecklistConcluido=async function(){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const checklistConcluido=!p.checklistConcluido;
+  const status=computeStatusPedido({...p, checklistConcluido});
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistConcluido, status, atualizadaEm:serverTimestamp()});
+    toast(checklistConcluido?'Checklist concluído!':'Checklist reaberto.');
+  }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
+};
+
+window.salvarAcompanhamentoChecklist=async function(){
+  const btn=document.getElementById('btnSalvarChecklist');
+  btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const id=document.getElementById('pedidoId').value;
+    const p=pedidos.find(x=>x.id===id);
+    if(!p) return;
+    const dataRetornoProjetista=document.getElementById('pdDataRetornoProjetista').value||null;
+    const latInput=document.getElementById('pdLatitude'), lonInput=document.getElementById('pdLongitude');
+    const latitude=latInput?(latInput.value.trim()||null):null;
+    const longitude=lonInput?(lonInput.value.trim()||null):null;
+    const checklistFeedback=document.getElementById('pdChecklistFeedback').value.trim();
+    const status=computeStatusPedido({...p, dataRetornoProjetista});
+    await updateDoc(doc(db,'pedidos',id), {dataRetornoProjetista, latitude, longitude, checklistFeedback, status, atualizadaEm:serverTimestamp()});
+    toast('Acompanhamento salvo!');
+  }catch(e){ console.error(e); toast('Erro ao salvar.','err'); }
+  finally{ const b=document.getElementById('btnSalvarChecklist'); if(b){ b.disabled=false; b.textContent='Salvar Acompanhamento'; } }
+};
+
 window.openPedidoModal=function(id){
   const isEdit=!!id;
   document.getElementById('pedidoId').value=id||'';
@@ -9963,6 +10080,7 @@ window.openPedidoModal=function(id){
   document.getElementById('pdDataEncaminhamento').value='';
   document.getElementById('pdMotivoCancelamento').value='';
   const medidaSec=document.getElementById('pedidoMedida34Wrap');
+  const checklistSec=document.getElementById('pedidoChecklistWrap');
   let p=null;
   if(isEdit){
     p=pedidos.find(x=>x.id===id);
@@ -9980,6 +10098,35 @@ window.openPedidoModal=function(id){
     medidaSec.style.display='block';
   } else {
     medidaSec.style.display='none';
+  }
+  // Checklist documental — só existe depois que o pedido foi enviado para projeto
+  if(isEdit && p && p.acaoAnalista==='Enviado para Projeto'){
+    checklistSec.style.display='block';
+    const editavel=podeEditarChecklist();
+    document.getElementById('pdDataRetornoProjetista').value=p.dataRetornoProjetista||'';
+    document.getElementById('pdChecklistFeedback').value=p.checklistFeedback||'';
+    document.getElementById('pdChecklistFeedback').disabled=!editavel;
+    document.getElementById('pdDataRetornoProjetista').disabled=!editavel;
+    const latLongWrap=document.getElementById('fgLatLong');
+    if(p.tipoSolicitacao==='Ligação nova Rural'){
+      latLongWrap.style.display='flex';
+      document.getElementById('pdLatitude').value=p.latitude||'';
+      document.getElementById('pdLongitude').value=p.longitude||'';
+      document.getElementById('pdLatitude').disabled=!editavel;
+      document.getElementById('pdLongitude').disabled=!editavel;
+    } else { latLongWrap.style.display='none'; }
+    const addWrap=document.getElementById('checklistAddWrap');
+    addWrap.style.display=editavel?'flex':'none';
+    const btnConcluir=document.getElementById('btnConcluirChecklist');
+    btnConcluir.style.display=editavel?'inline-flex':'none';
+    btnConcluir.textContent=p.checklistConcluido?'Reabrir Checklist':'Concluir Checklist';
+    document.getElementById('checklistConcluidoStatus').innerHTML=p.checklistConcluido
+      ?'<span style="color:#22C55E;font-weight:700">✅ Checklist concluído</span>'
+      :'<span style="color:#F59E0B">⏳ Checklist em andamento</span>';
+    document.getElementById('btnSalvarChecklist').style.display=editavel?'inline-flex':'none';
+    renderChecklistItems(p);
+  } else {
+    checklistSec.style.display='none';
   }
   onTipoSolicitacaoChange(); onAcaoAnalistaChange(); renderMedida34Status(p);
   const podeEditar=podeGerenciarPedidos();
@@ -10010,14 +10157,18 @@ window.savePedido=async function(){
       toast('Informe o projetista e a data de encaminhamento.','err'); return;
     }
     const cfg=TIPOS_SOLICITACAO[tipoSolicitacao];
+    const existente=id?(pedidos.find(x=>x.id===id)||{}):{};
     const dados={
       nota, tipoSolicitacao, tipoPedido:cfg?cfg.tipoPedido:'', dataAberturaPedido, municipio, flagOrgaoPublico,
-      acaoAnalista, status:statusInicialPedido(acaoAnalista),
+      acaoAnalista,
       projetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdProjetista').value:null,
       dataEncaminhamentoProjetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdDataEncaminhamento').value:null,
       motivoCancelamento: acaoAnalista==='Cancelado'?document.getElementById('pdMotivoCancelamento').value.trim():null,
       atualizadaEm:serverTimestamp(),
     };
+    // Status é recalculado a partir do estado completo do pedido (dados novos + o que já existia:
+    // checklist, análise documental, validação do gerente, enquadramento — preenchidos nas próximas etapas).
+    dados.status=computeStatusPedido({...existente, ...dados});
     if(id){
       await updateDoc(doc(db,'pedidos',id), dados);
       toast('Pedido atualizado!');
@@ -10026,7 +10177,9 @@ window.savePedido=async function(){
       dados.criadaPor=me.nome;
       dados.medida34Analista=[];
       dados.medida34Gerente=[];
-      dados.checklistDocumental=[];
+      dados.checklistDocumental=acaoAnalista==='Enviado para Projeto'
+        ?buildChecklistFromTemplate(tipoSolicitacao, flagOrgaoPublico):[];
+      dados.checklistConcluido=false;
       await addDoc(collection(db,'pedidos'), dados);
       toast('Pedido criado!');
     }
