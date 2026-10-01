@@ -419,10 +419,6 @@
   <div class="modal-section" id="pedidoChecklistWrap" style="display:none">
     <div class="modal-section-title">✅ Checklist Documental (Estagiário)</div>
     <div id="checklistItemsList"></div>
-    <div id="checklistAddWrap" style="display:flex;gap:8px;margin-top:10px">
-      <input type="text" id="pdNovoDocumentoChecklist" placeholder="Nome do documento a adicionar" style="flex:1">
-      <button type="button" class="btn btn-secondary btn-sm" onclick="addChecklistItemAdHoc()">+ Adicionar</button>
-    </div>
     <div class="fg-grid" style="margin-top:12px">
       <div class="fg"><label>Data de Retorno do Projetista</label><input type="date" id="pdDataRetornoProjetista"></div>
       <div class="fg" id="fgLatLong" style="display:none">
@@ -1009,6 +1005,39 @@
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeUserModal()">Cancelar</button>
     <button class="btn btn-primary" id="btnSalvarUser" onclick="saveUser()">Criar Usuário</button>
+  </div>
+ </div>
+</div>
+
+<!-- MODAL CONFIGURAR CHECKLIST (por tipo de solicitação) -->
+<div class="overlay" id="ovChecklistConfig">
+ <div class="modal modal-sm">
+  <h2>Configurar Checklist por Tipo de Solicitação</h2>
+  <div class="fg">
+    <label>Tipo de Solicitação</label>
+    <select id="cfgTipoSolicitacao" onchange="renderConfigChecklistDocs()">
+      <option value="">— selecione —</option>
+      <option value="Alimentadores">Alimentadores</option>
+      <option value="Equipamentos Especiais">Equipamentos Especiais</option>
+      <option value="Ext. para Ilum. Pública">Ext. para Ilum. Pública</option>
+      <option value="Interligação Proj. Particular">Interligação Proj. Particular</option>
+      <option value="Ligação nova Rural">Ligação nova Rural</option>
+      <option value="Ligação Nova Urbana">Ligação Nova Urbana</option>
+      <option value="Loteamento – Conexão">Loteamento – Conexão</option>
+      <option value="Melhorias">Melhorias</option>
+      <option value="Outros (Descrever)">Outros (Descrever)</option>
+      <option value="PVNT">PVNT</option>
+      <option value="Remoção e Deslocamento">Remoção e Deslocamento</option>
+      <option value="Troca de Padrão">Troca de Padrão</option>
+    </select>
+  </div>
+  <div id="cfgChecklistDocsList" style="margin:10px 0"></div>
+  <div style="display:flex;gap:8px">
+    <input type="text" id="cfgNovoDocumento" placeholder="Nome do documento" style="flex:1">
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addDocToTemplate()">+ Adicionar</button>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeChecklistConfigModal()">Fechar</button>
   </div>
  </div>
 </div>
