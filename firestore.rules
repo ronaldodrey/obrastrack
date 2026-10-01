@@ -61,8 +61,8 @@ service cloud.firestore {
     match /pedidos/{id} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
-      // Etapa 1: estagiario e adm_odi ainda não escrevem em pedidos (entra nas próximas etapas).
-      allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
+      // Etapa 2: estagiario pode atualizar (checklist documental). adm_odi entra na próxima etapa (análise documental).
+      allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente' || perfil() == 'estagiario');
       allow delete: if request.auth != null && perfil() == 'gerente';
     }
     // Comentários/avisos por obra
