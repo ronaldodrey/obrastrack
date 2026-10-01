@@ -1305,6 +1305,7 @@ function celulaPrazo(dias){
 }
 
 // ── MONITOR DE PRAZOS ─────────────────────────────────────────────────
+let _monitorCardCounter = 0;
 window._exportMonitorCSV = function(btn){
   const tipo   = btn.dataset.tipo   || '';
   const titulo = btn.dataset.titulo || 'monitor';
@@ -1388,9 +1389,10 @@ function renderMonitorPrazosTipo_inner(list){
       cnt.breve ? `<span style="background:#FBBF24;color:#000;padding:1px 7px;border-radius:10px;font-size:9px">⚡ ${cnt.breve} ≤5d</span>` : '',
     ].filter(Boolean).join(' ');
     const ROW_LIMIT = 15; // primeiras linhas visíveis
-    // Store data for clean CSV export (avoids DOM scraping issues)
+    // Store data for clean CSV export using unique card ID (avoids tipo collision)
     if(!window._monitorListas) window._monitorListas = {};
-    window._monitorListas[tipo] = lista.map(x=>({
+    const _cardId = 'card_' + (++_monitorCardCounter);
+    window._monitorListas[_cardId] = lista.map(x=>({
       numero: x.o.numero,
       prazo: fnPrazo(x.o) ? fmtTxt(fnPrazo(x.o)) : '—',
       situacao: x.dias<0 ? 'Vencida há '+Math.abs(x.dias)+'d' : x.dias===0 ? 'Vence hoje' : x.dias+'d restantes',
@@ -1435,7 +1437,7 @@ function renderMonitorPrazosTipo_inner(list){
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             ${badges}
-            ${me.perfil==='gerente'?`<button onclick="window._exportMonitorCSV(this)" data-titulo="${titulo}" data-tipo="${tipo}" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;white-space:nowrap">⬇️ Exportar CSV</button>`:''}
+            ${me.perfil==='gerente'?`<button onclick="window._exportMonitorCSV(this)" data-titulo="${titulo}" data-tipo="${_cardId}" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;white-space:nowrap">⬇️ Exportar CSV</button>`:''}
           </div>
         </div>
         ${!linhas
