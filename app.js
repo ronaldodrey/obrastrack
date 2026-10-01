@@ -1306,28 +1306,23 @@ function celulaPrazo(dias){
 
 // ── MONITOR DE PRAZOS ─────────────────────────────────────────────────
 window._exportMonitorCSV = function(btn){
-  // Find the closest table in the card
-  const card = btn.closest('div[style*="border-radius:10px"]');
-  if(!card) return;
+  const tipo   = btn.dataset.tipo   || '';
   const titulo = btn.dataset.titulo || 'monitor';
-  const rows = card.querySelectorAll('tbody tr');
-  let csv = '\uFEFFNota,Prazo,Situação,Cidade,Fiscal,Empreiteira\n';
-  rows.forEach(tr=>{
-    const cells = tr.querySelectorAll('td');
-    if(cells.length >= 6){
-      const row = Array.from(cells).slice(0,6).map(td=>{
-        const text = td.innerText||td.textContent||'';
-        return '"'+text.trim().replace(/"/g,'""')+'"';
-      });
-      csv += row.join(',')+',\n';
-    }
-  });
+  const dados  = (window._monitorListas||{})[tipo];
+  if(!dados||!dados.length){ toast('Nenhum dado para exportar.','warn'); return; }
+
+  // Build clean CSV from stored data (not DOM)
+  const esc = v => '"'+String(v||'').replace(/"/g,'""')+'"';
+  const header = 'Nota,Prazo,Situação,Cidade,Fiscal,Empreiteira';
+  const rows   = dados.map(r=>[r.numero,r.prazo,r.situacao,r.cidade,r.fiscal,r.empreiteira].map(esc).join(','));
+  const csv    = '\uFEFF' + header + '\n' + rows.join('\n');
+
   const filename = 'monitor_'+titulo.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase()+'.csv';
   const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = filename;
   a.click();
-  toast('✓ CSV exportado: '+filename,'ok');
+  toast('✓ Exportado '+dados.length+' obras — '+filename,'ok');
 };
 
 function renderMonitorPrazos(list){
@@ -1393,6 +1388,16 @@ function renderMonitorPrazosTipo_inner(list){
       cnt.breve ? `<span style="background:#FBBF24;color:#000;padding:1px 7px;border-radius:10px;font-size:9px">⚡ ${cnt.breve} ≤5d</span>` : '',
     ].filter(Boolean).join(' ');
     const ROW_LIMIT = 15; // primeiras linhas visíveis
+    // Store data for clean CSV export (avoids DOM scraping issues)
+    if(!window._monitorListas) window._monitorListas = {};
+    window._monitorListas[tipo] = lista.map(x=>({
+      numero: x.o.numero,
+      prazo: fnPrazo(x.o) ? fmtTxt(fnPrazo(x.o)) : '—',
+      situacao: x.dias<0 ? 'Vencida há '+Math.abs(x.dias)+'d' : x.dias===0 ? 'Vence hoje' : x.dias+'d restantes',
+      cidade: x.o.cidade||'',
+      fiscal: x.o.fiscal||'',
+      empreiteira: x.o.empreiteira||''
+    }));
     const mkRow = x => {
       const d = x.dias;
       const cor2 = d < 0 ? '#EF4444' : d === 0 ? '#F97316' : d <= 5 ? '#FBBF24' : d <= 15 ? '#F59E0B' : '#6b7280';
