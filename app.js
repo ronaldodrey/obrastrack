@@ -264,7 +264,7 @@ async function iniciarApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
   const rb=document.getElementById('hRole');
-  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário'};
+  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário','analista':'Analista','adm_odi':'Adm. ODI'};
   rb.textContent=perfilLabels[me.perfil]||me.perfil;
   rb.className='role-badge role-'+me.perfil;
   // Ensure role badge color for new profiles
@@ -280,9 +280,11 @@ async function iniciarApp(){
   const canSeeAbertura   = me.perfil==='gerente' || isAdmOdi;
   const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='empreiteira'||isAdmOdi;
   const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
+  const canSeePedidos = ['analista','estagiario','adm_odi','gerente'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
+    ...(canSeePedidos?[['pgPedidos','📋 Pedidos']]:[]),
     ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
@@ -295,7 +297,6 @@ async function iniciarApp(){
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
   if(['gerente','fiscal','fiscal_adm'].includes(me.perfil)) tabs.push(['pgOtimizacaoPort','🌐 Portfólio']);
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
-  if(me.perfil==='adm_odi'){ tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML =
     tabs.map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
@@ -347,6 +348,7 @@ window.showPage=function(id){
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
+  if(id==='pgPedidos') renderPedidos();
   if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
@@ -626,40 +628,6 @@ function renderDashGerente(list, listAll){
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">Painel de Empreiteiras</div>';
   html += tabelaResumoEmpreiteiras(list);
   // ODI obras have their own monitor in pgDashOdi
-  // ── Cards Ag. Fiscalização / Medição / Med.280 — todos os fiscais ──────────
-  const _gAtivas = list.filter(o=>!o.cancelado&&!o.armazenado&&o.tipo!=='ODI');
-  const _fimMesG = new Date(new Date().getFullYear(),new Date().getMonth()+1,0).toISOString().split('T')[0];
-  const _gAgFisc = _gAtivas.filter(o=>o.conclusao&&!o.fiscalizacao);
-  const _gAgMed  = _gAtivas.filter(o=>o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o));
-  const _gMed280 = _gAtivas.filter(o=>{
-    if(!o.conclusao||!o.kaffa||!o.medida230||o.medida280||temMedicaoFinal(o)) return false;
-    const _p=prazoMedida280(o); return _p&&_p<=_fimMesG;
-  });
-  if(_gAgFisc.length||_gAgMed.length||_gMed280.length){
-    function _gCardList(lista,cor){
-      return lista.length===0?'<span style="font-size:10px;color:var(--muted)">Nenhuma. ✓</span>':
-        lista.slice(0,24).map(o=>`<span onclick="openObraModal('${o.id}')" style="font-size:10px;cursor:pointer;padding:1px 6px;border-radius:4px;border:1px solid ${cor}44;background:${cor}11;white-space:nowrap" title="${o.fiscal||'—'} · ${o.cidade||'—'}">${o.numero}</span>`).join(' ')
-        +(lista.length>24?`<span style="font-size:9px;color:var(--muted)"> +${lista.length-24}</span>`:'');
-    }
-    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px">
-      <div style="font-weight:800;font-size:14px;margin-bottom:12px">📋 Situação Geral — Todos os Fiscais</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:10px;font-weight:700;color:#EAB308;margin-bottom:6px">⏳ Ag. Fiscalização (${_gAgFisc.length})</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gAgFisc,'#EAB308')}</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:10px;font-weight:700;color:#6366F1;margin-bottom:6px">📐 Ag. Medição — Kaffa OK (${_gAgMed.length})</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gAgMed,'#6366F1')}</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px">
-          <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">🔴 Med.280 — Fechar Este Mês + Atrasadas (${_gMed280.length})</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gMed280,'#EF4444')}</div>
-        </div>
-      </div>
-    </div>`;
-  }
-
   html += renderMonitorPrazos(list.filter(o=>o.tipo!=='ODI'));
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
   html += '<div class="vel-grid">' + velCards(list) + '</div>';
@@ -1610,9 +1578,9 @@ window.sortObras = function(col){
 
 // toggleEnquadramento: ver definição completa abaixo
 window.toggleDescricaoODI = function(){
-  // "Livre" e "Loteamento" não precisam de campo de texto adicional
+  const val = document.getElementById('oDescricaoODI')?.value;
   const fgLivre = document.getElementById('fgDescricaoLivre');
-  if(fgLivre) fgLivre.style.display = 'none'; // campo de descrição livre removido
+  if(fgLivre) fgLivre.style.display = val==='Livre' ? '' : 'none';
 };
 
 function renderObras(){
@@ -7421,12 +7389,9 @@ function renderDashSummaryFiscal(minhas){
   );
   // med280urg: kaffa executado + medida230 aprovada + prazo med280 vence este mês
   const med280urg   = ativas.filter(o=>{
-    if(!o.conclusao||!o.kaffa||!o.medida230||o.medida280) return false;
-    // Inclui obras atrasadas (prazo já passou) E obras que vencem este mês
-    // Independente de medição parcial ou final já existir
-    if(temMedicaoFinal(o)) return false; // só exclui se tiver medição FINAL
+    if(!o.conclusao||!o.kaffa||!o.medida230||o.medicao||o.medida280) return false;
     const p=prazoMedida280(o);
-    return p && p<=fimMes; // fimMes já inclui as vencidas pois prazo<hoje<fimMes é verdadeiro quando atrasado
+    return p && p<=fimMes;
   });
 
   // agMed: exclui apenas med280urg (urgência maior); agFisc aparece em AMBOS os cards
@@ -9404,26 +9369,18 @@ function renderAcoesODI(obra){
     ));
   }
 
-  // ── 7. Pendências Documentais (Adm / Gerente) — visível junto com lançamento NF ──
-  if(isAdm && obra.nfEnviadaFlag){
+  // ── 7. Pendências Documentais (Adm / Gerente) ───────────────────────
+  if(isAdm && obra.nfLancadaData){
     const PEND_LOT=['Falta de nota fiscal','Falta de devolução de material',
       'Falta de contrato de incorporação assinado','Falta de COSIP assinada','BIM aprovado','Medida 320','Outros'];
-    const PEND_LIV=['Falta de nota fiscal','Falta de devolução de material','BIM aprovado','Medida 320','Outros'];
+    const PEND_LIV=['Falta de nota fiscal','Falta de devolução de material','Medida 320','Outros'];
     const pendList = obra.descricaoODI==='Loteamento' ? PEND_LOT : PEND_LIV;
     const pendAtivas = obra.pendenciasDocODI||[];
     sections.push(card('📄 Pendências Documentais',
       `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${pendList.map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer">
-          <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} 
-            onchange="odiTogglePendDoc('${oId}','${p}',this.checked);if('${p}'==='Outros'){const f=document.getElementById('fgPendDocOutros_${oId}');if(f)f.style.display=this.checked?'':'none';}"
-          > ${p}
+          <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} onchange="odiTogglePendDoc('${oId}','${p}',this.checked)"> ${p}
         </label>`).join('')}
-        <div id="fgPendDocOutros_${oId}" style="${pendAtivas.includes('Outros')?'':'display:none'};margin-top:6px">
-          <input type="text" id="pendDocOutrosText_${oId}" placeholder="Descreva a pendência documental..." 
-            value="${obra.pendenciaDocOutros||''}"
-            onchange="odiSalvarCampo('${oId}','pendenciaDocOutros',this.value)"
-            style="width:100%;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
-        </div>
       </div>
       ${pendAtivas.length>0
         ?`<div style="font-size:9px;color:#EF4444;font-weight:700">⚠️ ${pendAtivas.length} pendência(s) ativa(s)</div>`
@@ -9463,16 +9420,6 @@ function renderAcoesODI(obra){
       obra.medida280 ? badge(true,'Registrada em '+fmtD(obra.medida280),'','medida280')
       : dateField('odiMed280Data','Data da Medida 280','Registrar Medida 280',
           `odiSalvarCampo('${oId}','medida280',document.getElementById('odiMed280Data')?.value)`)
-    ));
-  }
-
-  // ── 0. Cancelar obra ODI (Adm / Gerente apenas) ──────────────────────
-  if(isAdm && !obra.armazenado){
-    sections.push(card('🚫 Cancelamento',
-      obra.cancelado
-        ? `<div style="color:#EF4444;font-size:10px;font-weight:700">⛔ Obra cancelada em ${fmtD(obra.dataCancelamento)}</div>
-           <button class="btn btn-sm btn-secondary" style="margin-top:6px;font-size:10px" onclick="odiSalvarCampo('${oId}','cancelado',false)">↩ Reativar obra</button>`
-        : `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#EF4444;border:1px solid #EF444455" onclick="if(confirm('Cancelar esta obra ODI?')){odiSalvarCampo('${oId}','cancelado',true);odiSalvarCampo('${oId}','dataCancelamento','${new Date().toISOString().split('T')[0]}');}">🚫 Cancelar Obra</button>`
     ));
   }
 
@@ -9835,3 +9782,486 @@ function renderDashAdmOdi(){
     </div>`;
 }
 window.renderDashAdmOdi = renderDashAdmOdi;
+
+// ══════════════════════════════════════════════════════
+//  MÓDULO: GERENCIAMENTO DE PEDIDOS  — Etapa 1
+//  (Abertura de Pedido pelo Analista + Medida 34)
+// ══════════════════════════════════════════════════════
+const MUNICIPIOS_ARLAG = ['ANITA GARIBALDI','BOCAINA DO SUL','BOM JARDIM DA SERRA','BOM RETIRO',
+  'CAMPO BELO DO SUL','CAPAO ALTO','CELSO RAMOS','CERRO NEGRO','CORREIA PINTO','CURITIBANOS',
+  'FREI ROGERIO','LAGES','OTACILIO COSTA','PAINEL','PALMEIRA','PONTE ALTA','PONTE ALTA DO NORTE',
+  'RIO RUFINO','SANTA CECILIA','SAO CRISTOVAO DO SUL','SAO JOAQUIM','SAO JOSE DO CERRITO','URUBICI','URUPEMA'];
+
+const TIPOS_SOLICITACAO = {
+  'Alimentadores':                 {tipoPedido:'R2', prazoDias:60},
+  'Equipamentos Especiais':        {tipoPedido:'R2', prazoDias:60},
+  'Ext. para Ilum. Pública':       {tipoPedido:'R1', prazoDias:45},
+  'Interligação Proj. Particular': {tipoPedido:'R1', prazoDias:30},
+  'Ligação nova Rural':            {tipoPedido:'R1', prazoDias:30},
+  'Ligação Nova Urbana':           {tipoPedido:'R1', prazoDias:30},
+  'Loteamento – Conexão':          {tipoPedido:'R1', prazoDias:30},
+  'Melhorias':                     {tipoPedido:'R2', prazoDias:60},
+  'Outros (Descrever)':            {tipoPedido:'R1', prazoDias:30},
+  'PVNT':                          {tipoPedido:'R2', prazoDias:30},
+  'Remoção e Deslocamento':        {tipoPedido:'R1', prazoDias:45},
+  'Troca de Padrão':               {tipoPedido:'R1', prazoDias:30},
+};
+
+// Checklist padrão por tipo de solicitação — editável pelo Gerente nas próximas etapas.
+// Mantido aqui como referência de dados para a Etapa 2 (checklist do Estagiário).
+const CHECKLIST_PADRAO = {
+  'PVNT':                    ['Relatório CQDE'],
+  'Ext. para Ilum. Pública': ['Ofício Prefeitura','Lei de Criação da Via'],
+  'Ligação nova Rural':      ['Declaração de Não APP','Autorização de Passagem do Solicitante','Autorização de Passagem de Terceiros','Matrícula Georreferenciada'],
+};
+
+const PROJETISTAS_PEDIDO = ['Tonimar','Valdir','Claudionei','Não informado','Copia','Jucimar Outro'];
+
+const ACOES_ANALISTA = ['Enviado para Projeto','Liberado sem Obra','Cancelado','Abertura de Obra (Loteamento)','Abertura de Obra (Iluminação Pública)'];
+
+let pedidos=[], unsubPedidos=null;
+
+function podeGerenciarPedidos(){ return me && ['analista','gerente'].includes(me.perfil); }
+
+// Status dinâmico — recalculado a cada salvamento a partir dos dados atuais do pedido.
+// Segue exatamente a esteira de 9 estados + 4 encerramentos definida para o módulo.
+function statusNecessitaAnaliseDocumental(p){ return p.tipoSolicitacao==='Ligação nova Rural'; }
+function computeStatusPedido(p){
+  if(!p.acaoAnalista) return 'Analista Verificando';
+  if(p.acaoAnalista==='Liberado sem Obra') return 'Encerrado – Liberado sem Obra';
+  if(p.acaoAnalista==='Cancelado') return 'Encerrado – Cancelado';
+  if(p.acaoAnalista==='Abertura de Obra (Loteamento)') return 'Encaminhado ODI – Loteamento';
+  if(p.acaoAnalista==='Abertura de Obra (Iluminação Pública)') return 'Encaminhado ODI – Iluminação Pública';
+  // acaoAnalista === 'Enviado para Projeto' — segue a esteira dinâmica
+  const despachado=!!p.dataEncaminhamentoProjetista;
+  if(!despachado) return 'Analista Verificando';
+  const checklistOk=!!p.checklistConcluido;
+  const precisaAnalise=statusNecessitaAnaliseDocumental(p);
+  const analiseOk=!precisaAnalise || !!p.analiseDocumentalConcluida;
+  const projetoEntregue=!!p.dataRetornoProjetista;
+  const gerenteValidou=!!p.validacaoGerenteOk;
+  const enquadrado=!!p.dataEnquadramento;
+  if(enquadrado) return 'Pedido atendido – Orçamento encaminhado';
+  if(gerenteValidou) return 'Aguardando Enquadramento';
+  if(projetoEntregue){
+    if(!checklistOk) return 'Aguardando check-list documental e análise documental';
+    if(!analiseOk) return 'Aguardando análise documental';
+    return 'Aguardando Validação do projeto';
+  }
+  if(!checklistOk) return 'Aguardando Projeto e check-list documental';
+  if(!analiseOk) return 'Aguardando Projeto sem análise documental';
+  return 'Aguardando Projeto com análise documental';
+}
+function statusEhEncerrado(status){ return !!status && status.indexOf('Encerrado')===0; }
+// Pendência documental: checklist foi concluído mas ainda há documento(s) não entregue(s).
+function checklistTemPendencia(p){
+  return !!p.checklistConcluido && (p.checklistDocumental||[]).some(i=>i.status!=='entregue');
+}
+
+// Template do checklist por tipo de solicitação — armazenado em config/checklistTemplates,
+// editável só pelo Gerente (tela de configuração). CHECKLIST_PADRAO serve de valor inicial
+// até o Gerente configurar/alterar pela tela do sistema.
+let checklistTemplates={...CHECKLIST_PADRAO};
+let _templatesLoaded=false;
+async function loadChecklistTemplates(){
+  try{
+    const snap=await getDoc(doc(db,'config','checklistTemplates'));
+    if(snap.exists()) checklistTemplates={...CHECKLIST_PADRAO, ...snap.data()};
+  }catch(e){ console.warn('Checklist templates: usando valores padrão.', e); }
+}
+function ensureChecklistTemplatesLoaded(){ if(_templatesLoaded) return; _templatesLoaded=true; loadChecklistTemplates(); }
+function getChecklistTemplate(tipo){ return checklistTemplates[tipo]||[]; }
+
+function buildChecklistFromTemplate(tipo, flagOrgaoPublico){
+  const docs=[...getChecklistTemplate(tipo)];
+  if(flagOrgaoPublico && !docs.includes('Ofício')) docs.push('Ofício');
+  return docs.map(d=>({documento:d, status:'pendente', dataEntrega:null, conferidoPor:null}));
+}
+function podeEditarChecklist(){ return me && ['estagiario','analista','gerente'].includes(me.perfil); }
+
+function periodosMedida34(p){ return [...(p.medida34Analista||[]),...(p.medida34Gerente||[])]; }
+function medida34Ativa(p){ return periodosMedida34(p).some(x=>!x.fim); }
+function diasPausadosPedido(p){
+  let dias=0;
+  periodosMedida34(p).forEach(per=>{
+    const fim = per.fim || hoje().toISOString().split('T')[0];
+    const d = diff(per.inicio, fim);
+    if(d>0) dias+=d;
+  });
+  return dias;
+}
+function prazoLimitePedido(p){
+  const cfg=TIPOS_SOLICITACAO[p.tipoSolicitacao];
+  if(!cfg||!p.dataAberturaPedido) return null;
+  // Soma prazo base + dias pausados numa única chamada — addDias trata 0 como "sem valor"
+  // e cortaria o cálculo se os dias pausados (caso comum: nenhuma Medida 34 ainda) fossem somados à parte.
+  const totalDias=cfg.prazoDias + diasPausadosPedido(p);
+  return addDias(p.dataAberturaPedido, totalDias);
+}
+
+function loadPedidosListener(){
+  if(unsubPedidos) return;
+  const q=query(collection(db,'pedidos'), orderBy('dataAberturaPedido','desc'));
+  unsubPedidos=onSnapshot(q,snap=>{
+    pedidos=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const active=document.querySelector('.page.active');
+    if(active?.id==='pgPedidos') renderPedidos();
+  });
+}
+
+function renderPedidos(){
+  loadPedidosListener();
+  ensureChecklistTemplatesLoaded();
+  const cont=document.getElementById('pgPedidosContent');
+  if(!cont) return;
+  const podeCriar=podeGerenciarPedidos();
+  const podeConfigurarChecklist=me.perfil==='gerente';
+  const hojeStr=hoje().toISOString().split('T')[0];
+  const rows=pedidos.map(p=>{
+    const prazo=prazoLimitePedido(p);
+    const pausado=medida34Ativa(p);
+    const encerrado=statusEhEncerrado(p.status);
+    const atraso=!encerrado && prazo && !pausado && prazo<hojeStr;
+    const pendenciaDoc=checklistTemPendencia(p);
+    return `<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="openPedidoModal('${p.id}')">
+      <td style="padding:8px">${p.nota||'—'}</td>
+      <td style="padding:8px">${p.tipoSolicitacao||'—'}</td>
+      <td style="padding:8px">${p.municipio||'—'}${p.flagOrgaoPublico?' 🏛️':''}</td>
+      <td style="padding:8px">${p.status||'—'}${pausado?' <span style="color:#F59E0B;font-weight:700">⏸️ Medida 34</span>':''}${pendenciaDoc?' <span style="color:#EF4444;font-weight:700">⚠️ Pendência Documental</span>':''}</td>
+      <td style="padding:8px;${atraso?'color:#EF4444;font-weight:700':''}">${prazo?fmtTxt(prazo):'—'}</td>
+    </tr>`;
+  }).join('');
+  cont.innerHTML=`
+    <div class="tbl-head">
+      <div class="page-title">Gerenciamento de Pedidos</div>
+      <div style="display:flex;gap:8px">
+        ${podeConfigurarChecklist?'<button class="btn btn-secondary btn-sm" onclick="openChecklistConfigModal()">⚙️ Configurar Checklist</button>':''}
+        ${podeCriar?'<button class="btn btn-primary btn-sm" onclick="openPedidoModal()">+ Novo Pedido</button>':''}
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:8px;text-align:left">Nota</th>
+          <th style="padding:8px;text-align:left">Solicitação</th>
+          <th style="padding:8px;text-align:left">Município</th>
+          <th style="padding:8px;text-align:left">Status</th>
+          <th style="padding:8px;text-align:left">Prazo Enquadramento</th>
+        </tr></thead>
+        <tbody>${rows||'<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--muted)">Nenhum pedido cadastrado.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+window.renderPedidos=renderPedidos;
+
+window.onTipoSolicitacaoChange=function(){
+  const t=document.getElementById('pdTipoSolicitacao').value;
+  const cfg=TIPOS_SOLICITACAO[t];
+  document.getElementById('pdTipoPedidoPreview').textContent=cfg?`${cfg.tipoPedido} · prazo base: ${cfg.prazoDias} dias`:'—';
+};
+window.onAcaoAnalistaChange=function(){
+  const a=document.getElementById('pdAcaoAnalista').value;
+  document.getElementById('fgProjetista').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgDataEncaminhamento').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgMotivoCancelamento').style.display=a==='Cancelado'?'flex':'none';
+};
+
+function renderMedida34Status(p){
+  const ativaA=(p?.medida34Analista||[]).some(x=>!x.fim);
+  const ativaG=(p?.medida34Gerente||[]).some(x=>!x.fim);
+  const elA=document.getElementById('medida34AnalistaStatus');
+  const elG=document.getElementById('medida34GerenteStatus');
+  if(elA) elA.innerHTML=ativaA?'<span style="color:#F59E0B;font-weight:700">⏸️ Ativa</span>':'<span style="color:#22C55E">Inativa</span>';
+  if(elG) elG.innerHTML=ativaG?'<span style="color:#F59E0B;font-weight:700">⏸️ Ativa</span>':'<span style="color:#22C55E">Inativa</span>';
+  const btnA=document.getElementById('btnToggleMedida34Analista'); if(btnA) btnA.textContent=ativaA?'Desativar':'Ativar';
+  const btnG=document.getElementById('btnToggleMedida34Gerente'); if(btnG) btnG.textContent=ativaG?'Desativar':'Ativar';
+  const secA=document.getElementById('secMedida34Analista'); if(secA) secA.style.display=['analista','gerente'].includes(me.perfil)?'block':'none';
+  const secG=document.getElementById('secMedida34Gerente'); if(secG) secG.style.display=me.perfil==='gerente'?'block':'none';
+}
+
+window.toggleMedida34=async function(quem){
+  const id=document.getElementById('pedidoId').value;
+  if(!id){ toast('Salve o pedido antes de usar a Medida 34.','err'); return; }
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const campo=quem==='analista'?'medida34Analista':'medida34Gerente';
+  const lista=[...(p[campo]||[])];
+  const ativa=lista.find(x=>!x.fim);
+  const hojeStr=hoje().toISOString().split('T')[0];
+  if(ativa){
+    ativa.fim=hojeStr;
+  } else {
+    const motivo=prompt('Motivo da Medida 34:');
+    if(motivo===null) return;
+    lista.push({inicio:hojeStr, fim:null, motivo:(motivo||'').trim(), registradoPor:me.nome});
+  }
+  try{
+    await updateDoc(doc(db,'pedidos',id), {[campo]:lista, atualizadaEm:serverTimestamp()});
+    toast(ativa?'Medida 34 removida.':'Medida 34 ativada.');
+  }catch(e){ console.error(e); toast('Erro ao atualizar Medida 34.','err'); }
+};
+
+function refreshChecklistSection(p){
+  const warn=document.getElementById('checklistPendenciaWarning');
+  if(warn){
+    const pendentes=(p.checklistDocumental||[]).filter(i=>i.status!=='entregue').map(i=>i.documento);
+    if(checklistTemPendencia(p)){
+      warn.style.display='block';
+      warn.textContent='⚠️ Pendência Documental — checklist concluído com documento(s) não entregue(s): '+pendentes.join(', ');
+    } else { warn.style.display='none'; }
+  }
+  const btnConcluir=document.getElementById('btnConcluirChecklist');
+  if(btnConcluir) btnConcluir.textContent=p.checklistConcluido?'Reabrir Checklist':'Concluir Checklist';
+  const statusEl=document.getElementById('checklistConcluidoStatus');
+  if(statusEl) statusEl.innerHTML=p.checklistConcluido
+    ?'<span style="color:#22C55E;font-weight:700">✅ Checklist concluído</span>'
+    :'<span style="color:#F59E0B">⏳ Checklist em andamento</span>';
+  renderChecklistItems(p);
+}
+
+function renderChecklistItems(p){
+  const lista=p.checklistDocumental||[];
+  const el=document.getElementById('checklistItemsList');
+  if(!el) return;
+  const editavel=podeEditarChecklist();
+  if(!lista.length){ el.innerHTML='<div style="font-size:11px;color:var(--muted)">Este tipo de solicitação não tem documentos configurados no checklist. (Gerente pode configurar em "⚙️ Configurar Checklist".)</div>'; return; }
+  el.innerHTML=lista.map((item,idx)=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:${editavel?'pointer':'default'}">
+      <input type="checkbox" style="width:auto" ${item.status==='entregue'?'checked':''} ${editavel?'':'disabled'} onchange="toggleChecklistItem(${idx})">
+      <span style="font-size:12px;flex:1">${item.documento}</span>
+      ${item.status==='entregue'&&item.dataEntrega?`<span style="color:var(--muted);font-size:10px">${fmtTxt(item.dataEntrega)}${item.conferidoPor?' · '+item.conferidoPor:''}</span>`:''}
+    </label>`).join('');
+}
+
+window.toggleChecklistItem=async function(idx){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const lista=[...(p.checklistDocumental||[])];
+  const item={...lista[idx]};
+  if(!item) return;
+  if(item.status==='entregue'){ item.status='pendente'; item.dataEntrega=null; item.conferidoPor=null; }
+  else { item.status='entregue'; item.dataEntrega=hoje().toISOString().split('T')[0]; item.conferidoPor=me.nome; }
+  lista[idx]=item;
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistDocumental:lista, atualizadaEm:serverTimestamp()});
+    refreshChecklistSection({...p, checklistDocumental:lista});
+  }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
+};
+
+// ── Configuração do checklist (Gerente) ────────────────
+window.openChecklistConfigModal=function(){
+  document.getElementById('cfgTipoSolicitacao').value='';
+  document.getElementById('cfgChecklistDocsList').innerHTML='';
+  document.getElementById('ovChecklistConfig').classList.add('open');
+};
+window.closeChecklistConfigModal=function(){ document.getElementById('ovChecklistConfig').classList.remove('open'); };
+
+window.renderConfigChecklistDocs=function(){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  const el=document.getElementById('cfgChecklistDocsList');
+  if(!tipo){ el.innerHTML=''; return; }
+  const docs=getChecklistTemplate(tipo);
+  el.innerHTML=docs.length
+    ? docs.map((d,idx)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:12px">${d}</span>
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeDocFromTemplate(${idx})">🗑️</button>
+      </div>`).join('')
+    : '<div style="font-size:11px;color:var(--muted)">Nenhum documento configurado para este tipo.</div>';
+};
+
+window.addDocToTemplate=async function(){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  if(!tipo){ toast('Selecione o tipo de solicitação.','err'); return; }
+  const input=document.getElementById('cfgNovoDocumento');
+  const nome=(input.value||'').trim();
+  if(!nome){ toast('Informe o nome do documento.','err'); return; }
+  const docs=[...getChecklistTemplate(tipo), nome];
+  checklistTemplates[tipo]=docs;
+  try{
+    await setDoc(doc(db,'config','checklistTemplates'), {[tipo]:docs}, {merge:true});
+    input.value='';
+    renderConfigChecklistDocs();
+    toast('Documento adicionado ao checklist deste tipo!');
+  }catch(e){ console.error(e); toast('Erro ao salvar configuração.','err'); }
+};
+
+window.removeDocFromTemplate=async function(idx){
+  const tipo=document.getElementById('cfgTipoSolicitacao').value;
+  const docs=[...getChecklistTemplate(tipo)];
+  docs.splice(idx,1);
+  checklistTemplates[tipo]=docs;
+  try{
+    await setDoc(doc(db,'config','checklistTemplates'), {[tipo]:docs}, {merge:true});
+    renderConfigChecklistDocs();
+    toast('Documento removido do checklist deste tipo.');
+  }catch(e){ console.error(e); toast('Erro ao salvar configuração.','err'); }
+};
+
+window.toggleChecklistConcluido=async function(){
+  const id=document.getElementById('pedidoId').value;
+  const p=pedidos.find(x=>x.id===id);
+  if(!p) return;
+  const checklistConcluido=!p.checklistConcluido;
+  const status=computeStatusPedido({...p, checklistConcluido});
+  try{
+    await updateDoc(doc(db,'pedidos',id), {checklistConcluido, status, atualizadaEm:serverTimestamp()});
+    toast(checklistConcluido?'Checklist concluído!':'Checklist reaberto.');
+    refreshChecklistSection({...p, checklistConcluido, status});
+  }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
+};
+
+window.salvarAcompanhamentoChecklist=async function(){
+  const btn=document.getElementById('btnSalvarChecklist');
+  btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const id=document.getElementById('pedidoId').value;
+    const p=pedidos.find(x=>x.id===id);
+    if(!p) return;
+    const dataRetornoProjetista=document.getElementById('pdDataRetornoProjetista').value||null;
+    const latInput=document.getElementById('pdLatitude'), lonInput=document.getElementById('pdLongitude');
+    const latitude=latInput?(latInput.value.trim()||null):null;
+    const longitude=lonInput?(lonInput.value.trim()||null):null;
+    const checklistFeedback=document.getElementById('pdChecklistFeedback').value.trim();
+    const status=computeStatusPedido({...p, dataRetornoProjetista});
+    await updateDoc(doc(db,'pedidos',id), {dataRetornoProjetista, latitude, longitude, checklistFeedback, status, atualizadaEm:serverTimestamp()});
+    toast('Acompanhamento salvo!');
+  }catch(e){ console.error(e); toast('Erro ao salvar.','err'); }
+  finally{ const b=document.getElementById('btnSalvarChecklist'); if(b){ b.disabled=false; b.textContent='Salvar Acompanhamento'; } }
+};
+
+window.openPedidoModal=function(id){
+  const isEdit=!!id;
+  document.getElementById('pedidoId').value=id||'';
+  document.getElementById('pedidoModalTit').textContent=isEdit?'Pedido':'Novo Pedido';
+  document.getElementById('pdNota').value='';
+  document.getElementById('pdTipoSolicitacao').value='';
+  document.getElementById('pdDataAbertura').value='';
+  document.getElementById('pdMunicipio').value='';
+  document.getElementById('pdFlagOrgaoPublico').checked=false;
+  document.getElementById('pdAcaoAnalista').value='';
+  document.getElementById('pdProjetista').value='';
+  document.getElementById('pdDataEncaminhamento').value='';
+  document.getElementById('pdMotivoCancelamento').value='';
+  const medidaSec=document.getElementById('pedidoMedida34Wrap');
+  const checklistSec=document.getElementById('pedidoChecklistWrap');
+  let p=null;
+  if(isEdit){
+    p=pedidos.find(x=>x.id===id);
+    if(p){
+      document.getElementById('pdNota').value=p.nota||'';
+      document.getElementById('pdTipoSolicitacao').value=p.tipoSolicitacao||'';
+      document.getElementById('pdDataAbertura').value=p.dataAberturaPedido||'';
+      document.getElementById('pdMunicipio').value=p.municipio||'';
+      document.getElementById('pdFlagOrgaoPublico').checked=!!p.flagOrgaoPublico;
+      document.getElementById('pdAcaoAnalista').value=p.acaoAnalista||'';
+      document.getElementById('pdProjetista').value=p.projetista||'';
+      document.getElementById('pdDataEncaminhamento').value=p.dataEncaminhamentoProjetista||'';
+      document.getElementById('pdMotivoCancelamento').value=p.motivoCancelamento||'';
+    }
+    medidaSec.style.display='block';
+  } else {
+    medidaSec.style.display='none';
+  }
+  // Checklist documental — só existe depois que o pedido foi enviado para projeto
+  if(isEdit && p && p.acaoAnalista==='Enviado para Projeto'){
+    checklistSec.style.display='block';
+    const editavel=podeEditarChecklist();
+    document.getElementById('pdDataRetornoProjetista').value=p.dataRetornoProjetista||'';
+    document.getElementById('pdChecklistFeedback').value=p.checklistFeedback||'';
+    document.getElementById('pdChecklistFeedback').disabled=!editavel;
+    document.getElementById('pdDataRetornoProjetista').disabled=!editavel;
+    const latLongWrap=document.getElementById('fgLatLong');
+    if(p.tipoSolicitacao==='Ligação nova Rural'){
+      latLongWrap.style.display='flex';
+      document.getElementById('pdLatitude').value=p.latitude||'';
+      document.getElementById('pdLongitude').value=p.longitude||'';
+      document.getElementById('pdLatitude').disabled=!editavel;
+      document.getElementById('pdLongitude').disabled=!editavel;
+    } else { latLongWrap.style.display='none'; }
+    document.getElementById('btnConcluirChecklist').style.display=editavel?'inline-flex':'none';
+    document.getElementById('btnSalvarChecklist').style.display=editavel?'inline-flex':'none';
+    refreshChecklistSection(p);
+  } else {
+    checklistSec.style.display='none';
+  }
+  onTipoSolicitacaoChange(); onAcaoAnalistaChange(); renderMedida34Status(p);
+  const podeEditar=podeGerenciarPedidos();
+  // Os campos do checklist (#pedidoChecklistWrap) têm sua própria regra de permissão (Estagiário inclusive)
+  // e já foram habilitados/desabilitados acima — não sobrescrever aqui.
+  document.querySelectorAll('#ovPedido input, #ovPedido select').forEach(el=>{
+    if(el.closest('#pedidoChecklistWrap')) return;
+    el.disabled=!podeEditar;
+  });
+  document.getElementById('btnSalvarPedido').style.display=podeEditar?'inline-flex':'none';
+  document.getElementById('btnExcluirPedido').style.display=(isEdit && podeGerenciarPedidos())?'inline-flex':'none';
+  document.getElementById('ovPedido').classList.add('open');
+};
+window.closePedidoModal=function(){ document.getElementById('ovPedido').classList.remove('open'); };
+
+window.deletePedido=async function(){
+  const id=document.getElementById('pedidoId').value;
+  if(!id) return;
+  const p=pedidos.find(x=>x.id===id);
+  if(!confirm(`Excluir o pedido ${p?.nota||''}? Essa ação não pode ser desfeita.`)) return;
+  try{
+    await deleteDoc(doc(db,'pedidos',id));
+    toast('Pedido excluído.');
+    closePedidoModal();
+  }catch(e){ console.error(e); toast('Erro ao excluir pedido.','err'); }
+};
+
+window.savePedido=async function(){
+  const btn=document.getElementById('btnSalvarPedido');
+  btn.disabled=true; btn.textContent='Salvando…';
+  try{
+    const id=document.getElementById('pedidoId').value;
+    const nota=document.getElementById('pdNota').value.trim();
+    const tipoSolicitacao=document.getElementById('pdTipoSolicitacao').value;
+    const dataAberturaPedido=document.getElementById('pdDataAbertura').value;
+    const municipio=document.getElementById('pdMunicipio').value;
+    const flagOrgaoPublico=document.getElementById('pdFlagOrgaoPublico').checked;
+    const acaoAnalista=document.getElementById('pdAcaoAnalista').value;
+    if(!nota||!tipoSolicitacao||!dataAberturaPedido||!municipio||!acaoAnalista){
+      toast('Preencha todos os campos obrigatórios.','err'); return;
+    }
+    if(acaoAnalista==='Cancelado' && !document.getElementById('pdMotivoCancelamento').value.trim()){
+      toast('Informe o motivo do cancelamento.','err'); return;
+    }
+    if(acaoAnalista==='Enviado para Projeto' && (!document.getElementById('pdProjetista').value||!document.getElementById('pdDataEncaminhamento').value)){
+      toast('Informe o projetista e a data de encaminhamento.','err'); return;
+    }
+    const cfg=TIPOS_SOLICITACAO[tipoSolicitacao];
+    const existente=id?(pedidos.find(x=>x.id===id)||{}):{};
+    const dados={
+      nota, tipoSolicitacao, tipoPedido:cfg?cfg.tipoPedido:'', dataAberturaPedido, municipio, flagOrgaoPublico,
+      acaoAnalista,
+      projetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdProjetista').value:null,
+      dataEncaminhamentoProjetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdDataEncaminhamento').value:null,
+      motivoCancelamento: acaoAnalista==='Cancelado'?document.getElementById('pdMotivoCancelamento').value.trim():null,
+      atualizadaEm:serverTimestamp(),
+    };
+    // Status é recalculado a partir do estado completo do pedido (dados novos + o que já existia:
+    // checklist, análise documental, validação do gerente, enquadramento — preenchidos nas próximas etapas).
+    dados.status=computeStatusPedido({...existente, ...dados});
+    if(id){
+      await updateDoc(doc(db,'pedidos',id), dados);
+      toast('Pedido atualizado!');
+    } else {
+      dados.criadaEm=serverTimestamp();
+      dados.criadaPor=me.nome;
+      dados.medida34Analista=[];
+      dados.medida34Gerente=[];
+      dados.checklistDocumental=acaoAnalista==='Enviado para Projeto'
+        ?buildChecklistFromTemplate(tipoSolicitacao, flagOrgaoPublico):[];
+      dados.checklistConcluido=false;
+      await addDoc(collection(db,'pedidos'), dados);
+      toast('Pedido criado!');
+    }
+    closePedidoModal();
+  }catch(e){
+    console.error(e); toast('Erro ao salvar pedido.','err');
+  } finally {
+    btn.disabled=false; btn.textContent='Salvar';
+  }
+};
