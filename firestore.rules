@@ -63,7 +63,7 @@ service cloud.firestore {
       allow create: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
       // Etapa 2: estagiario pode atualizar (checklist documental). adm_odi entra na próxima etapa (análise documental).
       allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente' || perfil() == 'estagiario');
-      allow delete: if request.auth != null && perfil() == 'gerente';
+      allow delete: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
     }
     // Comentários/avisos por obra
     match /obras/{obraId}/comentarios/{commentId} {
