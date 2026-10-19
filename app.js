@@ -183,10 +183,11 @@ function statusSecundario(o){
   if(o.tipo==='ODI' && o.descricaoODI==='Loteamento'){
     extra += '<span class="st" style="color:#D97706;background:rgba(217,119,6,.2);border-color:#D9770655;margin-left:4px;font-weight:800"><span style="background:#D97706"></span>🏘️ Loteamento</span>';
   }
-  // Desligamento programado via SIMO importado
+  // Desligamento programado: via SIMO importado (_deslMap) OU campo na própria obra
   const deslEntry = (window._deslMap||{})[String(o.numero||'').trim()];
-  if(deslEntry && deslEntry.dataProgram){
-    const dtDesl = deslEntry.dataProgram.slice(0,10);
+  const dtDesl = deslEntry?.dataProgram?.slice(0,10)
+    || (o.dataDesligamento && !o.desligamentoCancelado ? o.dataDesligamento : null);
+  if(dtDesl){
     extra += `<span class="st" style="color:#7c6af7;background:rgba(124,106,247,.15);border-color:#7c6af744;margin-left:4px"><span style="background:#7c6af7"></span>⚡ Desl. ${fmtTxt(dtDesl)}</span>`;
   }
   if(o.pendencia && !o.pendenciaResolvida){
@@ -264,7 +265,7 @@ async function iniciarApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
   const rb=document.getElementById('hRole');
-  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário','analista':'Analista','adm_odi':'Adm. ODI'};
+  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário'};
   rb.textContent=perfilLabels[me.perfil]||me.perfil;
   rb.className='role-badge role-'+me.perfil;
   // Ensure role badge color for new profiles
@@ -280,7 +281,7 @@ async function iniciarApp(){
   const canSeeAbertura   = me.perfil==='gerente' || isAdmOdi;
   const canSeeFinanceiro = me.perfil==='gerente'||me.perfil==='fiscal'||me.perfil==='fiscal_adm'||me.perfil==='empreiteira'||isAdmOdi;
   const canSeeProgramas = ['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil);
-  const canSeePedidos = ['analista','estagiario','adm_odi','gerente'].includes(me.perfil);
+  const canSeePedidos  = ['analista','estagiario','adm_odi','gerente'].includes(me.perfil);
   const tabs=[
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
@@ -297,6 +298,7 @@ async function iniciarApp(){
   if(isEmpComOtim) tabs.push(['pgOtimizacao','⚡ Otimização']);
   if(['gerente','fiscal','fiscal_adm'].includes(me.perfil)) tabs.push(['pgOtimizacaoPort','🌐 Portfólio']);
   if(me.perfil==='gerente'){ tabs.push(['pgCarteira','📈 Carteira']); tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
+  if(me.perfil==='adm_odi'){ tabs.push(['pgEmpreiteiras','🏢 Empreiteiras']); tabs.push(['pgUsers','👥 Usuários']); }
   // genesis e estagiario: só dash e obras (read-only + ação específica)
   document.getElementById('tabBar').innerHTML =
     tabs.map(([id,lbl])=>`<div class="tab" data-page="${id}" onclick="showPage('${id}')">${lbl}</div>`).join('');
@@ -348,7 +350,6 @@ window.showPage=function(id){
   if(id==='pgCarteira') renderCarteira();
   if(id==='pgUsers') renderUsers();
   if(id==='pgEmpreiteiras') renderEmpreiteiras();
-  if(id==='pgPedidos') renderPedidos();
   if(id==='pgAbertura') renderAberturaObras();
   if(id==='pgAnalise'){ loadParamsFinanceiros().then(()=>renderAnaliseFinanceira()); }
   if(id==='pgProgramas') renderProgramas();
@@ -357,6 +358,7 @@ window.showPage=function(id){
   if(id==='pgDesligamentos') renderDesligamentos();
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
+  if(id==='pgPedidos') renderPedidos();
 };
 // Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
 window.switchObrasSubTab = function(tipo){
@@ -369,9 +371,10 @@ window.switchObrasSubTab = function(tipo){
 
 // ── FILTRO POR PERFIL ─────────────────────────────────
 function visibleObras(){
-  if(me.perfil==='gerente') return obras;
-  if(me.perfil==='fiscal')  return obras;
-  if(me.perfil==='genesis') return obras;   // só visualiza
+  if(me.perfil==='gerente')    return obras;
+  if(me.perfil==='fiscal')     return obras;
+  if(me.perfil==='fiscal_adm') return obras; // acesso administrativo — vê todas
+  if(me.perfil==='genesis')    return obras;   // só visualiza
   if(me.perfil==='estagiario') return obras; // visualiza + confirma armazenamento
   if(me.perfil==='empreiteira') return obras.filter(o=>o.empreiteira===me.vinculo);
   return [];
@@ -628,6 +631,40 @@ function renderDashGerente(list, listAll){
   html += '<div class="sect-title" style="margin-bottom:10px;margin-top:20px">Painel de Empreiteiras</div>';
   html += tabelaResumoEmpreiteiras(list);
   // ODI obras have their own monitor in pgDashOdi
+  // ── Cards Ag. Fiscalização / Medição / Med.280 — todos os fiscais ──────────
+  const _gAtivas = list.filter(o=>!o.cancelado&&!o.armazenado&&o.tipo!=='ODI');
+  const _fimMesG = new Date(new Date().getFullYear(),new Date().getMonth()+1,0).toISOString().split('T')[0];
+  const _gAgFisc = _gAtivas.filter(o=>o.conclusao&&!o.fiscalizacao);
+  const _gAgMed  = _gAtivas.filter(o=>o.conclusao&&(o.kaffaEntries||[]).some(k=>k.tipo==='final')&&!temMedicaoFinal(o));
+  const _gMed280 = _gAtivas.filter(o=>{
+    if(!o.conclusao||!o.kaffa||!o.medida230||o.medida280||temMedicaoFinal(o)) return false;
+    const _p=prazoMedida280(o); return _p&&_p<=_fimMesG;
+  });
+  if(_gAgFisc.length||_gAgMed.length||_gMed280.length){
+    function _gCardList(lista,cor){
+      return lista.length===0?'<span style="font-size:10px;color:var(--muted)">Nenhuma. ✓</span>':
+        lista.slice(0,24).map(o=>`<span onclick="openObraModal('${o.id}')" style="font-size:10px;cursor:pointer;padding:1px 6px;border-radius:4px;border:1px solid ${cor}44;background:${cor}11;white-space:nowrap" title="${o.fiscal||'—'} · ${o.cidade||'—'}">${o.numero}</span>`).join(' ')
+        +(lista.length>24?`<span style="font-size:9px;color:var(--muted)"> +${lista.length-24}</span>`:'');
+    }
+    html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px">
+      <div style="font-weight:800;font-size:14px;margin-bottom:12px">📋 Situação Geral — Todos os Fiscais</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:10px;font-weight:700;color:#EAB308;margin-bottom:6px">⏳ Ag. Fiscalização (${_gAgFisc.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gAgFisc,'#EAB308')}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:10px;font-weight:700;color:#6366F1;margin-bottom:6px">📐 Ag. Medição — Kaffa OK (${_gAgMed.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gAgMed,'#6366F1')}</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:10px">
+          <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">🔴 Med.280 — Fechar Este Mês + Atrasadas (${_gMed280.length})</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${_gCardList(_gMed280,'#EF4444')}</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   html += renderMonitorPrazos(list.filter(o=>o.tipo!=='ODI'));
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
   html += '<div class="vel-grid">' + velCards(list) + '</div>';
@@ -1578,9 +1615,9 @@ window.sortObras = function(col){
 
 // toggleEnquadramento: ver definição completa abaixo
 window.toggleDescricaoODI = function(){
-  const val = document.getElementById('oDescricaoODI')?.value;
+  // "Livre" e "Loteamento" não precisam de campo de texto adicional
   const fgLivre = document.getElementById('fgDescricaoLivre');
-  if(fgLivre) fgLivre.style.display = val==='Livre' ? '' : 'none';
+  if(fgLivre) fgLivre.style.display = 'none'; // campo de descrição livre removido
 };
 
 function renderObras(){
@@ -1836,16 +1873,8 @@ window.openObraModal=function(obraId){
       // Render ODI action panel
       setTimeout(()=>renderAcoesODI(obra),50);
 
-      // Fiscal: identification fields are read-only in ODI obras
+      // ODI: fiscal usa action buttons diretamente — ocultar botão salvar
       if(me.perfil==='fiscal'||me.perfil==='fiscal_adm'){
-        const ID_FIELDS = ['oNum','oTipo','oCidade','oEmp','oFiscalNome','oAbertura',
-          'oPrazo','oPrazoOpcao','oUSC','oULV','oEquipRef','oDescricao',
-          'oEnquadramento','oPrograma','oDescricaoODI','oDescricaoLivreODI'];
-        ID_FIELDS.forEach(id=>{
-          const el = document.getElementById(id);
-          if(el){ el.disabled=true; el.style.opacity='0.6'; }
-        });
-        // Hide save button — fiscal uses action buttons directly
         const btnSalvar = document.getElementById('btnSalvarObra');
         if(btnSalvar){ btnSalvar.style.display='none'; }
       }
@@ -2006,6 +2035,30 @@ window.openObraModal=function(obraId){
 
   // 2. Mostrar só o que cada perfil precisa — ignorado para obras ODI (têm secODIAcoes próprio)
   function showSec(id){ const el=document.getElementById(id); if(el) el.style.display='block'; }
+
+  // ── CONTROLE DE EDIÇÃO — CAMPOS DE IDENTIFICAÇÃO DA OBRA ─────────────
+  // Apenas gerente (qualquer obra) e adm_odi (obras ODI ou nova obra) podem
+  // editar os campos de identificação. Todos os demais ficam somente leitura.
+  const canEditIdentif = !isEdit
+    ? (p === 'gerente' || p === 'adm_odi')                          // nova obra
+    : (p === 'gerente' || (p === 'adm_odi' && obra?.tipo === 'ODI')); // obra existente
+  const IDENTIF_FIELDS = [
+    'oNum','oTipo','oCidade','oEmp','oFiscalSelect','oFiscalNome',
+    'oAbertura','oPrazo','oPrazoOpcao','oUSC','oULV','oEquipRef',
+    'oDescricao','oEnquadramento','oPrograma','oDescricaoODI','oDescricaoLivreODI'
+  ];
+  if(!canEditIdentif){
+    IDENTIF_FIELDS.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.disabled=true; el.style.opacity='0.7'; }
+    });
+  } else {
+    // Garante habilitação caso modal anterior tenha deixado campos desabilitados
+    IDENTIF_FIELDS.forEach(id=>{
+      const el=document.getElementById(id);
+      if(el){ el.disabled=false; el.style.opacity=''; }
+    });
+  }
 
   // secIdentif sempre visível (cabeçalho da obra) — exceto genesis/estagiario
   if(!isGenesis && !isEstagiario){
@@ -3460,7 +3513,13 @@ function aplicarFiltros(list) {
         (o.locaisTrabalho||[]).some(l=>(l.descricao||'').toLowerCase().includes(t));
       if(!found) return false;
     } // busca por número, descrição, cidade, empreiteira, fiscal, programa
-    if (f.status && statusOf(o) !== f.status) return false;
+    // Para fiscal/fiscal_adm: "Aguard. Fiscalização" inclui tbm obras já em
+    // "Encaminhar Cadastro Urgente" que ainda não foram fiscalizadas
+    if (f.status === 'Aguard. Fiscalização' && (me.perfil==='fiscal'||me.perfil==='fiscal_adm')){
+      if (!(o.conclusao && !o.fiscalizacao)) return false;
+    } else if (f.status && statusOf(o) !== f.status) {
+      return false;
+    }
     if (f.tipo && o.tipo !== f.tipo) return false;
     if (f.empreiteira && o.empreiteira !== f.empreiteira) return false;
     if (f.fiscal && o.fiscal !== f.fiscal) return false;
@@ -7389,9 +7448,12 @@ function renderDashSummaryFiscal(minhas){
   );
   // med280urg: kaffa executado + medida230 aprovada + prazo med280 vence este mês
   const med280urg   = ativas.filter(o=>{
-    if(!o.conclusao||!o.kaffa||!o.medida230||o.medicao||o.medida280) return false;
+    if(!o.conclusao||!o.kaffa||!o.medida230||o.medida280) return false;
+    // Inclui obras atrasadas (prazo já passou) E obras que vencem este mês
+    // Independente de medição parcial ou final já existir
+    if(temMedicaoFinal(o)) return false; // só exclui se tiver medição FINAL
     const p=prazoMedida280(o);
-    return p && p<=fimMes;
+    return p && p<=fimMes; // fimMes já inclui as vencidas pois prazo<hoje<fimMes é verdadeiro quando atrasado
   });
 
   // agMed: exclui apenas med280urg (urgência maior); agFisc aparece em AMBOS os cards
@@ -9369,18 +9431,26 @@ function renderAcoesODI(obra){
     ));
   }
 
-  // ── 7. Pendências Documentais (Adm / Gerente) ───────────────────────
-  if(isAdm && obra.nfLancadaData){
+  // ── 7. Pendências Documentais (Adm / Gerente) — visível junto com lançamento NF ──
+  if(isAdm && obra.nfEnviadaFlag){
     const PEND_LOT=['Falta de nota fiscal','Falta de devolução de material',
       'Falta de contrato de incorporação assinado','Falta de COSIP assinada','BIM aprovado','Medida 320','Outros'];
-    const PEND_LIV=['Falta de nota fiscal','Falta de devolução de material','Medida 320','Outros'];
+    const PEND_LIV=['Falta de nota fiscal','Falta de devolução de material','BIM aprovado','Medida 320','Outros'];
     const pendList = obra.descricaoODI==='Loteamento' ? PEND_LOT : PEND_LIV;
     const pendAtivas = obra.pendenciasDocODI||[];
     sections.push(card('📄 Pendências Documentais',
       `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${pendList.map(p=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer">
-          <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} onchange="odiTogglePendDoc('${oId}','${p}',this.checked)"> ${p}
+          <input type="checkbox" ${pendAtivas.includes(p)?'checked':''} 
+            onchange="odiTogglePendDoc('${oId}','${p}',this.checked);if('${p}'==='Outros'){const f=document.getElementById('fgPendDocOutros_${oId}');if(f)f.style.display=this.checked?'':'none';}"
+          > ${p}
         </label>`).join('')}
+        <div id="fgPendDocOutros_${oId}" style="${pendAtivas.includes('Outros')?'':'display:none'};margin-top:6px">
+          <input type="text" id="pendDocOutrosText_${oId}" placeholder="Descreva a pendência documental..." 
+            value="${obra.pendenciaDocOutros||''}"
+            onchange="odiSalvarCampo('${oId}','pendenciaDocOutros',this.value)"
+            style="width:100%;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
+        </div>
       </div>
       ${pendAtivas.length>0
         ?`<div style="font-size:9px;color:#EF4444;font-weight:700">⚠️ ${pendAtivas.length} pendência(s) ativa(s)</div>`
@@ -9420,6 +9490,16 @@ function renderAcoesODI(obra){
       obra.medida280 ? badge(true,'Registrada em '+fmtD(obra.medida280),'','medida280')
       : dateField('odiMed280Data','Data da Medida 280','Registrar Medida 280',
           `odiSalvarCampo('${oId}','medida280',document.getElementById('odiMed280Data')?.value)`)
+    ));
+  }
+
+  // ── 0. Cancelar obra ODI (Adm / Gerente apenas) ──────────────────────
+  if(isAdm && !obra.armazenado){
+    sections.push(card('🚫 Cancelamento',
+      obra.cancelado
+        ? `<div style="color:#EF4444;font-size:10px;font-weight:700">⛔ Obra cancelada em ${fmtD(obra.dataCancelamento)}</div>
+           <button class="btn btn-sm btn-secondary" style="margin-top:6px;font-size:10px" onclick="odiSalvarCampo('${oId}','cancelado',false)">↩ Reativar obra</button>`
+        : `<button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#EF4444;border:1px solid #EF444455" onclick="if(confirm('Cancelar esta obra ODI?')){odiSalvarCampo('${oId}','cancelado',true);odiSalvarCampo('${oId}','dataCancelamento','${new Date().toISOString().split('T')[0]}');}">🚫 Cancelar Obra</button>`
     ));
   }
 
@@ -9472,17 +9552,20 @@ function renderAcoesODI(obra){
     setTimeout(()=>{ renderEquipInstaladosODI(); renderEquipRetiradosODI(); }, 60);
   }
 
-  // ── 13. Locais de Trabalho (todos) ──────────────────────────────────
+  // ── 13. Locais de Trabalho (todos — sempre editável para gerente/fiscal) ───
   const locaisODI = obra.locaisTrabalho||[];
+  const podeEditarLocais = isFisc || isAdm;
   sections.push(card('📍 Locais de Trabalho',
-    `${locaisODI.map(l=>`<div style="display:flex;gap:8px;font-size:10px;padding:4px 0;border-bottom:1px solid var(--border)">
+    `${locaisODI.map(l=>`<div style="display:flex;align-items:flex-start;gap:6px;font-size:10px;padding:4px 0;border-bottom:1px solid var(--border)" id="odiLocalRow_${l.id}">
       <span style="color:var(--muted);white-space:nowrap">${fmtTxt(l.data)}</span>
-      <span style="flex:1">${l.descricao}</span>
-    </div>`).join('')}
-    <div style="display:flex;gap:8px;margin-top:8px">
+      <span style="flex:1" id="odiLocalTxt_${l.id}">${l.descricao}</span>
+      ${podeEditarLocais?`<button onclick="odiEditarLocal('${oId}','${l.id}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;padding:0" title="Editar">✏️</button>`:''}
+      ${podeEditarLocais?`<button onclick="odiRemoverLocal('${oId}','${l.id}')" style="background:none;border:none;color:#EF4444;cursor:pointer;font-size:11px;padding:0" title="Remover">✕</button>`:''}
+    </div>`).join('')||'<div style="font-size:10px;color:var(--muted);margin-bottom:4px">Nenhum local registrado.</div>'}
+    ${podeEditarLocais?`<div style="display:flex;gap:8px;margin-top:8px">
       <input type="text" id="odiLocalDesc" placeholder="Descrição do local..." style="flex:1;font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:inherit">
       <button class="btn btn-sm btn-secondary" onclick="odiAdicionarLocal('${oId}')">+ Local</button>
-    </div>`
+    </div>`:''}`,
   ));
 
   const grid = sections.length > 1
@@ -9508,6 +9591,49 @@ window.odiAdicionarLocal = async function(obraId){
     o.locaisTrabalho = novosLocais;
     renderAcoesODI(o);
     toast('✓ Local registrado.','ok');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
+window.odiEditarLocal = function(obraId, localId){
+  const row = document.getElementById('odiLocalRow_'+localId);
+  const o = obras.find(x=>x.id===obraId);
+  if(!row || !o) return;
+  const local = (o.locaisTrabalho||[]).find(l=>l.id===localId);
+  if(!local) return;
+  row.innerHTML = `
+    <span style="font-size:10px;color:var(--muted);white-space:nowrap">${fmtTxt(local.data)}</span>
+    <input type="text" id="odiLocalEdit_${localId}" value="${local.descricao.replace(/"/g,'&quot;')}"
+      style="font-size:11px;flex:1;border:1px solid var(--accent);border-radius:4px;padding:2px 6px;background:var(--surface);color:inherit"
+      onkeydown="if(event.key==='Enter') odiSalvarEdicaoLocal('${obraId}','${localId}');if(event.key==='Escape') renderAcoesODI(obras.find(x=>x.id==='${obraId}'));">
+    <button onclick="odiSalvarEdicaoLocal('${obraId}','${localId}')" style="background:var(--accent);border:none;color:#fff;cursor:pointer;border-radius:4px;padding:2px 8px;font-size:10px">✓</button>
+    <button onclick="renderAcoesODI(obras.find(x=>x.id==='${obraId}'))" style="background:none;border:1px solid var(--border);cursor:pointer;border-radius:4px;padding:2px 6px;font-size:10px">✕</button>`;
+  document.getElementById('odiLocalEdit_'+localId)?.focus();
+};
+
+window.odiSalvarEdicaoLocal = async function(obraId, localId){
+  const novaDesc = document.getElementById('odiLocalEdit_'+localId)?.value?.trim();
+  if(!novaDesc){ toast('Descrição não pode estar vazia.','err'); return; }
+  const o = obras.find(x=>x.id===obraId);
+  if(!o) return;
+  const novosLocais = (o.locaisTrabalho||[]).map(l=>l.id===localId?{...l,descricao:novaDesc}:l);
+  try{
+    await updateDoc(doc(db,'obras',obraId),{locaisTrabalho:novosLocais});
+    o.locaisTrabalho = novosLocais;
+    renderAcoesODI(o);
+    toast('✓ Local atualizado.','ok');
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+};
+
+window.odiRemoverLocal = async function(obraId, localId){
+  if(!confirm('Remover este local de trabalho?')) return;
+  const o = obras.find(x=>x.id===obraId);
+  if(!o) return;
+  const novosLocais = (o.locaisTrabalho||[]).filter(l=>l.id!==localId);
+  try{
+    await updateDoc(doc(db,'obras',obraId),{locaisTrabalho:novosLocais});
+    o.locaisTrabalho = novosLocais;
+    renderAcoesODI(o);
+    toast('Local removido.','ok');
   }catch(e){ toast('Erro: '+e.message,'err'); }
 };
 
@@ -9783,40 +9909,9 @@ function renderDashAdmOdi(){
 }
 window.renderDashAdmOdi = renderDashAdmOdi;
 
-// ══════════════════════════════════════════════════════
-//  MÓDULO: GERENCIAMENTO DE PEDIDOS  — Etapa 1
-//  (Abertura de Pedido pelo Analista + Medida 34)
-// ══════════════════════════════════════════════════════
-const MUNICIPIOS_ARLAG = ['ANITA GARIBALDI','BOCAINA DO SUL','BOM JARDIM DA SERRA','BOM RETIRO',
-  'CAMPO BELO DO SUL','CAPAO ALTO','CELSO RAMOS','CERRO NEGRO','CORREIA PINTO','CURITIBANOS',
-  'FREI ROGERIO','LAGES','OTACILIO COSTA','PAINEL','PALMEIRA','PONTE ALTA','PONTE ALTA DO NORTE',
-  'RIO RUFINO','SANTA CECILIA','SAO CRISTOVAO DO SUL','SAO JOAQUIM','SAO JOSE DO CERRITO','URUBICI','URUPEMA'];
-
-const TIPOS_SOLICITACAO = {
-  'Alimentadores':                 {tipoPedido:'R2', prazoDias:60},
-  'Equipamentos Especiais':        {tipoPedido:'R2', prazoDias:60},
-  'Ext. para Ilum. Pública':       {tipoPedido:'R1', prazoDias:45},
-  'Interligação Proj. Particular': {tipoPedido:'R1', prazoDias:30},
-  'Ligação nova Rural':            {tipoPedido:'R1', prazoDias:30},
-  'Ligação Nova Urbana':           {tipoPedido:'R1', prazoDias:30},
-  'Loteamento – Conexão':          {tipoPedido:'R1', prazoDias:30},
-  'Melhorias':                     {tipoPedido:'R2', prazoDias:60},
-  'Outros (Descrever)':            {tipoPedido:'R1', prazoDias:30},
-  'PVNT':                          {tipoPedido:'R2', prazoDias:30},
-  'Remoção e Deslocamento':        {tipoPedido:'R1', prazoDias:45},
-  'Troca de Padrão':               {tipoPedido:'R1', prazoDias:30},
-};
-
-// Checklist padrão por tipo de solicitação — editável pelo Gerente nas próximas etapas.
-// Mantido aqui como referência de dados para a Etapa 2 (checklist do Estagiário).
-const CHECKLIST_PADRAO = {
-  'PVNT':                    ['Relatório CQDE'],
-  'Ext. para Ilum. Pública': ['Ofício Prefeitura','Lei de Criação da Via'],
-  'Ligação nova Rural':      ['Declaração de Não APP','Autorização de Passagem do Solicitante','Autorização de Passagem de Terceiros','Matrícula Georreferenciada'],
-};
-
-const PROJETISTAS_PEDIDO = ['Tonimar','Valdir','Claudionei','Não informado','Copia','Jucimar Outro'];
-
+// ══════════════════════════════════════════════════════════════════════
+//  SISTEMA DE PEDIDOS
+// ══════════════════════════════════════════════════════════════════════
 const ACOES_ANALISTA = ['Enviado para Projeto','Liberado sem Obra','Cancelado','Abertura de Obra (Loteamento)','Abertura de Obra (Iluminação Pública)'];
 
 let pedidos=[], unsubPedidos=null;
