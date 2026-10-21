@@ -981,8 +981,31 @@ function renderDashEmpreiteira(minhas){
 
 
 // ── DASHBOARD GENESIS ─────────────────────────────────────────────────
+function renderGenesisTable(aguardando){
+  const hoje_s = hojeStr();
+  if(!aguardando.length){
+    return '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra aguardando confirmação de cadastro.</p></div>';
+  }
+  const rows = [...aguardando].sort((a,b)=>a.dataCadastro>b.dataCadastro?1:-1).map(o=>{
+    const diasAg = diff(o.dataCadastro, hoje_s);
+    const corDias = diasAg===null?'var(--muted)':diasAg>30?'var(--red)':diasAg>15?'var(--yellow)':'var(--text)';
+    return `<tr>
+      <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+      <td>${o.cidade||'—'}</td>
+      <td>${o.fiscal||'—'}</td>
+      <td>${fmt(o.dataCadastro)}</td>
+      <td style="color:${corDias};font-weight:600">${diasAg!==null?diasAg+'d':'—'}</td>
+      <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Confirmar Cadastro</button></td>
+    </tr>`;
+  }).join('');
+  return `<div class="tbl-wrap"><table>
+    <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Enviado em</th><th>Dias Aguardando</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
 function renderDashGenesis(list){
   const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cancelado);
+  window._genesisAguardandoAll = aguardando;
   const confirmados = list.filter(o => o.cadastroConfirmado);
   const hoje_s = hojeStr();
   // Avg time: dataCadastro → dataCadastroConfirmado
@@ -995,26 +1018,19 @@ function renderDashGenesis(list){
     ${kpiCard('Total Obras',list.filter(o=>!o.cancelado).length,'no sistema','#00e5a0')}
   </div>`;
   html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras Aguardando Confirmação de Cadastro</div>';
-  if(!aguardando.length){
-    html += '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra aguardando confirmação de cadastro.</p></div>';
-  } else {
-    const rows = [...aguardando].sort((a,b)=>a.dataCadastro>b.dataCadastro?1:-1).map(o=>{
-      const diasAg = diff(o.dataCadastro, hoje_s);
-      const corDias = diasAg===null?'var(--muted)':diasAg>30?'var(--red)':diasAg>15?'var(--yellow)':'var(--text)';
-      return `<tr>
-        <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
-        <td>${o.cidade||'—'}</td>
-        <td>${o.fiscal||'—'}</td>
-        <td>${fmt(o.dataCadastro)}</td>
-        <td style="color:${corDias};font-weight:600">${diasAg!==null?diasAg+'d':'—'}</td>
-        <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Confirmar Cadastro</button></td>
-      </tr>`;
-    }).join('');
-    html += `<div class="tbl-wrap"><table>
-      <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Enviado em</th><th>Dias Aguardando</th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>`;
-  }
+  // Filtros: número do projeto + fiscal
+  const fiscais = [...new Set(aguardando.map(o=>o.fiscal).filter(Boolean))].sort();
+  html += `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+    <input type="text" id="fltGenesisNumero" placeholder="Filtrar por nº obra…"
+      style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;width:180px"
+      oninput="applyGenesisFilter()">
+    <select id="fltGenesisFiscal" onchange="applyGenesisFilter()"
+      style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+      <option value="">Todos os fiscais</option>
+      ${fiscais.map(f=>`<option value="${f}">${f}</option>`).join('')}
+    </select>
+  </div>
+  <div id="genesisTableContainer">${renderGenesisTable(aguardando)}</div>`;
   // ── Seção Cadastro Urgente para Genesis ───────────────────────────────
   const genCadUrgFisc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&o.fiscalizacao&&!o.dataCadastro&&!o.cancelado);
   const genCadUrgConc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&!o.fiscalizacao&&o.conclusao&&!o.cancelado);
@@ -1077,6 +1093,16 @@ function renderDashGenesis(list){
 
   return html;
 }
+
+window.applyGenesisFilter = function(){
+  const num = (document.getElementById('fltGenesisNumero')?.value||'').trim().toLowerCase();
+  const fis = document.getElementById('fltGenesisFiscal')?.value||'';
+  let filtered = (window._genesisAguardandoAll||[]).slice();
+  if(num) filtered = filtered.filter(o=>(o.numero||'').toLowerCase().includes(num));
+  if(fis) filtered = filtered.filter(o=>o.fiscal===fis);
+  const cont = document.getElementById('genesisTableContainer');
+  if(cont) cont.innerHTML = renderGenesisTable(filtered);
+};
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
 function renderDashEstagiario(list){
@@ -2077,6 +2103,11 @@ window.openObraModal=function(obraId){
   // Para obras ODI: pular bloco de showSec RD (ODI tem suas próprias seções)
   if(obra?.tipo === 'ODI'){
     // ODI: secIdentif já mostrada acima; ações ODI renderizadas no bloco anterior
+    // Genesis ODI: mostrar cadastro (mesmo fluxo das obras RD)
+    if(isGenesis){
+      showSec('secCadastro');
+      if(obra?.dataCadastro) showSec('secCadastroConfirm');
+    }
   } else {
   if(isGenesis){
     // Genesis: SOMENTE secCadastro (data envio + toggle confirmação)
@@ -2407,11 +2438,30 @@ window.calcularPrazoPendencia=function(){
 
 // ── ARMAZENAMENTO: habilita confirm só se todos deps marcados ─────────
 window.checkArmazenamentoDeps = function(){
-  const deps = ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
-  const allChk = deps.every(id => { const el=document.getElementById(id); return el&&el.checked; });
-  const caixa  = (document.getElementById('oCaixaArmazenada')?.value||'').trim();
+  const obraId = document.getElementById('obraId')?.value;
+  const obra   = obraId ? obras.find(o=>o.id===obraId) : null;
   const final  = document.getElementById('oArmazenado');
   if(!final) return;
+  // Garante elemento de mensagem de bloqueio junto ao checkbox
+  let msgEl = document.getElementById('msgCadastroBlock');
+  if(!msgEl){
+    msgEl = document.createElement('p');
+    msgEl.id = 'msgCadastroBlock';
+    msgEl.style.cssText = 'color:var(--yellow);font-size:12px;margin:6px 0 0;display:none';
+    final.parentNode?.insertBefore(msgEl, final.nextSibling);
+  }
+  // Intertravamento: cadastro Genesis não confirmado → bloqueio total
+  if(!obra?.cadastroConfirmado){
+    final.disabled = true;
+    if(final.checked) final.checked = false;
+    msgEl.style.display = 'block';
+    msgEl.textContent = '⚠️ Aguardando confirmação de cadastro pelo Genesis';
+    return;
+  }
+  msgEl.style.display = 'none';
+  const deps   = ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
+  const allChk = deps.every(id => { const el=document.getElementById(id); return el&&el.checked; });
+  const caixa  = (document.getElementById('oCaixaArmazenada')?.value||'').trim();
   final.disabled = !(allChk && caixa);
   if(final.disabled && final.checked) final.checked = false;
 };
@@ -9909,9 +9959,41 @@ function renderDashAdmOdi(){
 }
 window.renderDashAdmOdi = renderDashAdmOdi;
 
-// ══════════════════════════════════════════════════════════════════════
-//  SISTEMA DE PEDIDOS
-// ══════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════
+//  MÓDULO: GERENCIAMENTO DE PEDIDOS  — Etapa 1
+//  (Abertura de Pedido pelo Analista + Medida 34)
+// ══════════════════════════════════════════════════════
+const MUNICIPIOS_ARLAG = ['ANITA GARIBALDI','BOCAINA DO SUL','BOM JARDIM DA SERRA','BOM RETIRO',
+  'CAMPO BELO DO SUL','CAPAO ALTO','CELSO RAMOS','CERRO NEGRO','CORREIA PINTO','CURITIBANOS',
+  'FREI ROGERIO','LAGES','OTACILIO COSTA','PAINEL','PALMEIRA','PONTE ALTA','PONTE ALTA DO NORTE',
+  'RIO RUFINO','SANTA CECILIA','SAO CRISTOVAO DO SUL','SAO JOAQUIM','SAO JOSE DO CERRITO','URUBICI','URUPEMA'];
+
+const TIPOS_SOLICITACAO = {
+  'Alimentadores':                 {tipoPedido:'R2', prazoDias:60},
+  'Equipamentos Especiais':        {tipoPedido:'R2', prazoDias:60},
+  'Ext. para Ilum. Pública':       {tipoPedido:'R1', prazoDias:45},
+  'Interligação Proj. Particular': {tipoPedido:'R1', prazoDias:30},
+  'Ligação nova Rural':            {tipoPedido:'R1', prazoDias:30},
+  'Ligação Nova Urbana':           {tipoPedido:'R1', prazoDias:30},
+  'Loteamento – Conexão':          {tipoPedido:'R1', prazoDias:30},
+  'Melhorias':                     {tipoPedido:'R2', prazoDias:60},
+  'Outros (Descrever)':            {tipoPedido:'R1', prazoDias:30},
+  'PVNT':                          {tipoPedido:'R2', prazoDias:30},
+  'Remoção e Deslocamento':        {tipoPedido:'R1', prazoDias:45},
+  'Troca de Padrão':               {tipoPedido:'R1', prazoDias:30},
+};
+
+// Checklist padrão por tipo de solicitação — editável pelo Gerente nas próximas etapas.
+// Mantido aqui como referência de dados para a Etapa 2 (checklist do Estagiário).
+const CHECKLIST_PADRAO = {
+  'PVNT':                    ['Relatório CQDE'],
+  'Ext. para Ilum. Pública': ['Ofício Prefeitura','Lei de Criação da Via'],
+  'Ligação nova Rural':      ['Declaração de Não APP','Autorização de Passagem do Solicitante','Autorização de Passagem de Terceiros','Matrícula Georreferenciada'],
+};
+
+const PROJETISTAS_PEDIDO = ['Tonimar','Valdir','Claudionei','Não informado','Copia','Jucimar Outro'];
+
 const ACOES_ANALISTA = ['Enviado para Projeto','Liberado sem Obra','Cancelado','Abertura de Obra (Loteamento)','Abertura de Obra (Iluminação Pública)'];
 
 let pedidos=[], unsubPedidos=null;
