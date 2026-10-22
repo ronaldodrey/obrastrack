@@ -1005,20 +1005,22 @@ function renderGenesisTable(aguardando){
 }
 function renderDashGenesis(list){
   const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cancelado);
-  window._genesisAguardandoAll = aguardando;
+  const aguardandoRD  = aguardando.filter(o => o.tipo !== 'ODI');
+  const aguardandoODI = aguardando.filter(o => o.tipo === 'ODI');
+  window._genesisAguardandoAll = {rd: aguardandoRD, odi: aguardandoODI};
   const confirmados = list.filter(o => o.cadastroConfirmado);
   const hoje_s = hojeStr();
   // Avg time: dataCadastro → dataCadastroConfirmado
   const tempos = confirmados.filter(o=>o.dataCadastro&&o.dataCadastroConfirmado).map(o=>diff(o.dataCadastro,o.dataCadastroConfirmado));
   const avgTempo = tempos.length ? Math.round(tempos.reduce((a,b)=>a+b,0)/tempos.length) : null;
   let html = `<div class="kpi-strip">
-    ${kpiCard('Aguardando Cadastro',aguardando.length,'enviadas pelo fiscal, sem confirmar','#F59E0B')}
+    ${kpiCard('Aguardando RD',aguardandoRD.length,'obras RD sem confirmar','#F59E0B')}
+    ${kpiCard('Aguardando ODI',aguardandoODI.length,'obras ODI sem confirmar','#F97316')}
     ${kpiCard('Cadastros Confirmados',confirmados.length,'já confirmados','#22C55E')}
     ${kpiCard('Tempo Médio Confirmação',avgTempo!==null?avgTempo+'d':'—','envio → confirmação','#06B6D4')}
-    ${kpiCard('Total Obras',list.filter(o=>!o.cancelado).length,'no sistema','#00e5a0')}
   </div>`;
   html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras Aguardando Confirmação de Cadastro</div>';
-  // Filtros: número do projeto + fiscal
+  // Filtros: número do projeto + fiscal (fiscais de RD e ODI combinados)
   const fiscais = [...new Set(aguardando.map(o=>o.fiscal).filter(Boolean))].sort();
   html += `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
     <input type="text" id="fltGenesisNumero" placeholder="Filtrar por nº obra…"
@@ -1030,7 +1032,20 @@ function renderDashGenesis(list){
       ${fiscais.map(f=>`<option value="${f}">${f}</option>`).join('')}
     </select>
   </div>
-  <div id="genesisTableContainer">${renderGenesisTable(aguardando)}</div>`;
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+    <div>
+      <div style="font-weight:700;font-size:12px;letter-spacing:.4px;color:var(--accent);margin-bottom:8px;padding:6px 10px;background:rgba(0,229,160,.06);border-radius:6px">
+        🔵 Obras RD — ${aguardandoRD.length} aguardando
+      </div>
+      <div id="genesisTableContainerRD">${renderGenesisTable(aguardandoRD)}</div>
+    </div>
+    <div>
+      <div style="font-weight:700;font-size:12px;letter-spacing:.4px;color:#F59E0B;margin-bottom:8px;padding:6px 10px;background:rgba(245,158,11,.06);border-radius:6px">
+        🟡 Obras ODI — ${aguardandoODI.length} aguardando
+      </div>
+      <div id="genesisTableContainerODI">${renderGenesisTable(aguardandoODI)}</div>
+    </div>
+  </div>`;
   // ── Seção Cadastro Urgente para Genesis ───────────────────────────────
   const genCadUrgFisc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&o.fiscalizacao&&!o.dataCadastro&&!o.cancelado);
   const genCadUrgConc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&!o.fiscalizacao&&o.conclusao&&!o.cancelado);
@@ -1097,11 +1112,21 @@ function renderDashGenesis(list){
 window.applyGenesisFilter = function(){
   const num = (document.getElementById('fltGenesisNumero')?.value||'').trim().toLowerCase();
   const fis = document.getElementById('fltGenesisFiscal')?.value||'';
-  let filtered = (window._genesisAguardandoAll||[]).slice();
-  if(num) filtered = filtered.filter(o=>(o.numero||'').toLowerCase().includes(num));
-  if(fis) filtered = filtered.filter(o=>o.fiscal===fis);
-  const cont = document.getElementById('genesisTableContainer');
-  if(cont) cont.innerHTML = renderGenesisTable(filtered);
+  const all = window._genesisAguardandoAll || {rd:[],odi:[]};
+  let filteredRD  = (all.rd||[]).slice();
+  let filteredODI = (all.odi||[]).slice();
+  if(num){
+    filteredRD  = filteredRD.filter(o=>(o.numero||'').toLowerCase().includes(num));
+    filteredODI = filteredODI.filter(o=>(o.numero||'').toLowerCase().includes(num));
+  }
+  if(fis){
+    filteredRD  = filteredRD.filter(o=>o.fiscal===fis);
+    filteredODI = filteredODI.filter(o=>o.fiscal===fis);
+  }
+  const contRD  = document.getElementById('genesisTableContainerRD');
+  if(contRD)  contRD.innerHTML  = renderGenesisTable(filteredRD);
+  const contODI = document.getElementById('genesisTableContainerODI');
+  if(contODI) contODI.innerHTML = renderGenesisTable(filteredODI);
 };
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
@@ -2021,6 +2046,20 @@ window.openObraModal=function(obraId){
     }
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
     setChk('oCadastroConfirmado',obra.cadastroConfirmado);
+    // Pendência de cadastro
+    setChk('oCadastroPendencia', obra.cadastroPendencia||false);
+    const _pendDescEl = document.getElementById('oCadastroPendenciaDesc');
+    if(_pendDescEl) _pendDescEl.value = obra.cadastroPendenciaDesc||'';
+    const _pendSec = document.getElementById('secCadastroPendenciaDesc');
+    if(_pendSec) _pendSec.style.display = obra.cadastroPendencia ? 'block' : 'none';
+    // Aviso de pendência para gerente/fiscal
+    const _warnPend = document.getElementById('msgCadastroPendenciaWarn');
+    if(_warnPend){
+      if(obra.cadastroPendencia){
+        _warnPend.style.display='block';
+        _warnPend.innerHTML='⚠️ <strong>Pendência registrada:</strong> '+(obra.cadastroPendenciaDesc||'Sem descrição');
+      } else { _warnPend.style.display='none'; }
+    }
     // Preenche view-only do transformador para fiscal e gerente
     // Preenche campos de visualização do transformador
     // Multi-equipment view: show all installed
@@ -2436,6 +2475,13 @@ window.calcularPrazoPendencia=function(){
 };
 
 
+// ── CADASTRO: toggle de pendência ────────────────────────────────────
+window.toggleCadastroPendencia = function(){
+  const chk = document.getElementById('oCadastroPendencia');
+  const sec = document.getElementById('secCadastroPendenciaDesc');
+  if(sec) sec.style.display = (chk&&chk.checked) ? 'block' : 'none';
+};
+
 // ── ARMAZENAMENTO: habilita confirm só se todos deps marcados ─────────
 window.checkArmazenamentoDeps = function(){
   const obraId = document.getElementById('obraId')?.value;
@@ -2804,6 +2850,8 @@ window.saveObra=async function(){
           pendenciaDevolvida: true,
         } : {}),
         dataCadastro:g('oCadastro'), cadastroConfirmado:gChk('oCadastroConfirmado'),
+        cadastroPendencia:gChk('oCadastroPendencia'),
+        cadastroPendenciaDesc:gChk('oCadastroPendencia')?(document.getElementById('oCadastroPendenciaDesc')?.value||'').trim():'',
         medicoes: allMedsG,
         medicao: lastMedG,
         medida70:g('oMedida70'), medida230:g('oMedida230'),
@@ -2844,7 +2892,7 @@ window.saveObra=async function(){
          'devolucaoFinanceiraData','locaisTrabalho',
          // Pendência construtiva ODI (salva via odiRegistrarPendencia/odiResolverPendencia)
          'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
-         'armazenado','armazenamentoData','dataCadastro','cadastroConfirmado'
+         'armazenado','armazenamentoData','dataCadastro','cadastroConfirmado','cadastroPendencia','cadastroPendenciaDesc'
         ].forEach(f=>{
           if(obraAntiga?.[f] !== undefined) patch[f] = obraAntiga[f];
           else delete patch[f];
@@ -2925,7 +2973,7 @@ window.saveObra=async function(){
       if(obraAntiga?.tipo === 'ODI'){
         ['conclusao','fiscalizacao','kaffaODI',
          'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
-         'dataCadastro','cadastroConfirmado',
+         'dataCadastro','cadastroConfirmado','cadastroPendencia','cadastroPendenciaDesc',
          'nfEnviadaFlag','nfEnviadaData','nfLancadaData',
          'medida70','medida230','medida280',
          'devolucaoFinanceiraData','armazenado','locaisTrabalho'
@@ -2943,9 +2991,13 @@ window.saveObra=async function(){
     if(me.perfil==='genesis'){
       const cadData = g('oCadastro') || obraAntiga?.dataCadastro || '';
       const cadConf = gChk('oCadastroConfirmado');
-      patch = { 
+      const cadPend = gChk('oCadastroPendencia');
+      const cadPendDesc = (document.getElementById('oCadastroPendenciaDesc')?.value||'').trim();
+      patch = {
         dataCadastro: cadData,
         cadastroConfirmado: cadConf,
+        cadastroPendencia: cadPend,
+        cadastroPendenciaDesc: cadPend ? cadPendDesc : '',
         atualizadaEm: serverTimestamp()
       };
       // Record confirmation timestamp
@@ -10399,7 +10451,7 @@ window.savePedido=async function(){
     const municipio=document.getElementById('pdMunicipio').value;
     const flagOrgaoPublico=document.getElementById('pdFlagOrgaoPublico').checked;
     const acaoAnalista=document.getElementById('pdAcaoAnalista').value;
-    if(!nota||!tipoSolicitacao||!dataAberturaPedido||!municipio||!acaoAnalista){
+    if(!nota||!tipoSolicitacao||!dataAberturaPedido||!municipio){
       toast('Preencha todos os campos obrigatórios.','err'); return;
     }
     if(acaoAnalista==='Cancelado' && !document.getElementById('pdMotivoCancelamento').value.trim()){
