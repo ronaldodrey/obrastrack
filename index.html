@@ -637,10 +637,20 @@
   <div class="modal-section" id="secCadastro">
     <div class="modal-section-title">📋 Cadastro</div>
     <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
+    <!-- Aviso de pendência visível para gerente/fiscal -->
+    <div id="msgCadastroPendenciaWarn" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);border-radius:6px;font-size:12px;color:#EF4444"></div>
     <div id="secCadastroConfirm" style="display:none">
       <div class="toggle-row">
         <label class="toggle"><input type="checkbox" id="oCadastroConfirmado"><span class="toggle-slider"></span></label>
         <span class="toggle-lbl" style="color:var(--accent)">✓ Confirmar Cadastro</span>
+      </div>
+      <!-- Toggle de pendência (visível para genesis e gerente) -->
+      <div class="toggle-row" style="margin-top:8px">
+        <label class="toggle"><input type="checkbox" id="oCadastroPendencia" onchange="toggleCadastroPendencia()"><span class="toggle-slider" style="--c:#EF4444"></span></label>
+        <span class="toggle-lbl" style="color:#EF4444">⚠️ Registrar Pendência de Cadastro</span>
+      </div>
+      <div id="secCadastroPendenciaDesc" style="display:none;margin-top:8px">
+        <div class="fg"><label>Descrição da Pendência</label><textarea id="oCadastroPendenciaDesc" rows="2" style="resize:vertical" placeholder="Ex.: Nota não encontrada no sistema; via não chegou para cadastro…"></textarea></div>
       </div>
     </div>
   </div>
