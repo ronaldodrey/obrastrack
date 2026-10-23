@@ -2153,10 +2153,19 @@ window.openObraModal=function(obraId){
   // Para obras ODI: pular bloco de showSec RD (ODI tem suas próprias seções)
   if(obra?.tipo === 'ODI'){
     // ODI: secIdentif já mostrada acima; ações ODI renderizadas no bloco anterior
-    // Genesis ODI: mostrar cadastro (mesmo fluxo das obras RD)
+    // Genesis ODI: mostrar cadastro + confirmação
     if(isGenesis){
       showSec('secCadastro');
       if(obra?.dataCadastro) showSec('secCadastroConfirm');
+    }
+    // Estagiário, adm_odi e gerente: armazenamento ODI + confirmação de cadastro
+    if(isEstagiario || p === 'adm_odi' || p === 'gerente'){
+      if(isEdit){
+        showSec('secArmazenamento');
+        setTimeout(checkArmazenamentoDeps, 100);
+        // Confirmação de cadastro aparece para quem pode confirmar cadastro ODI
+        if(obra?.dataCadastro) showSec('secCadastroConfirm');
+      }
     }
   } else {
   if(isGenesis){
@@ -2200,15 +2209,9 @@ window.openObraModal=function(obraId){
       const _impBody = document.getElementById('secImpedimentoViewBody');
       if(_impView && _impBody){
         if(obra?.impedimento){
-          const _tipoLabel = {
-            'falta_material':'Falta de Material',
-            'acesso_bloqueado':'Acesso Bloqueado',
-            'condicao_tempo':'Condições Climáticas',
-            'problema_rede':'Problema na Rede',
-            'outro':'Outro'
-          }[obra.tipoImpedimento] || obra.tipoImpedimento || '—';
-          const _descExtra = obra.tipoImpedimento==='outro' && obra.impedimentoOutro
-            ? `<div style="margin-top:4px;color:var(--muted);font-size:12px">${obra.impedimentoOutro}</div>`
+          const _tipoLabel = obra.tipoImpedimento || '—';
+          const _descExtra = obra.tipoImpedimento==='Outro' && obra.impedimentoOutro
+            ? `<div style="margin-top:6px;font-size:12px"><strong>Descrição:</strong> ${obra.impedimentoOutro}</div>`
             : '';
           _impBody.innerHTML = `<strong>Tipo:</strong> ${_tipoLabel}${_descExtra}`;
           _impView.style.display = 'block';
@@ -2277,8 +2280,9 @@ window.openObraModal=function(obraId){
     const newCadEl = cadEl.cloneNode(true);
     cadEl.parentNode.replaceChild(newCadEl, cadEl);
     newCadEl.addEventListener('change', ()=>{
-      // Confirmação só para gerente e genesis
-      const canConfirm = ['gerente','genesis'].includes(p);
+      // Confirmação: gerente e genesis (RD); ODI adiciona estagiário e adm_odi
+      const isODICtx = obras.find(o=>o.id===document.getElementById('obraId')?.value)?.tipo === 'ODI';
+      const canConfirm = ['gerente','genesis'].includes(p) || (isODICtx && ['estagiario','adm_odi'].includes(p));
       document.getElementById('secCadastroConfirm').style.display = (newCadEl.value && canConfirm) ? 'block' : 'none';
     });
   }
@@ -2318,6 +2322,15 @@ window.openObraModal=function(obraId){
     }
   },100);
   document.getElementById('ovObra').classList.add('open');
+  // Inicializa chat de avisos (só para obras existentes)
+  if(isEdit && id) abrirChatObra(id);
+  else {
+    const _box = document.getElementById('chatBox');
+    if(_box) _box.innerHTML='<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Salve a obra para usar o chat.</div>';
+    if(_chatUnsub){ _chatUnsub(); _chatUnsub=null; }
+    if(window._chatPollTimer){ clearInterval(window._chatPollTimer); window._chatPollTimer=null; }
+    _chatObraId = null;
+  }
   }catch(err){ console.error('openObraModal error:',err); alert('Erro ao abrir modal: '+err.message+' (linha '+err.stack?.split('\n')[1]+')'); }
 };
 
@@ -2430,7 +2443,10 @@ window.fecharChatObra = function(){
   window._chatReload = null;
 };
 
-window.closeObraModal=function(){ document.getElementById('ovObra').classList.remove('open'); };
+window.closeObraModal=function(){
+  document.getElementById('ovObra').classList.remove('open');
+  window.fecharChatObra();
+};
 
 function atualizarInfoLimite(){
   const ab=document.getElementById('oAbertura').value;
@@ -2520,6 +2536,12 @@ window.checkArmazenamentoDeps = function(){
   const obra   = obraId ? obras.find(o=>o.id===obraId) : null;
   const final  = document.getElementById('oArmazenado');
   if(!final) return;
+
+  // ODI obras não precisam de "Medições Assinadas" — oculta a linha
+  const isODI = obra?.tipo === 'ODI';
+  const rowMed = document.getElementById('rowMedicoesAssinadas');
+  if(rowMed) rowMed.style.display = isODI ? 'none' : '';
+
   // Garante elemento de mensagem de bloqueio junto ao checkbox
   let msgEl = document.getElementById('msgCadastroBlock');
   if(!msgEl){
@@ -2537,7 +2559,10 @@ window.checkArmazenamentoDeps = function(){
     return;
   }
   msgEl.style.display = 'none';
-  const deps   = ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
+  // ODI: sem Medições Assinadas; RD: com Medições Assinadas
+  const deps = isODI
+    ? ['oContratosAssinado','oProjetosAsBuilt']
+    : ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
   const allChk = deps.every(id => { const el=document.getElementById(id); return el&&el.checked; });
   const caixa  = (document.getElementById('oCaixaArmazenada')?.value||'').trim();
   final.disabled = !(allChk && caixa);
@@ -3037,10 +3062,31 @@ window.saveObra=async function(){
     }
     if(me.perfil==='estagiario'){
       const finalCheckEl=document.getElementById('oArmazenado');
+      const isODIObra = obraAntiga?.tipo === 'ODI';
       patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
         contratosAssinado:gChk('oContratosAssinado'),
-        medicoesAssinadas:gChk('oMedicoesAssinadas'), projetosAsBuilt:gChk('oProjetosAsBuilt'),
+        projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'), atualizadaEm:serverTimestamp() };
+      // RD: também salva medições assinadas; ODI: não tem medições assinadas
+      if(!isODIObra) patch.medicoesAssinadas = gChk('oMedicoesAssinadas');
+      // ODI: estagiário também pode confirmar cadastro
+      if(isODIObra){
+        const cadConf = gChk('oCadastroConfirmado');
+        patch.cadastroConfirmado = cadConf;
+        if(cadConf && !obraAntiga?.cadastroConfirmado) patch.dataCadastroConfirmado = hojeStr();
+      }
+    }
+    // adm_odi: armazenamento ODI + confirmação de cadastro
+    if(me.perfil==='adm_odi'){
+      const finalCheckEl=document.getElementById('oArmazenado');
+      const cadConf = gChk('oCadastroConfirmado');
+      patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
+        contratosAssinado:gChk('oContratosAssinado'),
+        projetosAsBuilt:gChk('oProjetosAsBuilt'),
+        caixaArmazenada:g('oCaixaArmazenada'),
+        cadastroConfirmado: cadConf,
+        atualizadaEm:serverTimestamp() };
+      if(cadConf && !obraAntiga?.cadastroConfirmado) patch.dataCadastroConfirmado = hojeStr();
     }
 
     if(isEdit){
