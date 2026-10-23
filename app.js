@@ -1141,43 +1141,57 @@ window.applyGenesisFilter = function(){
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
 function renderDashEstagiario(list){
-  const semArm   = list.filter(o => o.medida280 && !o.armazenado && !o.cancelado);
-  const armOk    = list.filter(o => o.armazenado);
-  const semContr = list.filter(o => o.medida280 && !o.armazenado && !o.contratosAssinado);
-  const semMed   = list.filter(o => o.medida280 && !o.armazenado && !o.medicoesAssinadas);
-  const semProj  = list.filter(o => o.medida280 && !o.armazenado && !o.projetosAsBuilt);
+  // Separar RD e ODI
+  const semArmRD  = list.filter(o => o.tipo !== 'ODI' && o.medida280 && !o.armazenado && !o.cancelado);
+  const semArmODI = list.filter(o => o.tipo === 'ODI' && !o.armazenado && !o.cancelado);
+  const semArm    = [...semArmRD, ...semArmODI];
+  const armOk     = list.filter(o => o.armazenado);
+  const semContr  = list.filter(o => !o.armazenado && !o.contratosAssinado && (o.medida280 || o.tipo==='ODI') && !o.cancelado);
+  const semMed    = list.filter(o => o.tipo!=='ODI' && o.medida280 && !o.armazenado && !o.medicoesAssinadas && !o.cancelado);
+  const semProj   = list.filter(o => !o.armazenado && !o.projetosAsBuilt && (o.medida280 || o.tipo==='ODI') && !o.cancelado);
+
   let html = `<div class="kpi-strip">
-    ${kpiCard('Aguard. Armazenamento',semArm.length,'com Med.280, sem armazenar','#F59E0B')}
+    ${kpiCard('Aguard. Armazenamento',semArm.length,'total pendente','#F59E0B')}
     ${kpiCard('Armazenadas',armOk.length,'concluídas','#22C55E')}
-    ${kpiCard('Sem Contratos',semContr.length,'faltando assinar','#EF4444')}
-    ${kpiCard('Sem Medições Assin.',semMed.length,'faltando assinar','#EF4444')}
-    ${kpiCard('Sem As-Built',semProj.length,'faltando assinar','#EF4444')}
+    ${kpiCard('RD pendentes',semArmRD.length,'com Med.280','#F59E0B')}
+    ${kpiCard('ODI pendentes',semArmODI.length,'obras ODI','#8B5CF6')}
+    ${kpiCard('Sem Cadastro Genesis',list.filter(o=>!o.armazenado&&!o.cancelado&&(o.medida280||o.tipo==='ODI')&&!o.cadastroConfirmado).length,'aguardando confirmação','#EF4444')}
   </div>`;
-  html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras para Armazenar</div>';
-  if(!semArm.length){
-    html += '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra pendente de armazenamento.</p></div>';
-  } else {
-    const rows = semArm.map(o=>{
+
+  // ── Tabela helper ──
+  function tblArmazenamento(obras, isODI){
+    if(!obras.length) return '<div class="empty" style="padding:16px"><div class="ico" style="font-size:18px">✅</div><p style="font-size:12px">Nenhuma obra pendente.</p></div>';
+    const rows = obras.map(o=>{
       const itens = [
         o.contratosAssinado?null:'Contratos',
-        o.medicoesAssinadas?null:'Medições',
+        (!isODI && !o.medicoesAssinadas)?'Medições':null,
         o.projetosAsBuilt?null:'As-Built',
         o.caixaArmazenada?null:'Caixa',
+        o.cadastroConfirmado?null:'Cadastro Genesis',
       ].filter(Boolean);
+      const dataRef = isODI ? (o.dataAbertura||o.abertura||'—') : fmt(o.medida280);
       return `<tr>
         <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
         <td>${o.cidade||'—'}</td>
         <td>${o.fiscal||'—'}</td>
-        <td>${fmt(o.medida280)}</td>
+        <td>${dataRef}</td>
         <td>${itens.length?`<span class="chip chip-red">${itens.join(', ')}</span>`:'<span class="chip chip-green">Pronto p/ confirmar</span>'}</td>
         <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Armazenar</button></td>
       </tr>`;
     }).join('');
-    html += `<div class="tbl-wrap"><table>
-      <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Med.280</th><th>Faltando</th><th></th></tr></thead>
+    const col4 = isODI ? 'Abertura' : 'Med.280';
+    return `<div class="tbl-wrap"><table>
+      <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>${col4}</th><th>Faltando</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
   }
+
+  html += '<div class="sect-title" style="margin-bottom:6px;margin-top:8px">📦 Monitor — Obras RD para Armazenar</div>';
+  html += tblArmazenamento(semArmRD, false);
+
+  html += '<div class="sect-title" style="margin-bottom:6px;margin-top:16px">📦 Monitor — Obras ODI para Armazenar</div>';
+  html += tblArmazenamento(semArmODI, true);
+
   return html;
 }
 
@@ -2323,7 +2337,7 @@ window.openObraModal=function(obraId){
   },100);
   document.getElementById('ovObra').classList.add('open');
   // Inicializa chat de avisos (só para obras existentes)
-  if(isEdit && id) abrirChatObra(id);
+  if(isEdit && obraId) abrirChatObra(obraId);
   else {
     const _box = document.getElementById('chatBox');
     if(_box) _box.innerHTML='<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Salve a obra para usar o chat.</div>';
