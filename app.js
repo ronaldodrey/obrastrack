@@ -143,14 +143,13 @@ function statusOf(o){
     return 'Obra Paralisada';
   }
   if(o.armazenado)   return 'Encerrada';
-  if(o.medida280)    return 'Aguard. Armazenamento';
-  // Fix #7: medidas só avançam o status SE a fiscalização já foi confirmada
+  // Aguard. Fiscalização SEMPRE tem prioridade — mesmo com medidas posteriores registradas
   if(o.conclusao && !o.fiscalizacao){
-    // +15 dias sem fiscalizar → cadastro urgente
     const _dCU = diff(o.conclusao, new Date().toISOString().split('T')[0]);
     if(_dCU !== null && _dCU > 15) return 'Encaminhar Cadastro Urgente';
-    return 'Aguard. Fiscalização'; // persiste até fiscal confirmar
+    return 'Aguard. Fiscalização';
   }
+  if(o.medida280)    return 'Aguard. Armazenamento';
   if(o.medida230)    return 'Aguard. Medida 280';
   if(o.medida70&&o.conclusao) return 'Aguard. Medida 230'; // conclusão obrigatória para Ag. Medida 230
   // R2: não exige Med.70 — medicao vai direto para "Aguard. Medida 230"
@@ -986,16 +985,25 @@ function renderGenesisTable(aguardando){
   if(!aguardando.length){
     return '<div class="empty" style="padding:24px"><div class="ico">✅</div><p>Nenhuma obra aguardando confirmação de cadastro.</p></div>';
   }
-  const rows = [...aguardando].sort((a,b)=>a.dataCadastro>b.dataCadastro?1:-1).map(o=>{
+  const rows = [...aguardando].sort((a,b)=>{
+    // obras com pendência primeiro
+    if(a.cadastroPendencia && !b.cadastroPendencia) return -1;
+    if(!a.cadastroPendencia && b.cadastroPendencia) return 1;
+    return a.dataCadastro > b.dataCadastro ? 1 : -1;
+  }).map(o=>{
     const diasAg = diff(o.dataCadastro, hoje_s);
     const corDias = diasAg===null?'var(--muted)':diasAg>30?'var(--red)':diasAg>15?'var(--yellow)':'var(--text)';
-    return `<tr>
-      <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+    const badgePend = o.cadastroPendencia
+      ? `<span title="${o.cadastroPendenciaDesc||'Pendência registrada'}" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:#EF4444;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:1px 5px;margin-left:4px;cursor:help">⚠️ Pendência</span>`
+      : '';
+    const trStyle = o.cadastroPendencia ? 'background:rgba(239,68,68,.04)' : '';
+    return `<tr style="${trStyle}">
+      <td><strong style="color:var(--accent)">${o.numero||'—'}</strong>${badgePend}</td>
       <td>${o.cidade||'—'}</td>
       <td>${o.fiscal||'—'}</td>
       <td>${fmt(o.dataCadastro)}</td>
       <td style="color:${corDias};font-weight:600">${diasAg!==null?diasAg+'d':'—'}</td>
-      <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Confirmar Cadastro</button></td>
+      <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">${o.cadastroPendencia?'Ver Pendência':'Confirmar Cadastro'}</button></td>
     </tr>`;
   }).join('');
   return `<div class="tbl-wrap"><table>
@@ -1009,6 +1017,7 @@ function renderDashGenesis(list){
   const aguardandoODI = aguardando.filter(o => o.tipo === 'ODI');
   window._genesisAguardandoAll = {rd: aguardandoRD, odi: aguardandoODI};
   const confirmados = list.filter(o => o.cadastroConfirmado);
+  const comPendencia = aguardando.filter(o => o.cadastroPendencia);
   const hoje_s = hojeStr();
   // Avg time: dataCadastro → dataCadastroConfirmado
   const tempos = confirmados.filter(o=>o.dataCadastro&&o.dataCadastroConfirmado).map(o=>diff(o.dataCadastro,o.dataCadastroConfirmado));
@@ -1016,6 +1025,7 @@ function renderDashGenesis(list){
   let html = `<div class="kpi-strip">
     ${kpiCard('Aguardando RD',aguardandoRD.length,'obras RD sem confirmar','#F59E0B')}
     ${kpiCard('Aguardando ODI',aguardandoODI.length,'obras ODI sem confirmar','#F97316')}
+    ${kpiCard('Com Pendência',comPendencia.length,comPendencia.length>0?'⚠️ verificar':'sem pendências registradas',comPendencia.length>0?'#EF4444':'#22C55E')}
     ${kpiCard('Cadastros Confirmados',confirmados.length,'já confirmados','#22C55E')}
     ${kpiCard('Tempo Médio Confirmação',avgTempo!==null?avgTempo+'d':'—','envio → confirmação','#06B6D4')}
   </div>`;
@@ -1712,6 +1722,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'pend_ag_conf')  baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData);
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
+  else if(_filtroRapidoAtivo === 'prob_executivo')      baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.impedimento&&!o.conclusao);
   let list = aplicarFiltros(baseList);
   // Fix #6: apply column sort
   if(_sortCol){
@@ -2184,6 +2195,27 @@ window.openObraModal=function(obraId){
     // Fiscalização: só fiscal e gerente
     if(p === 'fiscal'||p === 'fiscal_adm'||p === 'gerente'){
       showSec('secFisc');
+      // Mostra problema executivo registrado pela empreiteira (read-only)
+      const _impView = document.getElementById('secImpedimentoView');
+      const _impBody = document.getElementById('secImpedimentoViewBody');
+      if(_impView && _impBody){
+        if(obra?.impedimento){
+          const _tipoLabel = {
+            'falta_material':'Falta de Material',
+            'acesso_bloqueado':'Acesso Bloqueado',
+            'condicao_tempo':'Condições Climáticas',
+            'problema_rede':'Problema na Rede',
+            'outro':'Outro'
+          }[obra.tipoImpedimento] || obra.tipoImpedimento || '—';
+          const _descExtra = obra.tipoImpedimento==='outro' && obra.impedimentoOutro
+            ? `<div style="margin-top:4px;color:var(--muted);font-size:12px">${obra.impedimentoOutro}</div>`
+            : '';
+          _impBody.innerHTML = `<strong>Tipo:</strong> ${_tipoLabel}${_descExtra}`;
+          _impView.style.display = 'block';
+        } else {
+          _impView.style.display = 'none';
+        }
+      }
       if(isEdit){
         showSec('secLocaisTrabalho');
         _locaisPendentes = [];
@@ -3615,9 +3647,9 @@ function aplicarFiltros(list) {
         (o.locaisTrabalho||[]).some(l=>(l.descricao||'').toLowerCase().includes(t));
       if(!found) return false;
     } // busca por número, descrição, cidade, empreiteira, fiscal, programa
-    // Para fiscal/fiscal_adm: "Aguard. Fiscalização" inclui tbm obras já em
-    // "Encaminhar Cadastro Urgente" que ainda não foram fiscalizadas
-    if (f.status === 'Aguard. Fiscalização' && (me.perfil==='fiscal'||me.perfil==='fiscal_adm')){
+    // "Aguard. Fiscalização" inclui todas as obras com conclusao mas sem fiscalizacao
+    // (inclui "Encaminhar Cadastro Urgente" que são obras com >15d sem fiscalizar)
+    if (f.status === 'Aguard. Fiscalização'){
       if (!(o.conclusao && !o.fiscalizacao)) return false;
     } else if (f.status && statusOf(o) !== f.status) {
       return false;
