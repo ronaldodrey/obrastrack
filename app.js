@@ -1141,21 +1141,21 @@ window.applyGenesisFilter = function(){
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
 function renderDashEstagiario(list){
-  // Separar RD e ODI
+  // Separar RD e ODI — APENAS obras com Med.280 registrada entram no monitor
   const semArmRD  = list.filter(o => o.tipo !== 'ODI' && o.medida280 && !o.armazenado && !o.cancelado);
-  const semArmODI = list.filter(o => o.tipo === 'ODI' && !o.armazenado && !o.cancelado);
+  const semArmODI = list.filter(o => o.tipo === 'ODI' && o.medida280 && !o.armazenado && !o.cancelado);
   const semArm    = [...semArmRD, ...semArmODI];
   const armOk     = list.filter(o => o.armazenado);
-  const semContr  = list.filter(o => !o.armazenado && !o.contratosAssinado && (o.medida280 || o.tipo==='ODI') && !o.cancelado);
+  const semContr  = list.filter(o => o.medida280 && !o.armazenado && !o.contratosAssinado && !o.cancelado);
   const semMed    = list.filter(o => o.tipo!=='ODI' && o.medida280 && !o.armazenado && !o.medicoesAssinadas && !o.cancelado);
-  const semProj   = list.filter(o => !o.armazenado && !o.projetosAsBuilt && (o.medida280 || o.tipo==='ODI') && !o.cancelado);
+  const semProj   = list.filter(o => o.medida280 && !o.armazenado && !o.projetosAsBuilt && !o.cancelado);
 
   let html = `<div class="kpi-strip">
     ${kpiCard('Aguard. Armazenamento',semArm.length,'total pendente','#F59E0B')}
     ${kpiCard('Armazenadas',armOk.length,'concluídas','#22C55E')}
     ${kpiCard('RD pendentes',semArmRD.length,'com Med.280','#F59E0B')}
     ${kpiCard('ODI pendentes',semArmODI.length,'obras ODI','#8B5CF6')}
-    ${kpiCard('Sem Cadastro Genesis',list.filter(o=>!o.armazenado&&!o.cancelado&&(o.medida280||o.tipo==='ODI')&&!o.cadastroConfirmado).length,'aguardando confirmação','#EF4444')}
+    ${kpiCard('Sem Cadastro Genesis',list.filter(o=>o.medida280&&!o.armazenado&&!o.cancelado&&!o.cadastroConfirmado).length,'aguardando confirmação','#EF4444')}
   </div>`;
 
   // ── Tabela helper ──
