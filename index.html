@@ -642,10 +642,34 @@
   <div class="modal-section" id="secCadastro">
     <div class="modal-section-title">📋 Cadastro</div>
     <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
+    <div class="fg" id="fgTipoCadastro" style="display:none">
+      <label>Tipo de Cadastro</label>
+      <select id="oTipoCadastro">
+        <option value="">Selecione…</option>
+        <option value="parcial">📋 Parcial</option>
+        <option value="final">✅ Final</option>
+      </select>
+    </div>
     <!-- Aviso de pendência visível para gerente/fiscal -->
     <div id="msgCadastroPendenciaWarn" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);border-radius:6px;font-size:12px;color:#EF4444"></div>
     <div id="secCadastroConfirm" style="display:none">
-      <div class="toggle-row">
+      <!-- Genesis: seleciona tipo (parcial/final) e informa data do cadastro -->
+      <div id="secGenesisConfirmInputs" style="display:none;margin-bottom:12px;padding:10px 12px;background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.2);border-radius:6px">
+        <div class="fg" style="margin-bottom:8px">
+          <label style="color:var(--accent)">Confirmar como</label>
+          <select id="oCadastroGenesisType">
+            <option value="">Selecione…</option>
+            <option value="parcial">📋 Parcial</option>
+            <option value="final">✅ Final</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label style="color:var(--accent)">Data do Cadastro</label>
+          <input type="date" id="oDataCadastroConfirmado">
+        </div>
+      </div>
+      <!-- Toggle confirmar cadastro (para gerente) -->
+      <div id="rowCadastroConfirmado" class="toggle-row">
         <label class="toggle"><input type="checkbox" id="oCadastroConfirmado"><span class="toggle-slider"></span></label>
         <span class="toggle-lbl" style="color:var(--accent)">✓ Confirmar Cadastro</span>
       </div>
