@@ -1935,9 +1935,11 @@ window.openObraModal=function(obraId){
   const desEl=document.getElementById('oDesligamento');
   if(desEl){ desEl.min=hoje_s; desEl.removeAttribute('max'); }
 
+  // setChk disponível em todo o escopo do modal (usada dentro e fora do bloco isEdit)
+  const setChk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=!!v; };
+
   if(isEdit){
     const set=(id,v)=>{ const el=document.getElementById(id); if(el&&v!==undefined&&v!==null) el.value=v; };
-    const setChk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=!!v; };
     set('oNum',obra.numero); set('oTipo',obra.tipo); set('oCidade',obra.cidade);
     set('oEmp',obra.empreiteira); set('oFiscalNome',obra.fiscal);
     set('oAbertura',obra.dataAbertura);
@@ -2831,7 +2833,9 @@ function renderListaMedicoes(){
 function renderListaCadastrosEnviados(){
   const obraId=document.getElementById('obraId')?.value;
   const obra=obras.find(o=>o.id===obraId);
-  const existing=obra?.cadastrosEnviados||[];
+  // Compatibilidade retroativa: obras sem array mas com campo escalar legado
+  const existing=obra?.cadastrosEnviados||
+    (obra?.dataCadastro?[{id:'legado-env-1',data:obra.dataCadastro,tipo:obra.tipoCadastro||'final',legado:true}]:[]);
   const all=[...existing,..._cadEnvPendentes];
 
   // Helper: render one item row
@@ -2882,7 +2886,9 @@ function renderListaCadastrosEnviados(){
 function renderListaCadastrosConfirmados(){
   const obraId=document.getElementById('obraId')?.value;
   const obra=obras.find(o=>o.id===obraId);
-  const existing=obra?.cadastrosConfirmados||[];
+  // Compatibilidade retroativa: obras sem array mas com confirmação escalar legada
+  const existing=obra?.cadastrosConfirmados||
+    (obra?.cadastroConfirmado?[{id:'legado-conf-1',data:obra.dataCadastroConfirmado||'',tipo:'final',legado:true}]:[]);
   const all=[...existing,..._cadConfPendentes];
 
   const rowHtml=(c,isPend,canRemove)=>{
