@@ -1922,6 +1922,11 @@ window.openObraModal=function(obraId){
   _kaffasPendentes=[];
   _cadEnvPendentes=[];
   _cadConfPendentes=[];
+  // reset sub-seções de cadastro (fiscal/genesis/gerente) para evitar que estado
+  // de um perfil anterior fique visível ao abrir o modal com outro perfil
+  ['secCadastroFiscal','secCadastroGenesis','secCadastroGerente'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
   // reset oArmazenado to disabled (will be re-enabled by checkArmazenamentoDeps)
   const armEl=document.getElementById('oArmazenado'); if(armEl) armEl.disabled=true;
 
