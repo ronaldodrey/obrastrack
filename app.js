@@ -1903,11 +1903,11 @@ window.openObraModal=function(obraId){
   ['oNum','oFiscalNome','oAbertura','oPrazo','oUSC','oULV','oDesligamento','oConclusao','oPlacas','oSAP','oSerie',
    'oFabricante','oKaffa','oCadastro','oFiscalizacao','oPrazoPendencia','oRegularizacao','oMedicao',
    'oMedida70','oMedida230','oMedida280','oMedida280Motivo','oImpedimentoOutro','oPendenciaOutro',
-   'oDataCancelamento','oMotivoCancelamento','oDesligMotivo','oMotivoParalisada','oCaixaArmazenada','oDataCadastroConfirmado'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  ['oTipo','oCidade','oEmp','oTipoImpedimento','oPrazoOpcao','oTipoCadastro','oCadastroGenesisType'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+   'oDataCancelamento','oMotivoCancelamento','oDesligMotivo','oMotivoParalisada','oCaixaArmazenada'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  ['oTipo','oCidade','oEmp','oTipoImpedimento','oPrazoOpcao'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
   const prazoInp=document.getElementById('oPrazo'); if(prazoInp) prazoInp.style.display='none';
   ['oTemImpedimento','oTemPendencia','oPendenciaResolvida','oArmazenado','oCancelado',
-   'oDesligConfirmado','oDesligCancelado','oCadastroConfirmado','oParalisada',
+   'oDesligConfirmado','oDesligCancelado','oParalisada',
    'oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'].forEach(id=>{ const el=document.getElementById(id); if(el) el.checked=false; });
   // reset prazo pendência
   const selPrazoPend=document.getElementById('oPrazoPendenciaOpcao'); if(selPrazoPend) selPrazoPend.value='';
@@ -1917,9 +1917,11 @@ window.openObraModal=function(obraId){
   const inpFiscal=document.getElementById('oFiscalNome'); if(inpFiscal){ inpFiscal.style.display='none'; inpFiscal.value=''; }
   // reset checkboxes de pendência
   document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
-  // reset medições e kaffas pendentes
+  // reset medições, kaffas e cadastros pendentes
   _medicoesPendentes=[];
   _kaffasPendentes=[];
+  _cadEnvPendentes=[];
+  _cadConfPendentes=[];
   // reset oArmazenado to disabled (will be re-enabled by checkArmazenamentoDeps)
   const armEl=document.getElementById('oArmazenado'); if(armEl) armEl.disabled=true;
 
@@ -1966,7 +1968,7 @@ window.openObraModal=function(obraId){
        'secFisc',
        'secLocaisTrabalho',
        'secPendenciaDetalhe','fgPendenciaOutro',
-       'secCadastro','secCadastroConfirm',
+       'secCadastro',
        'secMedicao','secMedicaoParcialFields',
        'secMedidas','secMedida280Motivo',
        'secRegularizacao','secConfPendencia',
@@ -1998,7 +2000,7 @@ window.openObraModal=function(obraId){
        'secFisc',
        'secLocaisTrabalho',
        'secPendenciaDetalhe','fgPendenciaOutro',
-       'secCadastro','secCadastroConfirm',
+       'secCadastro',
        'secMedicao','secMedicaoParcialFields',
        'secMedidas','secMedida280Motivo',
        'secRegularizacao','secConfPendencia',
@@ -2016,14 +2018,7 @@ window.openObraModal=function(obraId){
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     // kaffaEntries rendered via renderListaKaffas above
-    set('oCadastro',obra.dataCadastro);
-    // Tipo de cadastro (fiscal seleciona) e confirmação Genesis
-    { const el=document.getElementById('oTipoCadastro'); if(el) el.value=obra.tipoCadastro||''; }
-    { const el=document.getElementById('oCadastroGenesisType');
-      if(el) el.value = obra.cadastroConfirmado ? 'final' : obra.cadastroParcialConfirmado ? 'parcial' : ''; }
-    { const el=document.getElementById('oDataCadastroConfirmado');
-      if(el) el.value = obra.cadastroConfirmado ? (obra.dataCadastroConfirmado||'')
-        : obra.cadastroParcialConfirmado ? (obra.dataCadastroParcialConfirmado||'') : ''; }
+    // Cadastro arrays renderizados via renderListaCadastrosEnviados/Confirmados acima
     set('oFiscalizacao',obra.fiscalizacao);
     // checkboxes de pendência (suporta array novo e string legada)
     const tipos = obra.tiposPendencia || (obra.tipoPendencia ? [obra.tipoPendencia] : []);
@@ -2090,9 +2085,11 @@ window.openObraModal=function(obraId){
       if(predFiscais.includes(obra.fiscal)){ selF.value=obra.fiscal; inpF.style.display='none'; }
       else { selF.value='outro'; inpF.style.display='block'; inpF.value=obra.fiscal; }
     }
-    // Render medições e kaffas list
+    // Render medições, kaffas e cadastros list
     renderListaMedicoes();
     renderListaKaffas();
+    renderListaCadastrosEnviados();
+    renderListaCadastrosConfirmados();
     // pendenciaDentroPrazo info
     const infoPP2=document.getElementById('infoPendenciaPrazo');
     if(infoPP2){
@@ -2105,7 +2102,6 @@ window.openObraModal=function(obraId){
       } else { infoPP2.style.display='none'; }
     }
     setChk('oDesligConfirmado',obra.desligamentoConfirmado); setChk('oDesligCancelado',obra.desligamentoCancelado);
-    setChk('oCadastroConfirmado',obra.cadastroConfirmado);
     // Pendência de cadastro
     setChk('oCadastroPendencia', obra.cadastroPendencia||false);
     const _pendDescEl = document.getElementById('oCadastroPendenciaDesc');
@@ -2202,36 +2198,40 @@ window.openObraModal=function(obraId){
   // Para obras ODI: pular bloco de showSec RD (ODI tem suas próprias seções)
   if(obra?.tipo === 'ODI'){
     // ODI: secIdentif já mostrada acima; ações ODI renderizadas no bloco anterior
-    // Genesis ODI: mostrar cadastro + confirmação
+    // Genesis ODI: mostrar cadastro (seção genesis com envios + confirmações)
     if(isGenesis){
       showSec('secCadastro');
-      const _fgTipoG=document.getElementById('fgTipoCadastro'); if(_fgTipoG) _fgTipoG.style.display='none';
-      if(obra?.dataCadastro){
-        showSec('secCadastroConfirm');
-        const _genBlk=document.getElementById('secGenesisConfirmInputs'); if(_genBlk) _genBlk.style.display='block';
-        const _rowCnf=document.getElementById('rowCadastroConfirmado'); if(_rowCnf) _rowCnf.style.display='none';
-      }
+      const _genDiv=document.getElementById('secCadastroGenesis'); if(_genDiv) _genDiv.style.display='block';
+      // Pendência de cadastro
+      setChk('oCadastroPendencia', obra?.cadastroPendencia||false);
+      const _pdDesc=document.getElementById('oCadastroPendenciaDesc'); if(_pdDesc) _pdDesc.value=obra?.cadastroPendenciaDesc||'';
+      const _pdSec=document.getElementById('secCadastroPendenciaDesc'); if(_pdSec) _pdSec.style.display=obra?.cadastroPendencia?'block':'none';
     }
-    // Estagiário, adm_odi e gerente: armazenamento ODI + confirmação de cadastro
+    // Estagiário, adm_odi e gerente: armazenamento ODI
     if(isEstagiario || p === 'adm_odi' || p === 'gerente'){
       if(isEdit){
         showSec('secArmazenamento');
         setTimeout(checkArmazenamentoDeps, 100);
-        // Confirmação de cadastro aparece para quem pode confirmar cadastro ODI
-        if(obra?.dataCadastro) showSec('secCadastroConfirm');
       }
+    }
+    // Gerente ODI: ver cadastros em leitura
+    if(p === 'gerente' && isEdit){
+      showSec('secCadastro');
+      const _gerDiv=document.getElementById('secCadastroGerente'); if(_gerDiv) _gerDiv.style.display='block';
     }
   } else {
   if(isGenesis){
-    // Genesis: SOMENTE secCadastro (data envio + bloco de confirmação)
+    // Genesis: secCadastro com seção de confirmações
     showSec('secCadastro');
-    const _fgTipoG2=document.getElementById('fgTipoCadastro'); if(_fgTipoG2) _fgTipoG2.style.display='none';
-    // Bloco de confirmação só aparece se já existe dataCadastro
-    if(obra?.dataCadastro){
-      showSec('secCadastroConfirm');
-      const _genBlk2=document.getElementById('secGenesisConfirmInputs'); if(_genBlk2) _genBlk2.style.display='block';
-      const _rowCnf2=document.getElementById('rowCadastroConfirmado'); if(_rowCnf2) _rowCnf2.style.display='none';
-    }
+    const _genDiv2=document.getElementById('secCadastroGenesis'); if(_genDiv2) _genDiv2.style.display='block';
+    // Pendência de cadastro
+    setChk('oCadastroPendencia', obra?.cadastroPendencia||false);
+    const _pdDesc2=document.getElementById('oCadastroPendenciaDesc'); if(_pdDesc2) _pdDesc2.value=obra?.cadastroPendenciaDesc||'';
+    const _pdSec2=document.getElementById('secCadastroPendenciaDesc'); if(_pdSec2) _pdSec2.style.display=obra?.cadastroPendencia?'block':'none';
+    // Desabilitar botão add se já existe final confirmado
+    const _allConfG=(obra?.cadastrosConfirmados||[]).concat(_cadConfPendentes);
+    const _hasFinalG=_allConfG.some(c=>c.tipo==='final');
+    const _btnCnf=document.getElementById('btnAddCadConf'); if(_btnCnf) _btnCnf.disabled=_hasFinalG;
 
   } else if(isEstagiario){
     // Estagiário: SOMENTE secArmazenamento
@@ -2290,18 +2290,18 @@ window.openObraModal=function(obraId){
     if(['gerente','fiscal'].includes(p) && isEdit && obra?.dataDesligamento) showSec('secDesligConfirm');
     toggleDesligamento();
 
-    // Cadastro (data de envio): fiscal e gerente preenchem
-    if(p === 'fiscal' || p === 'fiscal_adm' || p === 'gerente'){
+    // Cadastro: fiscal vê seção de envios; gerente vê ambas as listas (leitura)
+    if(p === 'fiscal' || p === 'fiscal_adm'){
       showSec('secCadastro');
-      const _fgTipoFG=document.getElementById('fgTipoCadastro'); if(_fgTipoFG) _fgTipoFG.style.display='grid';
+      const _fiscDiv=document.getElementById('secCadastroFiscal'); if(_fiscDiv) _fiscDiv.style.display='block';
+      // Bloqueia botão de novo envio se já existe final
+      const _allEnvF=(obra?.cadastrosEnviados||[]).concat(_cadEnvPendentes);
+      const _hasFinalF=_allEnvF.some(c=>c.tipo==='final');
+      const _btnAddE=document.getElementById('btnAddCadEnvio'); if(_btnAddE) _btnAddE.disabled=_hasFinalF;
     }
-
-    // Confirmação de cadastro: SOMENTE gerente (genesis tratado acima)
-    if(p === 'gerente' && isEdit && obra?.dataCadastro){
-      showSec('secCadastroConfirm');
-      // Gerente usa o toggle simples; esconde bloco genesis
-      const _rowCnf3=document.getElementById('rowCadastroConfirmado'); if(_rowCnf3) _rowCnf3.style.display='';
-      const _genBlk3=document.getElementById('secGenesisConfirmInputs'); if(_genBlk3) _genBlk3.style.display='none';
+    if(p === 'gerente' && isEdit){
+      showSec('secCadastro');
+      const _gerDiv2=document.getElementById('secCadastroGerente'); if(_gerDiv2) _gerDiv2.style.display='block';
     }
 
     // Pendência
@@ -2342,17 +2342,7 @@ window.openObraModal=function(obraId){
   if(btnKaffaEl) btnKaffaEl.style.display = (p === 'empreiteira' || p === 'gerente') ? 'inline-flex' : 'none';
 
   // 5. Listener do oCadastro para mostrar/ocultar confirmação
-  const cadEl = document.getElementById('oCadastro');
-  if(cadEl){
-    const newCadEl = cadEl.cloneNode(true);
-    cadEl.parentNode.replaceChild(newCadEl, cadEl);
-    newCadEl.addEventListener('change', ()=>{
-      // Confirmação: gerente e genesis (RD); ODI adiciona estagiário e adm_odi
-      const isODICtx = obras.find(o=>o.id===document.getElementById('obraId')?.value)?.tipo === 'ODI';
-      const canConfirm = ['gerente','genesis'].includes(p) || (isODICtx && ['estagiario','adm_odi'].includes(p));
-      document.getElementById('secCadastroConfirm').style.display = (newCadEl.value && canConfirm) ? 'block' : 'none';
-    });
-  }
+  // Cadastro usa listas de array agora; não há listener de input único
 
   // 6. Mensagem de pendência
   if(obra?.pendencia){
@@ -2650,6 +2640,8 @@ window.checkArmazenamentoDeps = function(){
 // ── MEDIÇÕES MÚLTIPLAS ────────────────────────────────────────────────
 let _medicoesPendentes = [];
 let _kaffasPendentes = [];
+let _cadEnvPendentes  = [];   // envios para cadastro pendentes (fiscal)
+let _cadConfPendentes = [];   // confirmações de cadastro pendentes (genesis)
 
 // ── KAFFA ENTRIES (parcial/final) ─────────────────────────────────────
 function tipoKaffa(obra){
@@ -2834,6 +2826,177 @@ function renderListaMedicoes(){
       </div>`;
     }).join('')}`;
 }
+// ── CADASTROS ENVIADOS / CONFIRMADOS (arrays) ─────────────────────────
+
+function renderListaCadastrosEnviados(){
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const existing=obra?.cadastrosEnviados||[];
+  const all=[...existing,..._cadEnvPendentes];
+
+  // Helper: render one item row
+  const rowHtml=(c,isPend,canRemove)=>{
+    const tipoChip=c.tipo==='final'?
+      '<span class="chip chip-green" style="font-size:9px">✅ Final</span>':
+      '<span class="chip chip-yellow" style="font-size:9px">📋 Parcial</span>';
+    const removeBtn=canRemove?
+      `<button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px;margin-left:auto" onclick="remCadEnvPend('${c.id}')">✕</button>`:'';
+    const newBadge=isPend?'<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>':'';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${isPend?'rgba(0,229,160,.06)':'var(--surface2)'};border-radius:6px;margin-bottom:5px;border:1px solid ${isPend?'rgba(0,229,160,.2)':'var(--border)'}">
+      <span style="font-size:10px;color:var(--muted);min-width:70px">${fmtTxt(c.data)}</span>
+      ${tipoChip}
+      ${c.legado?'<span style="font-size:10px;color:var(--muted)">(legado)</span>':''}
+      ${newBadge}${removeBtn}
+    </div>`;
+  };
+
+  const emptyMsg='<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhum envio registrado.</div>';
+
+  // Fiscal: editable list
+  const contFisc=document.getElementById('listaCadastrosEnviados');
+  if(contFisc){
+    if(!all.length){ contFisc.innerHTML=emptyMsg; }
+    else {
+      contFisc.innerHTML=[...all].reverse().map(c=>{
+        const isPend=_cadEnvPendentes.some(p=>p.id===c.id);
+        return rowHtml(c, isPend, isPend);
+      }).join('');
+    }
+  }
+
+  // Genesis: read-only reference
+  const contRef=document.getElementById('listaCadEnvRef');
+  if(contRef){
+    if(!all.length){ contRef.innerHTML=emptyMsg; }
+    else { contRef.innerHTML=[...all].reverse().map(c=>rowHtml(c,false,false)).join(''); }
+  }
+
+  // Gerente: read-only
+  const contGer=document.getElementById('listaCadastrosEnviadosGer');
+  if(contGer){
+    if(!all.length){ contGer.innerHTML=emptyMsg; }
+    else { contGer.innerHTML=[...all].reverse().map(c=>rowHtml(c,false,false)).join(''); }
+  }
+}
+
+function renderListaCadastrosConfirmados(){
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const existing=obra?.cadastrosConfirmados||[];
+  const all=[...existing,..._cadConfPendentes];
+
+  const rowHtml=(c,isPend,canRemove)=>{
+    const tipoChip=c.tipo==='final'?
+      '<span class="chip chip-green" style="font-size:9px">✅ Final</span>':
+      '<span class="chip chip-yellow" style="font-size:9px">📋 Parcial</span>';
+    const removeBtn=canRemove?
+      `<button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:10px;margin-left:auto" onclick="remCadConfPend('${c.id}')">✕</button>`:'';
+    const newBadge=isPend?'<span style="font-size:9px;color:var(--accent);margin-left:auto">novo</span>':'';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${isPend?'rgba(0,229,160,.06)':'var(--surface2)'};border-radius:6px;margin-bottom:5px;border:1px solid ${isPend?'rgba(0,229,160,.2)':'var(--border)'}">
+      <span style="font-size:10px;color:var(--muted);min-width:70px">${fmtTxt(c.data)}</span>
+      ${tipoChip}
+      ${newBadge}${removeBtn}
+    </div>`;
+  };
+
+  const emptyMsg='<div style="font-size:11px;color:var(--muted);padding:6px 0">Nenhuma confirmação registrada.</div>';
+
+  // Genesis: editable
+  const contGen=document.getElementById('listaCadastrosConfirmados');
+  if(contGen){
+    if(!all.length){ contGen.innerHTML=emptyMsg; }
+    else {
+      contGen.innerHTML=[...all].reverse().map(c=>{
+        const isPend=_cadConfPendentes.some(p=>p.id===c.id);
+        return rowHtml(c, isPend, isPend);
+      }).join('');
+    }
+  }
+
+  // Gerente: read-only
+  const contGerC=document.getElementById('listaCadConfGer');
+  if(contGerC){
+    if(!all.length){ contGerC.innerHTML=emptyMsg; }
+    else { contGerC.innerHTML=[...all].reverse().map(c=>rowHtml(c,false,false)).join(''); }
+  }
+}
+
+// ── ACTIONS: envio para cadastro ─────────────────────────────────────
+window.abrirFormCadEnvio = function(){
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const all=(obra?.cadastrosEnviados||[]).concat(_cadEnvPendentes);
+  if(all.some(c=>c.tipo==='final')){ toast('Esta obra já possui cadastro final enviado.','warn'); return; }
+  document.getElementById('formCadastroEnvio').style.display='block';
+  document.getElementById('btnAddCadEnvio').style.display='none';
+  document.getElementById('novoCadEnvioData').value=hojeStr();
+  document.getElementById('novoCadEnvioTipo').value='';
+};
+window.cancelarFormCadEnvio = function(){
+  document.getElementById('formCadastroEnvio').style.display='none';
+  document.getElementById('btnAddCadEnvio').style.display='';
+};
+window.confirmarCadastroEnvio = function(){
+  const data=(document.getElementById('novoCadEnvioData')?.value||'').trim();
+  const tipo=(document.getElementById('novoCadEnvioTipo')?.value||'').trim();
+  if(!data){ toast('Informe a data do envio.','warn'); return; }
+  if(!tipo){ toast('Selecione se o envio é parcial ou final.','warn'); return; }
+  _cadEnvPendentes.push({ id:'cadenv_'+Date.now(), data, tipo });
+  cancelarFormCadEnvio();
+  renderListaCadastrosEnviados();
+  if(tipo==='final'){
+    const btn=document.getElementById('btnAddCadEnvio');
+    if(btn){ btn.disabled=true; }
+  }
+};
+window.remCadEnvPend = function(id){
+  _cadEnvPendentes=_cadEnvPendentes.filter(c=>c.id!==id);
+  renderListaCadastrosEnviados();
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const all=(obra?.cadastrosEnviados||[]).concat(_cadEnvPendentes);
+  const btn=document.getElementById('btnAddCadEnvio');
+  if(btn){ btn.disabled=all.some(c=>c.tipo==='final'); }
+};
+
+// ── ACTIONS: confirmação de cadastro (genesis) ────────────────────────
+window.abrirFormCadConf = function(){
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const all=(obra?.cadastrosConfirmados||[]).concat(_cadConfPendentes);
+  if(all.some(c=>c.tipo==='final')){ toast('Esta obra já possui confirmação de cadastro final.','warn'); return; }
+  document.getElementById('formCadastroConf').style.display='block';
+  document.getElementById('btnAddCadConf').style.display='none';
+  document.getElementById('novoCadConfData').value=hojeStr();
+  document.getElementById('novoCadConfTipo').value='';
+};
+window.cancelarFormCadConf = function(){
+  document.getElementById('formCadastroConf').style.display='none';
+  document.getElementById('btnAddCadConf').style.display='';
+};
+window.confirmarCadastroConf = function(){
+  const data=(document.getElementById('novoCadConfData')?.value||'').trim();
+  const tipo=(document.getElementById('novoCadConfTipo')?.value||'').trim();
+  if(!data){ toast('Informe a data da confirmação.','warn'); return; }
+  if(!tipo){ toast('Selecione se a confirmação é parcial ou final.','warn'); return; }
+  _cadConfPendentes.push({ id:'cadconf_'+Date.now(), data, tipo });
+  cancelarFormCadConf();
+  renderListaCadastrosConfirmados();
+  if(tipo==='final'){
+    const btn=document.getElementById('btnAddCadConf');
+    if(btn){ btn.disabled=true; }
+  }
+};
+window.remCadConfPend = function(id){
+  _cadConfPendentes=_cadConfPendentes.filter(c=>c.id!==id);
+  renderListaCadastrosConfirmados();
+  const obraId=document.getElementById('obraId')?.value;
+  const obra=obras.find(o=>o.id===obraId);
+  const all=(obra?.cadastrosConfirmados||[]).concat(_cadConfPendentes);
+  const btn=document.getElementById('btnAddCadConf');
+  if(btn){ btn.disabled=all.some(c=>c.tipo==='final'); }
+};
+
 window.toggleCancelamento=function(){
   document.getElementById('secCancelamentoDetalhe').style.display=
     document.getElementById('oCancelado').checked?'block':'none';
@@ -2984,11 +3147,17 @@ window.saveObra=async function(){
           pendenciaDevolvidaEm: hojeStr(),
           pendenciaDevolvida: true,
         } : {}),
-        dataCadastro:g('oCadastro'), tipoCadastro:g('oTipoCadastro')||obraAntiga?.tipoCadastro||'',
-        cadastroConfirmado:gChk('oCadastroConfirmado'),
-        ...(gChk('oCadastroConfirmado')&&!obraAntiga?.cadastroConfirmado?{dataCadastroConfirmado:hojeStr()}:{}),
-        cadastroPendencia:gChk('oCadastroPendencia'),
-        cadastroPendenciaDesc:gChk('oCadastroPendencia')?(document.getElementById('oCadastroPendenciaDesc')?.value||'').trim():'',
+        // Gerente vê cadastros em leitura; preserva arrays e scalars existentes
+        cadastrosEnviados: obraAntiga?.cadastrosEnviados || [],
+        cadastrosConfirmados: obraAntiga?.cadastrosConfirmados || [],
+        dataCadastro: obraAntiga?.dataCadastro || '',
+        tipoCadastro: obraAntiga?.tipoCadastro || '',
+        cadastroConfirmado: obraAntiga?.cadastroConfirmado || false,
+        dataCadastroConfirmado: obraAntiga?.dataCadastroConfirmado || '',
+        cadastroParcialConfirmado: obraAntiga?.cadastroParcialConfirmado || false,
+        dataCadastroParcialConfirmado: obraAntiga?.dataCadastroParcialConfirmado || '',
+        cadastroPendencia: obraAntiga?.cadastroPendencia || false,
+        cadastroPendenciaDesc: obraAntiga?.cadastroPendenciaDesc || '',
         medicoes: allMedsG,
         medicao: lastMedG,
         medida70:g('oMedida70'), medida230:g('oMedida230'),
@@ -3016,8 +3185,9 @@ window.saveObra=async function(){
         cancelado:gChk('oCancelado'), dataCancelamento:g('oDataCancelamento'), motivoCancelamento:g('oMotivoCancelamento'),
         atualizadaEm:serverTimestamp()
       };
-      if(_kaffasPendentes.length>0)  _kaffasPendentes=[];
+      if(_kaffasPendentes.length>0)   _kaffasPendentes=[];
       if(_medicoesPendentes.length>0) _medicoesPendentes=[];
+      _cadEnvPendentes=[]; _cadConfPendentes=[];
 
       // ── ODI: campos específicos e preservação de ações ────────────────────
       if(patch.tipo==='ODI' || obraAntiga?.tipo==='ODI'){
@@ -3029,7 +3199,9 @@ window.saveObra=async function(){
          'devolucaoFinanceiraData','locaisTrabalho',
          // Pendência construtiva ODI (salva via odiRegistrarPendencia/odiResolverPendencia)
          'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
-         'armazenado','armazenamentoData','dataCadastro','cadastroConfirmado','cadastroPendencia','cadastroPendenciaDesc'
+         'armazenado','armazenamentoData','dataCadastro','tipoCadastro','cadastroConfirmado',
+         'cadastroPendencia','cadastroPendenciaDesc',
+         'cadastrosEnviados','cadastrosConfirmados'
         ].forEach(f=>{
           if(obraAntiga?.[f] !== undefined) patch[f] = obraAntiga[f];
           else delete patch[f];
@@ -3091,7 +3263,21 @@ window.saveObra=async function(){
           pendenciaDevolvidaEm: hojeStr(),
           pendenciaDevolvida: true,
         } : {}),
-        dataCadastro:g('oCadastro'), tipoCadastro:g('oTipoCadastro')||obraAntiga?.tipoCadastro||'',
+        // Cadastro: array de envios (fiscal adiciona via _cadEnvPendentes)
+        cadastrosEnviados: (()=>{
+          const existing = obraAntiga?.cadastrosEnviados||[];
+          // backward compat: se não há array mas há scalar, preserve como legado (sem migrar)
+          return [...existing, ..._cadEnvPendentes];
+        })(),
+        // Scalars derivados do array de envios (para backward compat/filtros)
+        dataCadastro: (()=>{
+          const all=[...(obraAntiga?.cadastrosEnviados||[]),..._cadEnvPendentes];
+          return all.length ? (all[all.length-1].data||obraAntiga?.dataCadastro||'') : (obraAntiga?.dataCadastro||'');
+        })(),
+        tipoCadastro: (()=>{
+          const all=[...(obraAntiga?.cadastrosEnviados||[]),..._cadEnvPendentes];
+          return all.length ? (all[all.length-1].tipo||'') : (obraAntiga?.tipoCadastro||'');
+        })(),
         // cadastroConfirmado only valid for gerente/genesis, fiscal cannot confirm
         medida70:g('oMedida70'), medida230:g('oMedida230'),
         medida280:g('oMedida280'), medida280Motivo:g('oMedida280Motivo'),
@@ -3103,6 +3289,7 @@ window.saveObra=async function(){
         atualizadaEm:serverTimestamp()
       };
       if(_medicoesPendentes.length > 0) _medicoesPendentes=[];
+      if(_cadEnvPendentes.length > 0) _cadEnvPendentes=[];
     _equipModificado = false;
 
       // ── ODI: preservar campos das ações ODI (salvos via odiSalvarCampo) ──
@@ -3110,7 +3297,8 @@ window.saveObra=async function(){
       if(obraAntiga?.tipo === 'ODI'){
         ['conclusao','fiscalizacao','kaffaODI',
          'pendencia','tiposPendencia','pendenciaOutro','pendenciaResolvida',
-         'dataCadastro','cadastroConfirmado','cadastroPendencia','cadastroPendenciaDesc',
+         'dataCadastro','tipoCadastro','cadastroConfirmado','cadastroPendencia','cadastroPendenciaDesc',
+         'cadastrosEnviados','cadastrosConfirmados',
          'nfEnviadaFlag','nfEnviadaData','nfLancadaData',
          'medida70','medida230','medida280',
          'devolucaoFinanceiraData','armazenado','locaisTrabalho'
@@ -3124,37 +3312,33 @@ window.saveObra=async function(){
       }
     }
 
-    // Patches para genesis (só confirmar cadastro) e estagiario (só armazenamento)
+    // Patches para genesis (confirmar cadastro via array) e estagiario (só armazenamento)
     if(me.perfil==='genesis'){
-      const cadData = g('oCadastro') || obraAntiga?.dataCadastro || '';
-      const genesisType = (document.getElementById('oCadastroGenesisType')?.value||'').trim(); // 'parcial' | 'final' | ''
-      const genesisDate = (document.getElementById('oDataCadastroConfirmado')?.value||'').trim();
+      const existingConf = obraAntiga?.cadastrosConfirmados || [];
+      const allConf = [...existingConf, ..._cadConfPendentes];
+      const hasFinal   = allConf.some(c=>c.tipo==='final');
+      const hasParcial = allConf.some(c=>c.tipo==='parcial');
       const cadPend = gChk('oCadastroPendencia');
       const cadPendDesc = (document.getElementById('oCadastroPendenciaDesc')?.value||'').trim();
+      // Derivar scalar de dataCadastroConfirmado a partir do array
+      const finalEntry  = hasFinal  ? allConf.filter(c=>c.tipo==='final').slice(-1)[0]  : null;
+      const parcialEntry= hasParcial ? allConf.filter(c=>c.tipo==='parcial').slice(-1)[0]: null;
       patch = {
-        dataCadastro: cadData,
+        cadastrosConfirmados: allConf,
+        // Scalars derivados (backward compat)
+        cadastroConfirmado: hasFinal,
+        cadastroParcialConfirmado: hasParcial && !hasFinal,
+        dataCadastroConfirmado: finalEntry?.data || (hasFinal ? hojeStr() : ''),
+        dataCadastroParcialConfirmado: parcialEntry?.data || '',
+        // Fiscal sends entries independently; genesis never clears dataCadastro
+        dataCadastro: obraAntiga?.dataCadastro || '',
+        tipoCadastro: obraAntiga?.tipoCadastro || '',
+        cadastrosEnviados: obraAntiga?.cadastrosEnviados || [],
         cadastroPendencia: cadPend,
         cadastroPendenciaDesc: cadPend ? cadPendDesc : '',
         atualizadaEm: serverTimestamp()
       };
-      if(genesisType === 'final'){
-        // Confirmação final: marca cadastroConfirmado e registra data
-        patch.cadastroConfirmado = true;
-        patch.dataCadastroConfirmado = genesisDate || hojeStr();
-        patch.cadastroParcialConfirmado = false;
-      } else if(genesisType === 'parcial'){
-        // Confirmação parcial: marca parcial, limpa dataCadastro p/ fiscal reenviar
-        patch.cadastroParcialConfirmado = true;
-        patch.dataCadastroParcialConfirmado = genesisDate || hojeStr();
-        patch.cadastroConfirmado = false;
-        patch.dataCadastro = '';   // limpa para fiscal poder reenviar
-        patch.tipoCadastro = '';
-      } else {
-        // Tipo não selecionado: preserva estado existente de confirmação
-        patch.cadastroConfirmado = obraAntiga?.cadastroConfirmado || false;
-        if(obraAntiga?.cadastroParcialConfirmado !== undefined)
-          patch.cadastroParcialConfirmado = obraAntiga.cadastroParcialConfirmado;
-      }
+      if(_cadConfPendentes.length > 0) _cadConfPendentes=[];
     }
     if(me.perfil==='estagiario'){
       const finalCheckEl=document.getElementById('oArmazenado');
@@ -3165,24 +3349,27 @@ window.saveObra=async function(){
         caixaArmazenada:g('oCaixaArmazenada'), atualizadaEm:serverTimestamp() };
       // RD: também salva medições assinadas; ODI: não tem medições assinadas
       if(!isODIObra) patch.medicoesAssinadas = gChk('oMedicoesAssinadas');
-      // ODI: estagiário também pode confirmar cadastro
+      // ODI: preserva confirmação de cadastro (genesis é quem confirma via arrays)
       if(isODIObra){
-        const cadConf = gChk('oCadastroConfirmado');
-        patch.cadastroConfirmado = cadConf;
-        if(cadConf && !obraAntiga?.cadastroConfirmado) patch.dataCadastroConfirmado = hojeStr();
+        patch.cadastroConfirmado = obraAntiga?.cadastroConfirmado || false;
+        patch.dataCadastroConfirmado = obraAntiga?.dataCadastroConfirmado || '';
+        patch.cadastrosEnviados    = obraAntiga?.cadastrosEnviados    || [];
+        patch.cadastrosConfirmados = obraAntiga?.cadastrosConfirmados || [];
       }
     }
-    // adm_odi: armazenamento ODI + confirmação de cadastro
+    // adm_odi: armazenamento ODI (cadastro confirmado preservado de genesis)
     if(me.perfil==='adm_odi'){
       const finalCheckEl=document.getElementById('oArmazenado');
-      const cadConf = gChk('oCadastroConfirmado');
       patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
         contratosAssinado:gChk('oContratosAssinado'),
         projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
-        cadastroConfirmado: cadConf,
+        // Preserva confirmação de cadastro (genesis é quem confirma)
+        cadastroConfirmado: obraAntiga?.cadastroConfirmado || false,
+        dataCadastroConfirmado: obraAntiga?.dataCadastroConfirmado || '',
+        cadastrosEnviados:    obraAntiga?.cadastrosEnviados    || [],
+        cadastrosConfirmados: obraAntiga?.cadastrosConfirmados || [],
         atualizadaEm:serverTimestamp() };
-      if(cadConf && !obraAntiga?.cadastroConfirmado) patch.dataCadastroConfirmado = hojeStr();
     }
 
     if(isEdit){
@@ -5837,6 +6024,135 @@ window.exportXLSXFiltrado=function(){
 };
 window.exportCSV=window.exportXLSX;
 window.exportCSVFiltrado=window.exportXLSXFiltrado;
+
+// ── EXPORTAR BASE HISTÓRICA (obras encerradas) ──────────────────────
+window.exportarBaseHistorica = async function(){
+  toast('Gerando base histórica…');
+  try {
+    await loadSheetJS();
+    const XLSX = window.XLSX;
+
+    // Encerrada = medida280 + armazenado
+    const encerradas = obras.filter(o => o.medida280 && o.armazenado);
+    const rdList  = encerradas.filter(o => o.tipo !== 'ODI');
+    const odiList = encerradas.filter(o => o.tipo === 'ODI');
+
+    const d=(v)=>{ if(!v)return ''; if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)){ const [y,m,dy]=v.split('-'); return `${dy}/${m}/${y}`; } return v; };
+    const n=(v)=>v!=null&&v!==''?v:'';
+
+    // ── Aba RD ─────────────────────────────────────────────────────
+    const rdHeader=[
+      'Número','Cidade','Tipo Obra','Data Abertura','Data Conclusão','Data Fiscalização',
+      'Medida 70','Medida 230','Medida 280',
+      'Qtd KAFFAs','Qtd KAFFA Parcial','Data Último KAFFA Parcial','Data KAFFA Final',
+      'Qtd Medições','Qtd Medições Parcial','Data Última Medição Parcial','Data Medição Final',
+      'Qtd Envios Cadastro','Qtd Env.Cadastro Parcial','Data Último Env.Parcial','Data Env.Final',
+      'Qtd Conf.Cadastro Genesis','Qtd Conf.Parcial Genesis','Data Última Conf.Parcial Genesis','Data Conf.Final Genesis',
+      'Cadastro Confirmado','Pendência Cadastro','Descrição Pendência Cadastro',
+      'Contratos Assinados','Medições Assinadas','Projetos As-Built','Caixa Armazenada','Data Armazenamento',
+      'Equip.Instalados (qtd)','Potências Instaladas','SAPs Instalados','Séries Instaladas','Data(s) Instalação',
+      'Equip.Retirados (qtd)','Potências Retiradas','SAPs Retirados','Séries Retiradas','Data(s) Retirada'
+    ];
+    const rdRows = rdList.map(o=>{
+      const kaffas  = o.kaffaEntries  || (o.kaffa  ? [{data:o.kaffa,  tipo:'final'}] : []);
+      const meds    = o.medicoes      || (o.medicao ? [{data:o.medicao, tipo:'final'}] : []);
+      const cEnv    = o.cadastrosEnviados   || (o.dataCadastro ? [{data:o.dataCadastro, tipo:o.tipoCadastro||'final'}] : []);
+      const cConf   = o.cadastrosConfirmados|| (o.cadastroConfirmado ? [{data:o.dataCadastroConfirmado||'', tipo:'final'}] : []);
+      const equipI  = o.equipamentosInstalados || [];
+      const equipR  = o.equipamentosRetirados  || [];
+      const kParcial= kaffas.filter(k=>k.tipo==='parcial');
+      const kFinal  = kaffas.filter(k=>k.tipo==='final');
+      const mParcial= meds.filter(m=>m.tipo==='parcial');
+      const mFinal  = meds.filter(m=>m.tipo==='final');
+      const cEnvP   = cEnv.filter(c=>c.tipo==='parcial');
+      const cEnvF   = cEnv.filter(c=>c.tipo==='final');
+      const cConfP  = cConf.filter(c=>c.tipo==='parcial');
+      const cConfF  = cConf.filter(c=>c.tipo==='final');
+      return [
+        n(o.numero), n(o.cidade), n(o.tipo)||'RD', d(o.abertura), d(o.conclusao), d(o.fiscalizacao),
+        d(o.medida70), d(o.medida230), d(o.medida280),
+        kaffas.length, kParcial.length,
+        kParcial.length ? d(kParcial.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        kFinal.length   ? d(kFinal[0].data) : '',
+        meds.length, mParcial.length,
+        mParcial.length ? d(mParcial.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        mFinal.length   ? d(mFinal[0].data) : '',
+        cEnv.length, cEnvP.length,
+        cEnvP.length ? d(cEnvP.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        cEnvF.length ? d(cEnvF[0].data) : '',
+        cConf.length, cConfP.length,
+        cConfP.length ? d(cConfP.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        cConfF.length ? d(cConfF[0].data) : '',
+        o.cadastroConfirmado ? 'Sim' : 'Não',
+        o.cadastroPendencia  ? 'Sim' : 'Não',
+        n(o.cadastroPendenciaDesc),
+        o.contratosAssinado  ? 'Sim' : 'Não',
+        o.medicoesAssinadas  ? 'Sim' : 'Não',
+        o.projetosAsBuilt    ? 'Sim' : 'Não',
+        n(o.caixaArmazenada), d(o.armazenamentoData),
+        equipI.length,
+        equipI.map(e=>n(e.potencia)).join('; '),
+        equipI.map(e=>n(e.sap)).join('; '),
+        equipI.map(e=>n(e.serie)).join('; '),
+        equipI.map(e=>d(e.dataTransf)).join('; '),
+        equipR.length,
+        equipR.map(e=>n(e.potencia)).join('; '),
+        equipR.map(e=>n(e.sap)).join('; '),
+        equipR.map(e=>n(e.serie)).join('; '),
+        equipR.map(e=>d(e.dataTransf)).join('; ')
+      ];
+    });
+
+    // ── Aba ODI ────────────────────────────────────────────────────
+    const odiHeader=[
+      'Número','Cidade','Data Abertura','Data Fiscalização','Data KAFFA ODI',
+      'NF Enviada','Data NF Enviada','Data NF Lançada',
+      'Medida 70','Medida 230','Medida 280',
+      'Qtd Envios Cadastro','Qtd Env.Cadastro Parcial','Data Último Env.Parcial','Data Env.Final',
+      'Qtd Conf.Cadastro Genesis','Qtd Conf.Parcial Genesis','Data Última Conf.Parcial Genesis','Data Conf.Final Genesis',
+      'Cadastro Confirmado','Pendência Cadastro','Descrição Pendência Cadastro',
+      'Contratos Assinados','Projetos As-Built','Caixa Armazenada','Data Armazenamento'
+    ];
+    const odiRows = odiList.map(o=>{
+      const cEnv  = o.cadastrosEnviados    || (o.dataCadastro ? [{data:o.dataCadastro, tipo:o.tipoCadastro||'final'}] : []);
+      const cConf = o.cadastrosConfirmados || (o.cadastroConfirmado ? [{data:o.dataCadastroConfirmado||'', tipo:'final'}] : []);
+      const cEnvP = cEnv.filter(c=>c.tipo==='parcial');
+      const cEnvF = cEnv.filter(c=>c.tipo==='final');
+      const cConfP= cConf.filter(c=>c.tipo==='parcial');
+      const cConfF= cConf.filter(c=>c.tipo==='final');
+      return [
+        n(o.numero), n(o.cidade), d(o.abertura), d(o.fiscalizacao), d(o.kaffaODI),
+        o.nfEnviadaFlag ? 'Sim' : 'Não', d(o.nfEnviadaData), d(o.nfLancadaData),
+        d(o.medida70), d(o.medida230), d(o.medida280),
+        cEnv.length, cEnvP.length,
+        cEnvP.length ? d(cEnvP.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        cEnvF.length ? d(cEnvF[0].data) : '',
+        cConf.length, cConfP.length,
+        cConfP.length ? d(cConfP.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
+        cConfF.length ? d(cConfF[0].data) : '',
+        o.cadastroConfirmado ? 'Sim' : 'Não',
+        o.cadastroPendencia  ? 'Sim' : 'Não',
+        n(o.cadastroPendenciaDesc),
+        o.contratosAssinado  ? 'Sim' : 'Não',
+        o.projetosAsBuilt    ? 'Sim' : 'Não',
+        n(o.caixaArmazenada), d(o.armazenamentoData)
+      ];
+    });
+
+    const wb = XLSX.utils.book_new();
+    const wsRD  = XLSX.utils.aoa_to_sheet([rdHeader,  ...rdRows]);
+    const wsODI = XLSX.utils.aoa_to_sheet([odiHeader, ...odiRows]);
+    XLSX.utils.book_append_sheet(wb, wsRD,  'RD Encerradas');
+    XLSX.utils.book_append_sheet(wb, wsODI, 'ODI Encerradas');
+
+    const today=hojeStr().replace(/-/g,'');
+    XLSX.writeFile(wb, `historico_obras_${today}.xlsx`);
+    toast(`✓ ${encerradas.length} obras encerradas exportadas (${rdList.length} RD + ${odiList.length} ODI).`);
+  } catch(e){
+    console.error('exportarBaseHistorica error:',e);
+    toast('Erro ao gerar histórico: '+e.message,'err');
+  }
+};
 
 // ══════════════════════════════════════════════════════
 
