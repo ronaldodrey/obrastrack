@@ -1013,12 +1013,14 @@ function renderGenesisTable(aguardando){
   </table></div>`;
 }
 function renderDashGenesis(list){
-  const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cancelado);
+  // Aguardando: tem dataCadastro, não confirmado E não tem parcial já confirmado
+  const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cadastroParcialConfirmado && !o.cancelado);
   const aguardandoRD  = aguardando.filter(o => o.tipo !== 'ODI');
   const aguardandoODI = aguardando.filter(o => o.tipo === 'ODI');
   window._genesisAguardandoAll = {rd: aguardandoRD, odi: aguardandoODI};
   // Obras com cadastro parcial confirmado aguardando envio de cadastro final pelo fiscal
-  const parcialConfirmado = list.filter(o => o.cadastroParcialConfirmado && !o.dataCadastro && !o.cadastroConfirmado && !o.cancelado);
+  // (inclui obras com ou sem dataCadastro — sai quando tiver cadastroConfirmado final)
+  const parcialConfirmado = list.filter(o => o.cadastroParcialConfirmado && !o.cadastroConfirmado && !o.cancelado);
   const confirmados = list.filter(o => o.cadastroConfirmado);
   const comPendencia = aguardando.filter(o => o.cadastroPendencia);
   const hoje_s = hojeStr();
@@ -1259,11 +1261,46 @@ function renderDashEstagiario(list){
     </table></div>`;
   }
 
-  html += '<div class="sect-title" style="margin-bottom:6px;margin-top:8px">📦 Monitor — Obras RD para Armazenar</div>';
-  html += tblArmazenamento(semArmRD, false);
+  // Salvar listas para filtro reativo
+  window._armRD = semArmRD; window._armODI = semArmODI;
 
-  html += '<div class="sect-title" style="margin-bottom:6px;margin-top:16px">📦 Monitor — Obras ODI para Armazenar</div>';
-  html += tblArmazenamento(semArmODI, true);
+  html += `<div style="display:flex;gap:10px;margin:8px 0 12px;flex-wrap:wrap;align-items:center">
+    <input type="text" id="fltArmBusca" placeholder="🔍 Filtrar por nº obra, cidade ou fiscal…"
+      style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;flex:1;min-width:200px;max-width:360px"
+      oninput="applyArmFilter()">
+    <select id="fltArmTipo" onchange="applyArmFilter()"
+      style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+      <option value="">Todos os tipos</option>
+      <option value="RD">Somente RD</option>
+      <option value="ODI">Somente ODI</option>
+    </select>
+  </div>
+
+  <div class="sect-title" style="margin-bottom:6px;margin-top:8px">📦 Monitor — Obras RD para Armazenar</div>
+  <div id="armTableContainerRD"></div>
+  <div class="sect-title" style="margin-bottom:6px;margin-top:16px">📦 Monitor — Obras ODI para Armazenar</div>
+  <div id="armTableContainerODI"></div>`;
+
+  // Inicializa tabelas (chamado também pelo applyArmFilter)
+  setTimeout(()=>{
+    const r=document.getElementById('armTableContainerRD'), od=document.getElementById('armTableContainerODI');
+    if(r) r.innerHTML=tblArmazenamento(window._armRD||[], false);
+    if(od) od.innerHTML=tblArmazenamento(window._armODI||[], true);
+  },0);
+
+  window.applyArmFilter = function(){
+    const q=(document.getElementById('fltArmBusca')?.value||'').toLowerCase().trim();
+    const t=(document.getElementById('fltArmTipo')?.value||'');
+    function filt(arr){ return arr.filter(o=>{
+      if(t==='RD' && o.tipo==='ODI') return false;
+      if(t==='ODI' && o.tipo!=='ODI') return false;
+      if(!q) return true;
+      return (o.numero||'').toLowerCase().includes(q)||(o.cidade||'').toLowerCase().includes(q)||(o.fiscal||'').toLowerCase().includes(q);
+    });}
+    const r=document.getElementById('armTableContainerRD'), od=document.getElementById('armTableContainerODI');
+    if(r) r.innerHTML=tblArmazenamento(filt(window._armRD||[]), false);
+    if(od) od.innerHTML=tblArmazenamento(filt(window._armODI||[]), true);
+  };
 
   // ── Seção preparatória: obras com Med.230 sem Med.280 ──
   if(prep230.length){
@@ -10589,23 +10626,18 @@ function renderDashAdmOdi(){
       }).filter(v=>v!==null);
       const mediaArmODI = diasArmODI.length ? Math.round(diasArmODI.reduce((a,b)=>a+b,0)/diasArmODI.length) : null;
 
-      let html2 = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;margin-top:4px">
-        <div style="font-weight:800;font-size:14px;margin-bottom:12px">📦 Monitor de Armazenamento ODI</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px">
-          ${kpiOdi('Ag. Armazenar', agArmODI.length,'#F59E0B')}
-          ${kpiOdi('Preparar (230 s/280)', prep230ODI_dash.length,'#3B82F6')}
-          ${kpiOdi('Tempo Médio', mediaArmODI!==null?mediaArmODI+'d':'—', mediaArmODI!==null?(mediaArmODI<=30?'#22C55E':mediaArmODI<=60?'#F59E0B':'#EF4444'):'#6B7280','Med.280→Arm.')}
-        </div>`;
-
-      if(agArmODI.length){
-        html2 += `<div style="font-size:11px;font-weight:700;color:#F59E0B;margin-bottom:6px">📦 Aguardando Armazenamento — Med.280 Registrada (${agArmODI.length})</div>
+      // Salvar lista para filtro reativo ODI
+      window._agArmODI_dash = agArmODI;
+      function renderAgArmODITable(lista){
+        if(!lista.length) return '<div style="font-size:11px;color:#22C55E;margin-bottom:8px">✅ Nenhuma obra ODI aguardando armazenamento.</div>';
+        return `<div style="font-size:11px;font-weight:700;color:#F59E0B;margin-bottom:6px">📦 Aguardando Armazenamento — Med.280 Registrada (${lista.length})</div>
           <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
             <thead><tr style="background:var(--surface2)">
               <th style="padding:5px 8px">Nota</th><th style="padding:5px 8px">Cidade</th>
               <th style="padding:5px 8px">Fiscal</th><th style="padding:5px 8px;text-align:center">Med.280</th>
               <th style="padding:5px 8px">Faltando</th><th style="padding:5px 8px"></th>
             </tr></thead>
-            <tbody>${agArmODI.map(o=>{
+            <tbody>${lista.map(o=>{
               const itens=[o.contratosAssinado?null:'Contratos',o.projetosAsBuilt?null:'As-Built',o.caixaArmazenada?null:'Caixa',o.cadastroConfirmado?null:'Cadastro Genesis'].filter(Boolean);
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:5px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
@@ -10617,9 +10649,34 @@ function renderDashAdmOdi(){
               </tr>`;}).join('')}
             </tbody>
           </table></div>`;
-      } else {
-        html2 += '<div style="font-size:11px;color:#22C55E;margin-bottom:8px">✅ Nenhuma obra ODI aguardando armazenamento.</div>';
       }
+
+      let html2 = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;margin-top:4px">
+        <div style="font-weight:800;font-size:14px;margin-bottom:12px">📦 Monitor de Armazenamento ODI</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px">
+          ${kpiOdi('Ag. Armazenar', agArmODI.length,'#F59E0B')}
+          ${kpiOdi('Preparar (230 s/280)', prep230ODI_dash.length,'#3B82F6')}
+          ${kpiOdi('Tempo Médio', mediaArmODI!==null?mediaArmODI+'d':'—', mediaArmODI!==null?(mediaArmODI<=30?'#22C55E':mediaArmODI<=60?'#F59E0B':'#EF4444'):'#6B7280','Med.280→Arm.')}
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+          <input type="text" id="fltOdiArmBusca" placeholder="🔍 Filtrar por nota, cidade ou fiscal…"
+            style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text);font-size:11px;flex:1;min-width:180px;max-width:340px"
+            oninput="applyOdiArmFilter()">
+        </div>
+        <div id="odiArmTableContainer"></div>`;
+
+      // Inicializa tabela via setTimeout (DOM pronto)
+      setTimeout(()=>{
+        const c=document.getElementById('odiArmTableContainer');
+        if(c) c.innerHTML=renderAgArmODITable(window._agArmODI_dash||[]);
+      },0);
+      window.applyOdiArmFilter=function(){
+        const q=(document.getElementById('fltOdiArmBusca')?.value||'').toLowerCase().trim();
+        const c=document.getElementById('odiArmTableContainer');
+        if(!c) return;
+        const filt=(window._agArmODI_dash||[]).filter(o=>!q||(o.numero||'').toLowerCase().includes(q)||(o.cidade||'').toLowerCase().includes(q)||(o.fiscal||'').toLowerCase().includes(q));
+        c.innerHTML=renderAgArmODITable(filt);
+      };
 
       if(prep230ODI_dash.length){
         html2 += `<div style="font-size:11px;font-weight:700;color:#3B82F6;margin-top:12px;margin-bottom:6px">🔵 Preparação Antecipada — Med.230 s/ Med.280 (${prep230ODI_dash.length})</div>
