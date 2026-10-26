@@ -375,6 +375,7 @@ function visibleObras(){
   if(me.perfil==='fiscal_adm') return obras; // acesso administrativo — vê todas
   if(me.perfil==='genesis')    return obras;   // só visualiza
   if(me.perfil==='estagiario') return obras; // visualiza + confirma armazenamento
+  if(me.perfil==='adm_odi')    return obras; // acesso completo — vê todas
   if(me.perfil==='empreiteira') return obras.filter(o=>o.empreiteira===me.vinculo);
   return [];
 }
@@ -1163,24 +1164,69 @@ window.applyGenesisFilter = function(){
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
 function renderDashEstagiario(list){
-  // Separar RD e ODI — APENAS obras com Med.280 registrada entram no monitor
+  // Separar RD e ODI — APENAS obras com Med.280 registrada entram no monitor de armazenamento
   const semArmRD  = list.filter(o => o.tipo !== 'ODI' && o.medida280 && !o.armazenado && !o.cancelado);
   const semArmODI = list.filter(o => o.tipo === 'ODI' && o.medida280 && !o.armazenado && !o.cancelado);
   const semArm    = [...semArmRD, ...semArmODI];
   const armOk     = list.filter(o => o.armazenado);
-  const semContr  = list.filter(o => o.medida280 && !o.armazenado && !o.contratosAssinado && !o.cancelado);
-  const semMed    = list.filter(o => o.tipo!=='ODI' && o.medida280 && !o.armazenado && !o.medicoesAssinadas && !o.cancelado);
-  const semProj   = list.filter(o => o.medida280 && !o.armazenado && !o.projetosAsBuilt && !o.cancelado);
+
+  // Obras com Med.230 mas sem Med.280 — preparação antecipada (verificar contratos, etc.)
+  const prep230RD  = list.filter(o => o.tipo !== 'ODI' && o.medida230 && !o.medida280 && !o.armazenado && !o.cancelado);
+  const prep230ODI = list.filter(o => o.tipo === 'ODI' && o.medida230 && !o.medida280 && !o.armazenado && !o.cancelado);
+  const prep230    = [...prep230RD, ...prep230ODI];
+
+  // KPI tempo médio de armazenamento: dias entre medida280 e armazenamentoData
+  const armComKpi = armOk.filter(o => o.medida280 && o.armazenamentoData);
+  function calcDiasArm(o){
+    if(!o.medida280 || !o.armazenamentoData) return null;
+    const d1=new Date(o.medida280+'T00:00:00'), d2=new Date(o.armazenamentoData+'T00:00:00');
+    const d=Math.round((d2-d1)/(1000*60*60*24)); return d>=0?d:null;
+  }
+  const diasArm = armComKpi.map(calcDiasArm).filter(v=>v!==null);
+  const mediaArm = diasArm.length ? Math.round(diasArm.reduce((a,b)=>a+b,0)/diasArm.length) : null;
+  const maxArm   = diasArm.length ? Math.max(...diasArm) : null;
+  const minArm   = diasArm.length ? Math.min(...diasArm) : null;
 
   let html = `<div class="kpi-strip">
-    ${kpiCard('Aguard. Armazenamento',semArm.length,'total pendente','#F59E0B')}
+    ${kpiCard('Aguard. Armazenar',semArm.length,'total com Med.280','#F59E0B')}
     ${kpiCard('Armazenadas',armOk.length,'concluídas','#22C55E')}
-    ${kpiCard('RD pendentes',semArmRD.length,'com Med.280','#F59E0B')}
+    ${kpiCard('RD pendentes',semArmRD.length,'obras RD','#F59E0B')}
     ${kpiCard('ODI pendentes',semArmODI.length,'obras ODI','#8B5CF6')}
+    ${kpiCard('Preparar (230 s/280)',prep230.length,'aguardando med.280','#3B82F6')}
     ${kpiCard('Sem Cadastro Genesis',list.filter(o=>o.medida280&&!o.armazenado&&!o.cancelado&&!o.cadastroConfirmado).length,'aguardando confirmação','#EF4444')}
   </div>`;
 
-  // ── Tabela helper ──
+  // ── KPI Tempo de Armazenamento ──
+  html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px">
+    <div style="font-weight:800;font-size:13px;margin-bottom:10px">⏱️ KPI — Tempo de Confirmação de Armazenamento</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">
+      Período medido: entrada da <strong>Medida 280</strong> até confirmação do armazenamento.
+      Base: ${diasArm.length} obra(s) já armazenada(s) com dados completos.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:900;color:${mediaArm!==null?(mediaArm<=30?'#22C55E':mediaArm<=60?'#F59E0B':'#EF4444'):'var(--muted)'}">
+          ${mediaArm!==null ? mediaArm+'d' : '—'}
+        </div>
+        <div style="font-size:9px;color:var(--muted)">Média (dias)</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:900;color:#EF4444">${maxArm!==null?maxArm+'d':'—'}</div>
+        <div style="font-size:9px;color:var(--muted)">Máximo (dias)</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:900;color:#22C55E">${minArm!==null?minArm+'d':'—'}</div>
+        <div style="font-size:9px;color:var(--muted)">Mínimo (dias)</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:22px;font-weight:900;color:#3B82F6">${semArm.length}</div>
+        <div style="font-size:9px;color:var(--muted)">Aguardando agora</div>
+      </div>
+    </div>
+    ${diasArm.length===0?'<div style="font-size:10px;color:var(--muted);margin-top:8px">ℹ️ KPI disponível após primeiras confirmações com Med.280 registrada.</div>':''}
+  </div>`;
+
+  // ── Tabela helper — obras aguardando armazenamento ──
   function tblArmazenamento(obras, isODI){
     if(!obras.length) return '<div class="empty" style="padding:16px"><div class="ico" style="font-size:18px">✅</div><p style="font-size:12px">Nenhuma obra pendente.</p></div>';
     const rows = obras.map(o=>{
@@ -1192,11 +1238,16 @@ function renderDashEstagiario(list){
         o.cadastroConfirmado?null:'Cadastro Genesis',
       ].filter(Boolean);
       const dataRef = isODI ? (o.dataAbertura||o.abertura||'—') : fmt(o.medida280);
+      // Dias aguardando desde Med.280
+      const diasEsp = !isODI && o.medida280 ? (()=>{
+        const d=diff(o.medida280, new Date().toISOString().split('T')[0]);
+        return d!==null ? `<span style="font-size:9px;color:${d>30?'#EF4444':'#F59E0B'}">${d}d</span>` : '';
+      })() : '';
       return `<tr>
         <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
         <td>${o.cidade||'—'}</td>
         <td>${o.fiscal||'—'}</td>
-        <td>${dataRef}</td>
+        <td>${dataRef} ${diasEsp}</td>
         <td>${itens.length?`<span class="chip chip-red">${itens.join(', ')}</span>`:'<span class="chip chip-green">Pronto p/ confirmar</span>'}</td>
         <td><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Armazenar</button></td>
       </tr>`;
@@ -1213,6 +1264,50 @@ function renderDashEstagiario(list){
 
   html += '<div class="sect-title" style="margin-bottom:6px;margin-top:16px">📦 Monitor — Obras ODI para Armazenar</div>';
   html += tblArmazenamento(semArmODI, true);
+
+  // ── Seção preparatória: obras com Med.230 sem Med.280 ──
+  if(prep230.length){
+    function tblPrep230(obras, isODI){
+      const hoje = new Date().toISOString().split('T')[0];
+      const rows = obras.map(o=>{
+        const prazo = prazoMedida280(o);
+        const vencido = prazo && prazo < hoje;
+        const itensContr = [
+          o.contratosAssinado?null:'⚠️ Contratos',
+          (!isODI && !o.medicoesAssinadas)?'⚠️ Medições':null,
+          o.projetosAsBuilt?null:'⚠️ As-Built',
+        ].filter(Boolean);
+        return `<tr>
+          <td><strong style="color:var(--accent)">${o.numero||'—'}</strong></td>
+          <td>${o.cidade||'—'}</td>
+          <td>${o.fiscal||'—'}</td>
+          <td>${fmt(o.medida230)}</td>
+          <td style="${vencido?'color:#EF4444;font-weight:700':''}">${prazo?fmt(prazo):'—'}${vencido?' ⚠️':''}</td>
+          <td>${itensContr.length?`<span style="font-size:9px;color:#F59E0B">${itensContr.join(' ')}</span>`:'<span style="font-size:9px;color:#22C55E">✓ OK</span>'}</td>
+          <td><button class="btn btn-secondary btn-sm" onclick="openObraModal('${o.id}')">Ver</button></td>
+        </tr>`;
+      }).join('');
+      return `<div class="tbl-wrap"><table>
+        <thead><tr><th>Nº Obra</th><th>Cidade</th><th>Fiscal</th><th>Med.230</th><th>Prazo Med.280</th><th>Checar</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+    html += `<div style="background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.25);border-radius:12px;padding:14px;margin-top:16px">
+      <div style="font-weight:800;font-size:13px;color:#3B82F6;margin-bottom:6px">🔵 Preparação Antecipada — Med.230 Registrada, Aguardando Med.280 (${prep230.length})</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:10px">
+        Obras que já têm Med.230 mas ainda não atingiram a Med.280. Use para adiantar a verificação de contratos e documentação antes do armazenamento.
+        As regras para confirmar o armazenamento continuam as mesmas.
+      </div>`;
+    if(prep230RD.length){
+      html += `<div style="font-size:11px;font-weight:700;color:#3B82F6;margin-bottom:6px">RD — ${prep230RD.length} obra(s)</div>`;
+      html += tblPrep230(prep230RD, false);
+    }
+    if(prep230ODI.length){
+      html += `<div style="font-size:11px;font-weight:700;color:#8B5CF6;margin-top:10px;margin-bottom:6px">ODI — ${prep230ODI.length} obra(s)</div>`;
+      html += tblPrep230(prep230ODI, true);
+    }
+    html += '</div>';
+  }
 
   return html;
 }
@@ -1759,6 +1854,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'encerradas')          baseList = baseList.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
   else if(_filtroRapidoAtivo === 'prob_executivo')      baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.impedimento&&!o.conclusao);
+  else if(_filtroRapidoAtivo === 'ag_armazenar')        baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
   let list = aplicarFiltros(baseList);
   // Fix #6: apply column sort
   if(_sortCol){
@@ -3383,6 +3479,11 @@ window.saveObra=async function(){
         atualizadaEm:serverTimestamp() };
     }
 
+    // Registrar data de armazenamento na primeira confirmação (cobre gerente, estagiário, adm_odi)
+    if(isEdit && patch.armazenado && !obraAntiga?.armazenado && !patch.armazenamentoData){
+      patch.armazenamentoData = hojeStr();
+    }
+
     if(isEdit){
       await updateDoc(doc(db,'obras',obraId),patch);
       // disparo de e-mails por evento
@@ -4033,7 +4134,7 @@ window.filtroRapido=function(tipo){
   const btnLimpar=document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display=tipo?'inline-flex':'none';
   const resumo=document.getElementById('filtrosResumo');
-  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
+  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','ag_armazenar':'Ag. Armazenar','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
   if(resumo) resumo.textContent=tipo?'Filtro rápido: '+(labels[tipo]||tipo):'';
   renderObras();
 };
@@ -6029,6 +6130,7 @@ window.exportXLSXFiltrado=function(){
   if(_filtroRapidoAtivo==='sem_medida70')     base=base.filter(o=>o.conclusao&&!o.medida70);
   else if(_filtroRapidoAtivo==='sem_medida230') base=base.filter(o=>o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
+  else if(_filtroRapidoAtivo==='ag_armazenar')        base=base.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
   else if(_filtroRapidoAtivo==='encerradas')          base=base.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo==='proc_cancelamento')   base=base.filter(o=>o.processoCancelamento&&!o.cancelado);
   gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
@@ -10475,7 +10577,79 @@ function renderDashAdmOdi(){
     ${tabelaOdi(agNF,'📋 Aguardando Recebimento de NF pela Empreiteira','#F97316',true,o=>diasEntre(o.kaffaODI))}
     ${tabelaOdi(agLancamento,'🧾 Aguardando Lançamento de Notas','#EF4444',true,o=>diasEntre(o.nfEnviadaData))}
     ${tabelaOdi(comPendencia,'⚠️ Obras com Pendência','#DC2626',false,null)}
-    
+
+    <!-- Monitor de Armazenamento ODI (adm_odi + gerente) -->
+    ${(()=>{
+      const agArmODI = odiObras.filter(o => o.medida280 && !o.armazenado);
+      const prep230ODI_dash = odiObras.filter(o => o.medida230 && !o.medida280 && !o.armazenado);
+      const armOkODI = odiObras.filter(o => o.armazenado && o.medida280 && o.armazenamentoData);
+      const diasArmODI = armOkODI.map(o=>{
+        const d1=new Date(o.medida280+'T00:00:00'), d2=new Date(o.armazenamentoData+'T00:00:00');
+        const d=Math.round((d2-d1)/(1000*60*60*24)); return d>=0?d:null;
+      }).filter(v=>v!==null);
+      const mediaArmODI = diasArmODI.length ? Math.round(diasArmODI.reduce((a,b)=>a+b,0)/diasArmODI.length) : null;
+
+      let html2 = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px;margin-top:4px">
+        <div style="font-weight:800;font-size:14px;margin-bottom:12px">📦 Monitor de Armazenamento ODI</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:12px">
+          ${kpiOdi('Ag. Armazenar', agArmODI.length,'#F59E0B')}
+          ${kpiOdi('Preparar (230 s/280)', prep230ODI_dash.length,'#3B82F6')}
+          ${kpiOdi('Tempo Médio', mediaArmODI!==null?mediaArmODI+'d':'—', mediaArmODI!==null?(mediaArmODI<=30?'#22C55E':mediaArmODI<=60?'#F59E0B':'#EF4444'):'#6B7280','Med.280→Arm.')}
+        </div>`;
+
+      if(agArmODI.length){
+        html2 += `<div style="font-size:11px;font-weight:700;color:#F59E0B;margin-bottom:6px">📦 Aguardando Armazenamento — Med.280 Registrada (${agArmODI.length})</div>
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:5px 8px">Nota</th><th style="padding:5px 8px">Cidade</th>
+              <th style="padding:5px 8px">Fiscal</th><th style="padding:5px 8px;text-align:center">Med.280</th>
+              <th style="padding:5px 8px">Faltando</th><th style="padding:5px 8px"></th>
+            </tr></thead>
+            <tbody>${agArmODI.map(o=>{
+              const itens=[o.contratosAssinado?null:'Contratos',o.projetosAsBuilt?null:'As-Built',o.caixaArmazenada?null:'Caixa',o.cadastroConfirmado?null:'Cadastro Genesis'].filter(Boolean);
+              return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:5px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
+                <td style="padding:5px 8px">${o.cidade||'—'}</td>
+                <td style="padding:5px 8px">${o.fiscal||'—'}</td>
+                <td style="padding:5px 8px;text-align:center">${fmtTxt(o.medida280)}</td>
+                <td style="padding:5px 8px">${itens.length?`<span style="font-size:9px;color:#F59E0B">${itens.join(', ')}</span>`:'<span style="font-size:9px;color:#22C55E">✓ Pronto</span>'}</td>
+                <td style="padding:5px 8px"><button class="btn btn-primary btn-sm" onclick="openObraModal('${o.id}')">Armazenar</button></td>
+              </tr>`;}).join('')}
+            </tbody>
+          </table></div>`;
+      } else {
+        html2 += '<div style="font-size:11px;color:#22C55E;margin-bottom:8px">✅ Nenhuma obra ODI aguardando armazenamento.</div>';
+      }
+
+      if(prep230ODI_dash.length){
+        html2 += `<div style="font-size:11px;font-weight:700;color:#3B82F6;margin-top:12px;margin-bottom:6px">🔵 Preparação Antecipada — Med.230 s/ Med.280 (${prep230ODI_dash.length})</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Verifique contratos e documentação antes da Med.280 para agilizar o armazenamento.</div>
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:5px 8px">Nota</th><th style="padding:5px 8px">Cidade</th>
+              <th style="padding:5px 8px">Fiscal</th><th style="padding:5px 8px;text-align:center">Med.230</th>
+              <th style="padding:5px 8px;text-align:center">Prazo Med.280</th>
+              <th style="padding:5px 8px">Checar</th><th style="padding:5px 8px"></th>
+            </tr></thead>
+            <tbody>${prep230ODI_dash.map(o=>{
+              const prazo=prazoMedida280(o); const venc=prazo&&prazo<hoje;
+              const itens=[o.contratosAssinado?null:'⚠️ Contratos',o.projetosAsBuilt?null:'⚠️ As-Built'].filter(Boolean);
+              return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:5px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
+                <td style="padding:5px 8px">${o.cidade||'—'}</td>
+                <td style="padding:5px 8px">${o.fiscal||'—'}</td>
+                <td style="padding:5px 8px;text-align:center">${fmtTxt(o.medida230)}</td>
+                <td style="padding:5px 8px;text-align:center;${venc?'color:#EF4444;font-weight:700':''}">${prazo?fmtTxt(prazo):'—'}${venc?' ⚠️':''}</td>
+                <td style="padding:5px 8px">${itens.length?`<span style="font-size:9px;color:#F59E0B">${itens.join(' ')}</span>`:'<span style="font-size:9px;color:#22C55E">✓ OK</span>'}</td>
+                <td style="padding:5px 8px"><button class="btn btn-secondary btn-sm" onclick="openObraModal('${o.id}')">Ver</button></td>
+              </tr>`;}).join('')}
+            </tbody>
+          </table></div>`;
+      }
+      html2 += '</div>';
+      return html2;
+    })()}
+
     <!-- Monitor de Prazos ODI -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
       <div style="font-weight:800;font-size:14px;margin-bottom:12px">📊 Monitor de Prazos — Medidas ODI</div>
