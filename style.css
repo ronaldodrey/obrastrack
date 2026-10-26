@@ -29,10 +29,10 @@ body{font-family:'DM Mono',monospace;background:var(--bg);color:var(--text);min-
 .btn-full{width:100%;justify-content:center;}
 
 /* HEADER */
-header{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:50;}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:50;overflow-x:auto;gap:16px;}
 .h-logo{font-family:'Syne',sans-serif;font-size:19px;font-weight:800;}
 .h-logo span{color:var(--accent);}
-.h-right{display:flex;align-items:center;gap:12px;}
+.h-right{display:flex;align-items:center;gap:8px;overflow-x:auto;flex-shrink:1;min-width:0;}
 .h-user{font-size:11px;color:var(--muted);}
 .h-user strong{color:var(--text);}
 .role-badge{font-size:9px;padding:2px 8px;border-radius:20px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
