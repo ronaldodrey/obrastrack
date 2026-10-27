@@ -3501,8 +3501,8 @@ window.saveObra=async function(){
         patch.cadastrosConfirmados = obraAntiga?.cadastrosConfirmados || [];
       }
     }
-    // adm_odi: armazenamento ODI (cadastro confirmado preservado de genesis)
-    if(me.perfil==='adm_odi'){
+    // adm_odi: armazenamento ODI — apenas ao editar obras existentes (nova obra usa patch completo)
+    if(me.perfil==='adm_odi' && isEdit){
       const finalCheckEl=document.getElementById('oArmazenado');
       patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
         contratosAssinado:gChk('oContratosAssinado'),
