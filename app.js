@@ -2375,6 +2375,10 @@ window.openObraModal=function(obraId){
       setChk('oCadastroPendencia', obra?.cadastroPendencia||false);
       const _pdDesc=document.getElementById('oCadastroPendenciaDesc'); if(_pdDesc) _pdDesc.value=obra?.cadastroPendenciaDesc||'';
       const _pdSec=document.getElementById('secCadastroPendenciaDesc'); if(_pdSec) _pdSec.style.display=obra?.cadastroPendencia?'block':'none';
+      // Desabilitar botão add se já existe final confirmado (idêntico ao bloco RD)
+      const _allConfGODI=(obra?.cadastrosConfirmados||[]).concat(_cadConfPendentes);
+      const _hasFinalGODI=_allConfGODI.some(c=>c.tipo==='final');
+      const _btnCnfODI=document.getElementById('btnAddCadConf'); if(_btnCnfODI) _btnCnfODI.disabled=_hasFinalGODI;
     }
     // Estagiário, adm_odi e gerente: armazenamento ODI
     if(isEstagiario || p === 'adm_odi' || p === 'gerente'){
