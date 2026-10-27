@@ -110,6 +110,11 @@ function statusOfODI(o){
     if(temPend) return 'Pendência Doc./Construtiva';
     return 'Ag. Medida 280';
   }
+  // Cadastro urgente ODI: fiscalizada +7d sem encaminhar cadastro
+  if(o.fiscalizacao && !o.dataCadastro){
+    const _dC = diff(o.fiscalizacao, new Date().toISOString().split('T')[0]);
+    if(_dC !== null && _dC > 7) return 'Encaminhar Cadastro Urgente';
+  }
   // NF lançada → Ag. Medidas 70/230 se sem pendência, senão Pendência
   if(o.nfLancadaData){
     const temPend = (o.pendenciasDocODI||[]).length>0 || (o.pendencia&&!o.pendenciaResolvida);
@@ -120,8 +125,14 @@ function statusOfODI(o){
   if(o.nfEnviadaFlag) return 'Ag. Lançamento NF';
   // Kaffa ODI feito → Ag. Notas Fiscais
   if(o.kaffaODI) return 'Ag. Notas Fiscais';
-  // Conclusão informada → Ag. Fiscalização/Kaffa
-  if(o.conclusao) return 'Ag. Fiscalização/Kaffa';
+  // Conclusão informada → cadUrg se +15d sem fiscalização, senão Ag. Fiscalização/Kaffa
+  if(o.conclusao){
+    if(!o.fiscalizacao){
+      const _dF = diff(o.conclusao, new Date().toISOString().split('T')[0]);
+      if(_dF !== null && _dF > 15) return 'Encaminhar Cadastro Urgente';
+    }
+    return 'Ag. Fiscalização/Kaffa';
+  }
   // Default
   return 'Em Execução';
 }
@@ -1012,6 +1023,26 @@ function renderGenesisTable(aguardando){
     <tbody>${rows}</tbody>
   </table></div>`;
 }
+// Tabela parcial confirmado (reutilizada na renderização e no filtro dinâmico)
+function renderGenesisParcialTableInner(obras){
+  if(!obras.length) return '<div class="empty" style="padding:12px"><div class="ico" style="font-size:14px">ℹ️</div><p style="font-size:11px">Nenhuma obra corresponde ao filtro.</p></div>';
+  return `<div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Fiscal</th><th>Data Parcial Conf.</th>
+      <th style="text-align:center">Med.230</th><th style="text-align:center">Med.280</th><th></th>
+    </tr></thead>
+    <tbody>${obras.map(o=>`<tr>
+      <td><strong style="color:#8B5CF6">${o.numero||'—'}</strong></td>
+      <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
+      <td>${o.cidade||'—'}</td>
+      <td>${o.fiscal||'—'}</td>
+      <td style="color:#8B5CF6">${fmtTxt(o.dataCadastroParcialConfirmado)||'—'}</td>
+      <td style="text-align:center;font-size:11px;${o.medida230?'color:#22C55E;font-weight:700':'color:var(--muted)'}">${o.medida230?fmtTxt(o.medida230):'—'}</td>
+      <td style="text-align:center;font-size:11px;${o.medida280?'color:#22C55E;font-weight:700':'color:var(--muted)'}">${o.medida280?fmtTxt(o.medida280):'—'}</td>
+      <td><button class="btn btn-sm" onclick="openObraModal('${o.id}')" style="background:rgba(139,92,246,.15);color:#8B5CF6;border:1px solid rgba(139,92,246,.35)">Ver Obra</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
 function renderDashGenesis(list){
   // Aguardando: tem dataCadastro, não confirmado E não tem parcial já confirmado
   const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cadastroParcialConfirmado && !o.cancelado);
@@ -1021,6 +1052,7 @@ function renderDashGenesis(list){
   // Obras com cadastro parcial confirmado aguardando envio de cadastro final pelo fiscal
   // (inclui obras com ou sem dataCadastro — sai quando tiver cadastroConfirmado final)
   const parcialConfirmado = list.filter(o => o.cadastroParcialConfirmado && !o.cadastroConfirmado && !o.cancelado);
+  window._genesisParcialAll = parcialConfirmado; // armazena para filtro dinâmico
   const confirmados = list.filter(o => o.cadastroConfirmado);
   const comPendencia = aguardando.filter(o => o.cadastroPendencia);
   const hoje_s = hojeStr();
@@ -1037,7 +1069,8 @@ function renderDashGenesis(list){
   </div>`;
   html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras Aguardando Confirmação de Cadastro</div>';
   // Filtros: número do projeto + fiscal (fiscais de RD e ODI combinados)
-  const fiscais = [...new Set(aguardando.map(o=>o.fiscal).filter(Boolean))].sort();
+  // Fiscais combinados: aguardando + parcial (para o filtro cobrir ambas as tabelas)
+  const fiscais = [...new Set([...aguardando,...parcialConfirmado].map(o=>o.fiscal).filter(Boolean))].sort();
   html += `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
     <input type="text" id="fltGenesisNumero" placeholder="Filtrar por nº obra…"
       style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;width:180px"
@@ -1067,19 +1100,9 @@ function renderDashGenesis(list){
     html += `<div class="sect-title" style="margin-top:20px;margin-bottom:10px;color:#8B5CF6">
       📋 Cadastro Parcial Confirmado — Aguardando Envio de Cadastro Final pelo Fiscal (${parcialConfirmado.length})
     </div>
-    <div class="tbl-wrap"><table>
-      <thead><tr>
-        <th>Nº Obra</th><th>Tipo</th><th>Cidade</th><th>Fiscal</th><th>Data Parcial Conf.</th><th></th>
-      </tr></thead>
-      <tbody>${parcialConfirmado.map(o=>`<tr>
-        <td><strong style="color:#8B5CF6">${o.numero||'—'}</strong></td>
-        <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
-        <td>${o.cidade||'—'}</td>
-        <td>${o.fiscal||'—'}</td>
-        <td style="color:#8B5CF6">${fmtTxt(o.dataCadastroParcialConfirmado)||'—'}</td>
-        <td><button class="btn btn-sm" onclick="openObraModal('${o.id}')" style="background:rgba(139,92,246,.15);color:#8B5CF6;border:1px solid rgba(139,92,246,.35)">Ver Obra</button></td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
+    <div id="genesisTableContainerParcial">
+      ${renderGenesisParcialTableInner(parcialConfirmado)}
+    </div>`;
   }
   // ── Seção Cadastro Urgente para Genesis ───────────────────────────────
   const genCadUrgFisc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&o.fiscalizacao&&!o.dataCadastro&&!o.cancelado);
@@ -1162,6 +1185,12 @@ window.applyGenesisFilter = function(){
   if(contRD)  contRD.innerHTML  = renderGenesisTable(filteredRD);
   const contODI = document.getElementById('genesisTableContainerODI');
   if(contODI) contODI.innerHTML = renderGenesisTable(filteredODI);
+  // Filtrar tabela de cadastro parcial
+  let filteredParcial = (window._genesisParcialAll||[]).slice();
+  if(num) filteredParcial = filteredParcial.filter(o=>(o.numero||'').toLowerCase().includes(num));
+  if(fis) filteredParcial = filteredParcial.filter(o=>o.fiscal===fis);
+  const contParcial = document.getElementById('genesisTableContainerParcial');
+  if(contParcial) contParcial.innerHTML = renderGenesisParcialTableInner(filteredParcial);
 };
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
