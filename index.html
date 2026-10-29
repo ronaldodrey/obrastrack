@@ -477,26 +477,19 @@
         <input type="number" id="oULVMedidoGerente" placeholder="Quantidade já medida" min="0" step="0.01">
       </div>
     </div>
-    <div class="fg" id="secDesligData"><label>Data de Desligamento Programado</label>
-      <input type="date" id="oDesligamento" min="">
+    <div class="modal-section-title" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">⚡ Desligamentos Programados</div>
+    <div id="secDesligData">
+      <!-- Lista de desligamentos gerenciada por renderDesligamentosModal() -->
+      <div id="divDesligList" style="margin-bottom:6px"></div>
+      <!-- Inputs legados (hidden, backward compat com toggleDesligamento e código legado) -->
+      <input type="hidden" id="oDesligamento" value="">
+      <input type="hidden" id="oDesligConfirmado" value="">
+      <input type="hidden" id="oDesligCancelado" value="">
+      <input type="hidden" id="oDesligMotivo" value="">
     </div>
     <div id="dataLimiteInfo" style="font-size:11px;color:var(--accent);margin-top:4px;display:none"></div>
-    <!-- Confirmação só pelo fiscal -->
-    <div id="secDesligConfirm" style="display:none;margin-top:10px">
-      <div class="toggle-row">
-        <label class="toggle"><input type="checkbox" id="oDesligConfirmado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
-        <span class="toggle-lbl" style="color:#22c55e;font-weight:600">✓ Desligamento confirmado</span>
-      </div>
-      <div class="toggle-row">
-        <label class="toggle"><input type="checkbox" id="oDesligCancelado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
-        <span class="toggle-lbl" style="color:var(--red);font-weight:600">✗ Desligamento cancelado</span>
-      </div>
-      <div id="secDesligMotivo" style="display:none">
-        <div class="fg"><label>Motivo do cancelamento do desligamento</label>
-          <textarea id="oDesligMotivo" rows="2" placeholder="Descreva o motivo..."></textarea>
-        </div>
-      </div>
-    </div>
+    <!-- secDesligConfirm mantido oculto para compatibilidade com código que faz showSec -->
+    <div id="secDesligConfirm" style="display:none"></div>
   </div>
   <div class="modal-section" id="secExec">
     <div class="modal-section-title">⚡ Execução — Empreiteira</div>
