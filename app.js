@@ -606,24 +606,25 @@ function renderDashGerente(list, listAll){
     ${kpiSplit('Prob. Executivo',r=>r.filter(x=>x.impedimento&&!x.conclusao).length,o=>o.filter(x=>x.impedimento&&!x.conclusao).length,'#B91C1C')}
     ${kpiSplit('Pendências Ativas',r=>r.filter(x=>x.pendencia&&!x.pendenciaResolvida).length,o=>o.filter(x=>x.pendencia&&!x.pendenciaResolvida).length,'#F97316')}
     ${kpiCard('Ag. Conf. Pend.',list.filter(o=>o.pendencia&&!o.pendenciaResolvida&&o.regularizacaoData).length,'fiscal conferir','#F59E0B')}
-    ${kpiCard('Cadastro Urgente',list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente').length,'+7d sem cadastro','#EF4444')}
+    ${kpiCard('Cadastro Pendente',list.filter(o=>!o.cancelado&&!o.armazenado&&((o.fiscalizacao&&!o.dataCadastro)||(o.conclusao&&!o.fiscalizacao))).length,'sem registro de envio','#EF4444')}
     ${kpiCard('Encerradas',list.filter(o=>statusOf(o)==='Encerrada').length,'armazenadas','#16A34A')}
   </div>`;
 
   // Tabela resumo por fiscal
-  // Cadastro urgente por fiscal
+  // Obras pendentes de envio para cadastro — mesmos critérios do Genesis, agrupado por fiscal
   const obsCadUrg = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
-  if(obsCadUrg.length){
-    const byFiscal={};
-    obsCadUrg.forEach(o=>{ const f=o.fiscal||'Sem Fiscal'; if(!byFiscal[f]) byFiscal[f]=[]; byFiscal[f].push(o); });
+  const gerPendCadFisc = list.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
+  const gerPendCadConc = list.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
+  if(gerPendCadFisc.length || gerPendCadConc.length){
+    const byFiscalPend={};
+    [...gerPendCadFisc,...gerPendCadConc].forEach(o=>{ const f=o.fiscal||'Sem Fiscal'; if(!byFiscalPend[f]) byFiscalPend[f]={fisc:[],conc:[]}; if(o.fiscalizacao&&!o.dataCadastro) byFiscalPend[f].fisc.push(o); else byFiscalPend[f].conc.push(o); });
     html+=`<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
-      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">📋 Cadastro Urgente Pendente (+7d após fiscalização)</div>
-      ${Object.entries(byFiscal).map(([fisc,obs])=>`
-        <div style="margin-bottom:8px">
-          <div style="font-size:11px;font-weight:700;margin-bottom:4px">👤 ${fisc} — ${obs.length} obra(s)</div>
-          <div style="display:flex;flex-wrap:wrap;gap:5px">
-            ${obs.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="aplicarFiltro('status','Encaminhar Cadastro Urgente')" title="${o.cidade||''}">${o.numero}</span>`).join('')}
-          </div>
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">📋 Envio para Cadastro Pendente — ${gerPendCadFisc.length+gerPendCadConc.length} obra(s)${obsCadUrg.length?` <span style="font-size:11px;font-weight:600;color:#F97316">(${obsCadUrg.length} urgentes 🚨)</span>`:''}</div>
+      ${Object.entries(byFiscalPend).sort((a,b)=>(b[1].fisc.length+b[1].conc.length)-(a[1].fisc.length+a[1].conc.length)).map(([fisc,grp])=>`
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;margin-bottom:4px">👤 ${fisc} — ${grp.fisc.length+grp.conc.length} obra(s)${(grp.fisc.filter(o=>obsCadUrg.some(u=>u.id===o.id)).length+grp.conc.filter(o=>obsCadUrg.some(u=>u.id===o.id)).length)?` <span style="color:#F97316;font-size:10px">(${grp.fisc.filter(o=>obsCadUrg.some(u=>u.id===o.id)).length+grp.conc.filter(o=>obsCadUrg.some(u=>u.id===o.id)).length} urgentes)</span>`:''}</div>
+          ${grp.fisc.length?`<div style="font-size:10px;color:var(--muted);margin-bottom:3px">Fiscalizadas sem cadastro: <span style="display:inline-flex;flex-wrap:wrap;gap:3px">${grp.fisc.map(o=>{const urg=obsCadUrg.some(u=>u.id===o.id);return`<span style="background:var(--surface);border:1px solid rgba(239,68,68,${urg?'.7':'.3'});border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;color:${urg?'#EF4444':'inherit'}" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Fisc: ${fmtTxt(o.fiscalizacao)}${urg?' ⚠️ urgente':''}">${o.numero}${urg?' 🚨':''}</span>`;}).join('')}</span></div>`:''}
+          ${grp.conc.length?`<div style="font-size:10px;color:var(--muted)">Concluídas sem fiscalizar: <span style="display:inline-flex;flex-wrap:wrap;gap:3px">${grp.conc.map(o=>{const urg=obsCadUrg.some(u=>u.id===o.id);return`<span style="background:var(--surface);border:1px solid rgba(249,115,22,${urg?'.7':'.3'});border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;color:${urg?'#F97316':'inherit'}" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Conc: ${fmtTxt(o.conclusao)}${urg?' ⚠️ urgente':''}">${o.numero}${urg?' 🚨':''}</span>`;}).join('')}</span></div>`:''}
         </div>`).join('')}
     </div>`;
   }
@@ -838,6 +839,9 @@ function renderDashFiscal(list, meuNome){
   const cadUrgente = minhas.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente');
   const cadUrgFisc = cadUrgente.filter(o=> o.fiscalizacao && !o.dataCadastro); // fiscalizada +7d sem cadastro
   const cadUrgConc = cadUrgente.filter(o=>!o.fiscalizacao && o.conclusao);      // concluída +15d sem fiscalizar
+  // Todos os pendentes de cadastro — mesmos critérios do Genesis (sem limite de prazo)
+  const pendCadFisc = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
+  const pendCadConc = minhas.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
   const mesAtual = new Date().getMonth(), anoAtual = new Date().getFullYear();
   const fiscMes = minhas.filter(o=>{ if(!o.fiscalizacao) return false; const d=new Date(o.fiscalizacao+'T00:00:00'); return d.getMonth()===mesAtual&&d.getFullYear()===anoAtual; });
   const tempoFisc = avgDiff(minhas,'conclusao','fiscalizacao');
@@ -851,25 +855,26 @@ function renderDashFiscal(list, meuNome){
     ${kpiCard('Para Medir',paraMedir.length,'kaffa sem medição (RD)','#6366F1')}
     ${kpiCard('Pendências Ativas',comPend.length,'não resolvidas','#F97316')}
     ${kpiCard('Ag. Conf. Pend.',agConfPend.length,'regularizadas p/ conferir','#F59E0B')}
-    ${kpiCard('Cadastro Urgente',cadUrgente.length,'+7d sem enviar','#EF4444')}
+    ${kpiCard('Cadastro Pendente',pendCadFisc.length+pendCadConc.length,'sem registro de envio','#EF4444')}
     ${kpiCard('Fiscalizadas/Mês',fiscMes.length,'mês corrente','#38bdf8')}
   </div>
   <!-- ── Velocidades por tipo ────────────────────────────────────────── -->
   ${window._velociTableFiscal(minhas)}`;
-  // Cadastro urgente para fiscal — suas obras
-  if(cadUrgente.length){
+  // Obras pendentes de envio para cadastro — mesmos critérios do Genesis
+  if(pendCadFisc.length || pendCadConc.length){
     html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px">
-      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">🚨 Cadastro Urgente — ${cadUrgente.length} obra(s)</div>
-      ${cadUrgFisc.length ? `<div style="margin-bottom:10px">
-        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:5px">📋 Fiscalizadas +7d sem encaminhar cadastro (${cadUrgFisc.length})</div>
+      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">📋 Envio para Cadastro Pendente — ${pendCadFisc.length+pendCadConc.length} obra(s)${cadUrgente.length?` <span style="font-size:11px;font-weight:600;color:#F97316">(${cadUrgente.length} urgentes 🚨)</span>`:''}
+      </div>
+      ${pendCadFisc.length ? `<div style="margin-bottom:10px">
+        <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:5px">📋 Fiscalizadas sem encaminhar cadastro (${pendCadFisc.length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px">
-          ${cadUrgFisc.map(o=>`<span style="background:var(--surface);border:1px solid rgba(239,68,68,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Fisc: ${fmtTxt(o.fiscalizacao)}">${o.numero}</span>`).join('')}
+          ${pendCadFisc.map(o=>{const urg=cadUrgFisc.some(u=>u.id===o.id);return `<span style="background:var(--surface);border:1px solid rgba(239,68,68,${urg?'.7':'.3'});border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;color:${urg?'#EF4444':'inherit'}" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Fisc: ${fmtTxt(o.fiscalizacao)}${urg?' ⚠️ urgente':''}">${o.numero}${urg?' 🚨':''}</span>`;}).join('')}
         </div>
       </div>` : ''}
-      ${cadUrgConc.length ? `<div>
-        <div style="font-size:10px;font-weight:700;color:#F97316;margin-bottom:5px">⏳ Concluídas +15d sem fiscalizar (${cadUrgConc.length})</div>
+      ${pendCadConc.length ? `<div>
+        <div style="font-size:10px;font-weight:700;color:#F97316;margin-bottom:5px">⏳ Concluídas sem fiscalizar (${pendCadConc.length})</div>
         <div style="display:flex;flex-wrap:wrap;gap:5px">
-          ${cadUrgConc.map(o=>`<span style="background:var(--surface);border:1px solid rgba(249,115,22,.4);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Conc: ${fmtTxt(o.conclusao)}">${o.numero}</span>`).join('')}
+          ${pendCadConc.map(o=>{const urg=cadUrgConc.some(u=>u.id===o.id);return `<span style="background:var(--surface);border:1px solid rgba(249,115,22,${urg?'.7':'.3'});border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;color:${urg?'#F97316':'inherit'}" onclick="openObraModal('${o.id}')" title="${o.cidade||''} · Conc: ${fmtTxt(o.conclusao)}${urg?' ⚠️ urgente':''}">${o.numero}${urg?' 🚨':''}</span>`;}).join('')}
         </div>
       </div>` : ''}
     </div>`;
@@ -2963,7 +2968,7 @@ window.checkArmazenamentoDeps = function(){
   const rowMed = document.getElementById('rowMedicoesAssinadas');
   if(rowMed) rowMed.style.display = isODI ? 'none' : '';
 
-  // Garante elemento de mensagem de bloqueio junto ao checkbox
+  // Garante elemento de mensagem de aviso junto ao checkbox
   let msgEl = document.getElementById('msgCadastroBlock');
   if(!msgEl){
     msgEl = document.createElement('p');
@@ -2971,7 +2976,7 @@ window.checkArmazenamentoDeps = function(){
     msgEl.style.cssText = 'color:var(--yellow);font-size:12px;margin:6px 0 0;display:none';
     final.parentNode?.insertBefore(msgEl, final.nextSibling);
   }
-  // Intertravamento: cadastro Genesis não confirmado → bloqueio total
+  // Bloqueio obrigatório: Genesis precisa confirmar cadastro antes do armazenamento
   if(!obra?.cadastroConfirmado){
     final.disabled = true;
     if(final.checked) final.checked = false;
