@@ -195,7 +195,13 @@ function statusSecundario(o){
   }
   // Desligamento programado: via SIMO importado (_deslMap) OU campo na própria obra
   const deslEntry = (window._deslMap||{})[String(o.numero||'').trim()];
+  // Desligamento: usa array novo (último não-cancelado) ou scalar legado
+  const latestDesl = (()=>{
+    const arr = (o.desligamentos||[]).filter(d=>d.status!=='cancelado');
+    return arr.length ? arr[arr.length-1].data : null;
+  })();
   const dtDesl = deslEntry?.dataProgram?.slice(0,10)
+    || latestDesl
     || (o.dataDesligamento && !o.desligamentoCancelado ? o.dataDesligamento : null);
   if(dtDesl){
     extra += `<span class="st" style="color:#7c6af7;background:rgba(124,106,247,.15);border-color:#7c6af744;margin-left:4px"><span style="background:#7c6af7"></span>⚡ Desl. ${fmtTxt(dtDesl)}</span>`;
@@ -621,6 +627,33 @@ function renderDashGerente(list, listAll){
         </div>`).join('')}
     </div>`;
   }
+  // ── Pendências Genesis (cadastroPendencia) agrupadas por fiscal ────────
+  const genPendGer = list.filter(o=>o.cadastroPendencia && !o.cadastroConfirmado && !o.cancelado);
+  if(genPendGer.length){
+    const byFiscalGen={};
+    genPendGer.forEach(o=>{ const f=o.fiscal||'Sem Fiscal'; if(!byFiscalGen[f]) byFiscalGen[f]=[]; byFiscalGen[f].push(o); });
+    html+=`<div style="background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:800;font-size:13px;color:#8B5CF6;margin-bottom:10px">📋 Pendências Genesis — ${genPendGer.length} obra(s) com pendência de cadastro</div>
+      ${Object.entries(byFiscalGen).map(([fisc,obs])=>`
+        <div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;margin-bottom:5px;color:var(--text)">👤 ${fisc} — ${obs.length} obra(s)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px">
+            <thead><tr style="color:var(--muted)">
+              <th style="text-align:left;padding:3px 8px;font-weight:600">Obra</th>
+              <th style="text-align:left;padding:3px 8px;font-weight:600">Cidade</th>
+              <th style="text-align:left;padding:3px 8px;font-weight:600">Pendência</th>
+            </tr></thead>
+            <tbody>
+              ${obs.map(o=>`<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
+                <td style="padding:3px 8px;font-weight:700">${o.numero}</td>
+                <td style="padding:3px 8px">${o.cidade||'—'}</td>
+                <td style="padding:3px 8px;color:#8B5CF6">${o.cadastroPendenciaDesc||'Pendência cadastro'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`).join('')}
+    </div>`;
+  }
   html += '<div class="sect-title" style="margin-bottom:10px">Painel de Fiscais</div>';
   html += tabelaResumoFiscais(list);
   // ── Painel de Programas ─────────────────────────────────────────────
@@ -841,6 +874,27 @@ function renderDashFiscal(list, meuNome){
       </div>` : ''}
     </div>`;
   }
+  // ── Pendências Genesis (cadastroPendencia) ─────────────────────────────
+  const genPendFisc = minhas.filter(o=>o.cadastroPendencia && !o.cadastroConfirmado && !o.cancelado);
+  if(genPendFisc.length){
+    html += `<div style="background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:800;font-size:13px;color:#8B5CF6;margin-bottom:10px">📋 Pendências Genesis — ${genPendFisc.length} obra(s)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="color:var(--muted)">
+          <th style="text-align:left;padding:4px 8px;font-weight:600">Obra</th>
+          <th style="text-align:left;padding:4px 8px;font-weight:600">Cidade</th>
+          <th style="text-align:left;padding:4px 8px;font-weight:600">Pendência</th>
+        </tr></thead>
+        <tbody>
+          ${genPendFisc.map(o=>`<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
+            <td style="padding:4px 8px;font-weight:700">${o.numero}</td>
+            <td style="padding:4px 8px">${o.cidade||'—'}</td>
+            <td style="padding:4px 8px;color:#8B5CF6">${o.cadastroPendenciaDesc||'Pendência cadastro'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }
   // Monitor de prazos: exclude ODI obras for fiscal (ODI monitor is in pgDashOdi for adm_odi/gerente)
   html += renderMonitorPrazos(minhas.filter(o=>o.tipo!=='ODI'));
   html += '<div class="sect-title" style="margin-bottom:12px">Pendências por Empreiteira</div>';
@@ -1043,6 +1097,67 @@ function renderGenesisParcialTableInner(obras){
     </tr>`).join('')}</tbody>
   </table></div>`;
 }
+// Tabela: fiscalizadas mas sem dataCadastro (independente do tempo)
+function renderPendCadFiscTable(obras){
+  const hoje_s = hojeStr();
+  if(!obras.length) return '<div class="empty" style="padding:12px"><div class="ico" style="font-size:14px">✅</div><p style="font-size:11px">Nenhuma obra pendente.</p></div>';
+  return `<div class="tbl-wrap"><table style="font-size:10px">
+    <thead><tr style="background:var(--surface2)">
+      <th style="padding:4px 8px;text-align:left">Nº</th>
+      <th style="padding:4px 8px;text-align:left">Tipo</th>
+      <th style="padding:4px 8px;text-align:left">Fiscal</th>
+      <th style="padding:4px 8px;text-align:left">Cidade</th>
+      <th style="padding:4px 8px;text-align:center">Fiscalizado</th>
+      <th style="padding:4px 8px;text-align:center">Dias s/ Cadastro</th>
+      <th style="padding:4px 8px"></th>
+    </tr></thead>
+    <tbody>${obras.sort((a,b)=>a.fiscalizacao>b.fiscalizacao?1:-1).map(o=>{
+      const d=diff(o.fiscalizacao,hoje_s);
+      const urg=d!==null&&d>7;
+      const cor=urg?'#EF4444':d!==null&&d>3?'#F97316':'var(--text)';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer${urg?';background:rgba(239,68,68,.04)':''}" onclick="openObraModal('${o.id}')">
+        <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero||'—'}</td>
+        <td style="padding:4px 8px">${o.tipo?`<span class="chip" style="font-size:9px">${o.tipo}</span>`:'—'}</td>
+        <td style="padding:4px 8px">${o.fiscal||'—'}</td>
+        <td style="padding:4px 8px">${o.cidade||'—'}</td>
+        <td style="padding:4px 8px;text-align:center">${fmt(o.fiscalizacao)}</td>
+        <td style="padding:4px 8px;text-align:center;color:${cor};font-weight:${urg?700:400}">${d!==null?d+'d':'—'}${urg?' ⚠️':''}</td>
+        <td style="padding:4px 8px"><button class="btn btn-sm" style="font-size:9px;padding:2px 6px" onclick="event.stopPropagation();openObraModal('${o.id}')">Abrir</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+// Tabela: concluídas sem fiscalização (independente do tempo)
+function renderPendCadConcTable(obras){
+  const hoje_s = hojeStr();
+  if(!obras.length) return '<div class="empty" style="padding:12px"><div class="ico" style="font-size:14px">✅</div><p style="font-size:11px">Nenhuma obra pendente.</p></div>';
+  return `<div class="tbl-wrap"><table style="font-size:10px">
+    <thead><tr style="background:var(--surface2)">
+      <th style="padding:4px 8px;text-align:left">Nº</th>
+      <th style="padding:4px 8px;text-align:left">Tipo</th>
+      <th style="padding:4px 8px;text-align:left">Fiscal</th>
+      <th style="padding:4px 8px;text-align:left">Cidade</th>
+      <th style="padding:4px 8px;text-align:center">Concluída</th>
+      <th style="padding:4px 8px;text-align:center">Dias s/ Fiscalização</th>
+      <th style="padding:4px 8px"></th>
+    </tr></thead>
+    <tbody>${obras.sort((a,b)=>a.conclusao>b.conclusao?1:-1).map(o=>{
+      const d=diff(o.conclusao,hoje_s);
+      const urg=d!==null&&d>15;
+      const cor=urg?'#EF4444':d!==null&&d>7?'#F97316':'var(--text)';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer${urg?';background:rgba(239,68,68,.04)':''}" onclick="openObraModal('${o.id}')">
+        <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero||'—'}</td>
+        <td style="padding:4px 8px">${o.tipo?`<span class="chip" style="font-size:9px">${o.tipo}</span>`:'—'}</td>
+        <td style="padding:4px 8px">${o.fiscal||'—'}</td>
+        <td style="padding:4px 8px">${o.cidade||'—'}</td>
+        <td style="padding:4px 8px;text-align:center">${fmt(o.conclusao)}</td>
+        <td style="padding:4px 8px;text-align:center;color:${cor};font-weight:${urg?700:400}">${d!==null?d+'d':'—'}${urg?' ⚠️':''}</td>
+        <td style="padding:4px 8px"><button class="btn btn-sm" style="font-size:9px;padding:2px 6px" onclick="event.stopPropagation();openObraModal('${o.id}')">Abrir</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
 function renderDashGenesis(list){
   // Aguardando: tem dataCadastro, não confirmado E não tem parcial já confirmado
   const aguardando = list.filter(o => o.dataCadastro && !o.cadastroConfirmado && !o.cadastroParcialConfirmado && !o.cancelado);
@@ -1056,25 +1171,43 @@ function renderDashGenesis(list){
   const confirmados = list.filter(o => o.cadastroConfirmado);
   const comPendencia = aguardando.filter(o => o.cadastroPendencia);
   const hoje_s = hojeStr();
-  // Avg time: dataCadastro → dataCadastroConfirmado
+  // Pré-calcular pendentes de encaminhar (para incluir nos fiscais do filtro)
+  const genCadPendFisc = list.filter(o=>!o.cancelado&&!o.armazenado&&o.fiscalizacao&&!o.dataCadastro);
+  const genCadPendConc = list.filter(o=>!o.cancelado&&!o.armazenado&&o.conclusao&&!o.fiscalizacao);
+  window._genesisPendAll = {fisc: genCadPendFisc, conc: genCadPendConc};
+  // Avg time: dataCadastro → dataCadastroConfirmado (ciclo completo)
   const tempos = confirmados.filter(o=>o.dataCadastro&&o.dataCadastroConfirmado).map(o=>diff(o.dataCadastro,o.dataCadastroConfirmado));
   const avgTempo = tempos.length ? Math.round(tempos.reduce((a,b)=>a+b,0)/tempos.length) : null;
+  // Avg time parcial: dataCadastro → dataCadastroParcialConfirmado
+  const temposParcial = list.filter(o=>o.dataCadastro&&o.dataCadastroParcialConfirmado).map(o=>diff(o.dataCadastro,o.dataCadastroParcialConfirmado));
+  const avgTempoParcial = temposParcial.length ? Math.round(temposParcial.reduce((a,b)=>a+b,0)/temposParcial.length) : null;
+  // Avg time final: dataCadastroParcialConfirmado → dataCadastroConfirmado
+  const temposFinal = confirmados.filter(o=>o.dataCadastroParcialConfirmado&&o.dataCadastroConfirmado).map(o=>diff(o.dataCadastroParcialConfirmado,o.dataCadastroConfirmado));
+  const avgTempoFinal = temposFinal.length ? Math.round(temposFinal.reduce((a,b)=>a+b,0)/temposFinal.length) : null;
+  const totalPend = genCadPendFisc.length+genCadPendConc.length;
   let html = `<div class="kpi-strip">
     ${kpiCard('Aguardando RD',aguardandoRD.length,'obras RD sem confirmar','#F59E0B')}
     ${kpiCard('Aguardando ODI',aguardandoODI.length,'obras ODI sem confirmar','#F97316')}
     ${kpiCard('Com Pendência',comPendencia.length,comPendencia.length>0?'⚠️ verificar':'sem pendências registradas',comPendencia.length>0?'#EF4444':'#22C55E')}
     ${kpiCard('Cadastros Confirmados',confirmados.length,'já confirmados','#22C55E')}
-    ${kpiCard('Aguard. Cadastro Final',parcialConfirmado.length,'parcial confirmado, aguard. final',parcialConfirmado.length>0?'#8B5CF6':'#22C55E')}
-    ${kpiCard('Tempo Médio Confirmação',avgTempo!==null?avgTempo+'d':'—','envio → confirmação','#06B6D4')}
+    ${kpiCard('Pend. Encaminhar Cad.',totalPend,totalPend>0?'⚠️ sem dataCadastro':'em dia',totalPend>0?'#EF4444':'#22C55E')}
+    ${kpiCard('Tempo Médio (ciclo)',avgTempo!==null?avgTempo+'d':'—','envio → confirmação final','#06B6D4')}
+    ${kpiCard('Tempo Médio Parcial',avgTempoParcial!==null?avgTempoParcial+'d':'—','envio → conf. parcial','#8B5CF6')}
+    ${kpiCard('Tempo Médio Final',avgTempoFinal!==null?avgTempoFinal+'d':'—','conf. parcial → conf. final','#EC4899')}
   </div>`;
   html += '<div class="sect-title" style="margin-bottom:10px">Monitor — Obras Aguardando Confirmação de Cadastro</div>';
-  // Filtros: número do projeto + fiscal (fiscais de RD e ODI combinados)
-  // Fiscais combinados: aguardando + parcial (para o filtro cobrir ambas as tabelas)
-  const fiscais = [...new Set([...aguardando,...parcialConfirmado].map(o=>o.fiscal).filter(Boolean))].sort();
+  // Filtros: número + fiscal + tipo (cobre todas as tabelas da seção genesis)
+  const fiscais = [...new Set([...aguardando,...parcialConfirmado,...genCadPendFisc,...genCadPendConc].map(o=>o.fiscal).filter(Boolean))].sort();
   html += `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
     <input type="text" id="fltGenesisNumero" placeholder="Filtrar por nº obra…"
       style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;width:180px"
       oninput="applyGenesisFilter()">
+    <select id="fltGenesisTipo" onchange="applyGenesisFilter()"
+      style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+      <option value="">Todos os tipos</option>
+      <option value="RD">RD</option>
+      <option value="ODI">ODI</option>
+    </select>
     <select id="fltGenesisFiscal" onchange="applyGenesisFilter()"
       style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
       <option value="">Todos os fiscais</option>
@@ -1104,62 +1237,30 @@ function renderDashGenesis(list){
       ${renderGenesisParcialTableInner(parcialConfirmado)}
     </div>`;
   }
-  // ── Seção Cadastro Urgente para Genesis ───────────────────────────────
-  const genCadUrgFisc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&o.fiscalizacao&&!o.dataCadastro&&!o.cancelado);
-  const genCadUrgConc = list.filter(o=>statusOf(o)==='Encaminhar Cadastro Urgente'&&!o.fiscalizacao&&o.conclusao&&!o.cancelado);
-
-  if(genCadUrgFisc.length || genCadUrgConc.length){
+  // ── Seção: Controle de Obras a Encaminhar para Cadastro ──────────────
+  // Usa os arrays pré-calculados (genCadPendFisc / genCadPendConc)
+  // NÃO depende de statusOf — cobre TODAS as obras sem dataCadastro
+  if(genCadPendFisc.length || genCadPendConc.length){
     html += `<div style="background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin-bottom:16px;margin-top:16px">
-      <div style="font-weight:800;font-size:13px;color:#EF4444;margin-bottom:10px">
-        🚨 Atenção: Obras Pendentes de Cadastro (${genCadUrgFisc.length+genCadUrgConc.length} total)
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
+        <div style="font-weight:800;font-size:13px;color:#EF4444">
+          📋 Controle — Obras a Encaminhar para Cadastro (${genCadPendFisc.length+genCadPendConc.length} total)
+        </div>
+        <div style="font-size:10px;color:var(--muted)">Use os filtros acima para pesquisar por fiscal, tipo ou nº</div>
       </div>
-      ${genCadUrgFisc.length ? `<div style="margin-bottom:10px">
+      ${genCadPendFisc.length ? `<div style="margin-bottom:14px">
         <div style="font-size:10px;font-weight:700;color:#EF4444;margin-bottom:6px">
-          📋 Fiscalizadas há +7 dias sem encaminhar cadastro (${genCadUrgFisc.length} obras)
+          📋 Fiscalizadas sem encaminhar para cadastro (${genCadPendFisc.length} obras)
+          <span style="font-weight:400;color:var(--muted);margin-left:6px">— ⚠️ vermelho = passou de 7 dias</span>
         </div>
-        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
-          <thead><tr style="background:var(--surface2)">
-            <th style="padding:4px 8px;text-align:left">Nº</th>
-            <th style="padding:4px 8px;text-align:left">Fiscal</th>
-            <th style="padding:4px 8px;text-align:left">Cidade</th>
-            <th style="padding:4px 8px;text-align:center">Fiscalizado</th>
-            <th style="padding:4px 8px;text-align:center;color:#EF4444">Dias</th>
-          </tr></thead>
-          <tbody>${genCadUrgFisc.sort((a,b)=>a.fiscalizacao>b.fiscalizacao?1:-1).map(o=>{
-            const d=diff(o.fiscalizacao,hoje_s);
-            return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
-              <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
-              <td style="padding:4px 8px">${o.fiscal||'—'}</td>
-              <td style="padding:4px 8px">${o.cidade||'—'}</td>
-              <td style="padding:4px 8px;text-align:center">${fmt(o.fiscalizacao)}</td>
-              <td style="padding:4px 8px;text-align:center;color:#EF4444;font-weight:700">${d!==null?d+'d':'—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
+        <div id="genesisPendCadFiscContainer">${renderPendCadFiscTable(genCadPendFisc)}</div>
       </div>` : ''}
-      ${genCadUrgConc.length ? `<div>
+      ${genCadPendConc.length ? `<div>
         <div style="font-size:10px;font-weight:700;color:#F97316;margin-bottom:6px">
-          ⏳ Concluídas há +15 dias ainda sem fiscalização (${genCadUrgConc.length} obras)
+          ⏳ Concluídas sem fiscalização (${genCadPendConc.length} obras)
+          <span style="font-weight:400;color:var(--muted);margin-left:6px">— ⚠️ vermelho = passou de 15 dias</span>
         </div>
-        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">
-          <thead><tr style="background:var(--surface2)">
-            <th style="padding:4px 8px;text-align:left">Nº</th>
-            <th style="padding:4px 8px;text-align:left">Fiscal</th>
-            <th style="padding:4px 8px;text-align:left">Cidade</th>
-            <th style="padding:4px 8px;text-align:center">Concluída</th>
-            <th style="padding:4px 8px;text-align:center;color:#F97316">Dias</th>
-          </tr></thead>
-          <tbody>${genCadUrgConc.sort((a,b)=>a.conclusao>b.conclusao?1:-1).map(o=>{
-            const d=diff(o.conclusao,hoje_s);
-            return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openObraModal('${o.id}')">
-              <td style="padding:4px 8px;font-weight:700;color:var(--accent)">${o.numero}</td>
-              <td style="padding:4px 8px">${o.fiscal||'—'}</td>
-              <td style="padding:4px 8px">${o.cidade||'—'}</td>
-              <td style="padding:4px 8px;text-align:center">${fmt(o.conclusao)}</td>
-              <td style="padding:4px 8px;text-align:center;color:#F97316;font-weight:700">${d!==null?d+'d':'—'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
+        <div id="genesisPendCadConcContainer">${renderPendCadConcTable(genCadPendConc)}</div>
       </div>` : ''}
     </div>`;
   }
@@ -1168,9 +1269,12 @@ function renderDashGenesis(list){
 }
 
 window.applyGenesisFilter = function(){
-  const num = (document.getElementById('fltGenesisNumero')?.value||'').trim().toLowerCase();
-  const fis = document.getElementById('fltGenesisFiscal')?.value||'';
-  const all = window._genesisAguardandoAll || {rd:[],odi:[]};
+  const num  = (document.getElementById('fltGenesisNumero')?.value||'').trim().toLowerCase();
+  const fis  = document.getElementById('fltGenesisFiscal')?.value||'';
+  const tipo = document.getElementById('fltGenesisTipo')?.value||'';
+  const all  = window._genesisAguardandoAll || {rd:[],odi:[]};
+
+  // ── Aguardando confirmação (RD / ODI) ─────────────────────────────────
   let filteredRD  = (all.rd||[]).slice();
   let filteredODI = (all.odi||[]).slice();
   if(num){
@@ -1181,16 +1285,52 @@ window.applyGenesisFilter = function(){
     filteredRD  = filteredRD.filter(o=>o.fiscal===fis);
     filteredODI = filteredODI.filter(o=>o.fiscal===fis);
   }
+  // Tipo: esconde container inteiro quando filtrado
+  const wrapRD  = document.getElementById('genesisTableContainerRD')?.parentElement;
+  const wrapODI = document.getElementById('genesisTableContainerODI')?.parentElement;
+  if(tipo==='ODI'){
+    if(wrapRD)  wrapRD.style.display='none';
+    if(wrapODI) wrapODI.style.display='';
+  } else if(tipo==='RD'){
+    if(wrapRD)  wrapRD.style.display='';
+    if(wrapODI) wrapODI.style.display='none';
+  } else {
+    if(wrapRD)  wrapRD.style.display='';
+    if(wrapODI) wrapODI.style.display='';
+  }
   const contRD  = document.getElementById('genesisTableContainerRD');
-  if(contRD)  contRD.innerHTML  = renderGenesisTable(filteredRD);
+  if(contRD  && tipo!=='ODI') contRD.innerHTML  = renderGenesisTable(filteredRD);
   const contODI = document.getElementById('genesisTableContainerODI');
-  if(contODI) contODI.innerHTML = renderGenesisTable(filteredODI);
-  // Filtrar tabela de cadastro parcial
+  if(contODI && tipo!=='RD')  contODI.innerHTML = renderGenesisTable(filteredODI);
+
+  // ── Cadastro parcial ───────────────────────────────────────────────────
   let filteredParcial = (window._genesisParcialAll||[]).slice();
-  if(num) filteredParcial = filteredParcial.filter(o=>(o.numero||'').toLowerCase().includes(num));
-  if(fis) filteredParcial = filteredParcial.filter(o=>o.fiscal===fis);
+  if(num)  filteredParcial = filteredParcial.filter(o=>(o.numero||'').toLowerCase().includes(num));
+  if(fis)  filteredParcial = filteredParcial.filter(o=>o.fiscal===fis);
+  if(tipo) filteredParcial = filteredParcial.filter(o=>tipo==='ODI'?o.tipo==='ODI':o.tipo!=='ODI');
   const contParcial = document.getElementById('genesisTableContainerParcial');
   if(contParcial) contParcial.innerHTML = renderGenesisParcialTableInner(filteredParcial);
+
+  // ── Pendentes de encaminhar para cadastro ─────────────────────────────
+  const pendAll = window._genesisPendAll || {fisc:[],conc:[]};
+  let filteredFisc = pendAll.fisc.slice();
+  let filteredConc = pendAll.conc.slice();
+  if(num){
+    filteredFisc = filteredFisc.filter(o=>(o.numero||'').toLowerCase().includes(num));
+    filteredConc = filteredConc.filter(o=>(o.numero||'').toLowerCase().includes(num));
+  }
+  if(fis){
+    filteredFisc = filteredFisc.filter(o=>o.fiscal===fis);
+    filteredConc = filteredConc.filter(o=>o.fiscal===fis);
+  }
+  if(tipo){
+    filteredFisc = filteredFisc.filter(o=>tipo==='ODI'?o.tipo==='ODI':o.tipo!=='ODI');
+    filteredConc = filteredConc.filter(o=>tipo==='ODI'?o.tipo==='ODI':o.tipo!=='ODI');
+  }
+  const contPendFisc = document.getElementById('genesisPendCadFiscContainer');
+  if(contPendFisc) contPendFisc.innerHTML = renderPendCadFiscTable(filteredFisc);
+  const contPendConc = document.getElementById('genesisPendCadConcContainer');
+  if(contPendConc) contPendConc.innerHTML = renderPendCadConcTable(filteredConc);
 };
 
 // ── DASHBOARD ESTAGIÁRIO ───────────────────────────────────────────────
@@ -1303,6 +1443,15 @@ function renderDashEstagiario(list){
       <option value="RD">Somente RD</option>
       <option value="ODI">Somente ODI</option>
     </select>
+    <select id="fltArmDoc" onchange="applyArmFilter()"
+      style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+      <option value="">Todos os doc. pendentes</option>
+      <option value="Contratos">⚠️ Contratos</option>
+      <option value="Medições">⚠️ Medições</option>
+      <option value="As-Built">⚠️ As-Built</option>
+      <option value="Caixa">⚠️ Caixa</option>
+      <option value="Cadastro Genesis">⚠️ Cadastro Genesis</option>
+    </select>
   </div>
 
   <div class="sect-title" style="margin-bottom:6px;margin-top:8px">📦 Monitor — Obras RD para Armazenar</div>
@@ -1320,15 +1469,27 @@ function renderDashEstagiario(list){
   window.applyArmFilter = function(){
     const q=(document.getElementById('fltArmBusca')?.value||'').toLowerCase().trim();
     const t=(document.getElementById('fltArmTipo')?.value||'');
-    function filt(arr){ return arr.filter(o=>{
+    const doc=(document.getElementById('fltArmDoc')?.value||'');
+    function pendDoc(o, isODI){
+      // Retorna array de docs pendentes igual ao tblArmazenamento
+      return [
+        o.contratosAssinado?null:'Contratos',
+        (!isODI && !o.medicoesAssinadas)?'Medições':null,
+        o.projetosAsBuilt?null:'As-Built',
+        o.caixaArmazenada?null:'Caixa',
+        o.cadastroConfirmado?null:'Cadastro Genesis',
+      ].filter(Boolean);
+    }
+    function filt(arr, isODI){ return arr.filter(o=>{
       if(t==='RD' && o.tipo==='ODI') return false;
       if(t==='ODI' && o.tipo!=='ODI') return false;
+      if(doc && !pendDoc(o, isODI).includes(doc)) return false;
       if(!q) return true;
       return (o.numero||'').toLowerCase().includes(q)||(o.cidade||'').toLowerCase().includes(q)||(o.fiscal||'').toLowerCase().includes(q);
     });}
     const r=document.getElementById('armTableContainerRD'), od=document.getElementById('armTableContainerODI');
-    if(r) r.innerHTML=tblArmazenamento(filt(window._armRD||[]), false);
-    if(od) od.innerHTML=tblArmazenamento(filt(window._armODI||[]), true);
+    if(r) r.innerHTML=tblArmazenamento(filt(window._armRD||[], false), false);
+    if(od) od.innerHTML=tblArmazenamento(filt(window._armODI||[], true), true);
   };
 
   // ── Seção preparatória: obras com Med.230 sem Med.280 ──
@@ -2016,7 +2177,17 @@ function renderObras(){
       <td>${o.prazoExecucao?o.prazoExecucao+'d':'—'}</td>
       <td>${fmt(o.dataLimite)}</td>
       <td>${!o.conclusao?diasHtml(limDias):'<span class="chip chip-green">Concluída</span>'}</td>
-      <td>${o.dataDesligamento?`<span style="color:${o.desligamentoConfirmado?'var(--green)':o.desligamentoCancelado?'var(--red)':'var(--text)'}">${fmtTxt(o.dataDesligamento)}${o.desligamentoConfirmado?' ✓':o.desligamentoCancelado?' ✗':''}</span>`:'—'}</td>
+      <td>${(()=>{
+        // Novo array: mostra último desligamento com status
+        const arr = o.desligamentos||[];
+        if(arr.length){
+          const last=arr[arr.length-1];
+          const sc=last.status==='aprovado'?'var(--green)':last.status==='cancelado'?'var(--red)':'var(--text)';
+          return `<span style="color:${sc}">${fmtTxt(last.data)}${last.status==='aprovado'?' ✓':last.status==='cancelado'?' ✗':''}</span>`;
+        }
+        // Legado scalar
+        return o.dataDesligamento?`<span style="color:${o.desligamentoConfirmado?'var(--green)':o.desligamentoCancelado?'var(--red)':'var(--text)'}">${fmtTxt(o.dataDesligamento)}${o.desligamentoConfirmado?' ✓':o.desligamentoCancelado?' ✗':''}</span>`:'—';
+      })()}</td>
       <td>${fmt(o.conclusao)}</td>
       <td>${fmt(o.fiscalizacao)}</td>
       <td>${pendChip}</td>
@@ -2079,11 +2250,14 @@ window.openObraModal=function(obraId){
   const inpFiscal=document.getElementById('oFiscalNome'); if(inpFiscal){ inpFiscal.style.display='none'; inpFiscal.value=''; }
   // reset checkboxes de pendência
   document.querySelectorAll('.chk-pendencia').forEach(el=>el.checked=false);
-  // reset medições, kaffas e cadastros pendentes
+  // reset medições, kaffas, cadastros e desligamentos pendentes
   _medicoesPendentes=[];
   _kaffasPendentes=[];
   _cadEnvPendentes=[];
   _cadConfPendentes=[];
+  _desligamentosEdit=[];
+  // renderiza lista vazia (para nova obra)
+  const _divDesl=document.getElementById('divDesligList'); if(_divDesl) _divDesl.innerHTML='';
   // reset sub-seções de cadastro (fiscal/genesis/gerente) para evitar que estado
   // de um perfil anterior fique visível ao abrir o modal com outro perfil
   ['secCadastroFiscal','secCadastroGenesis','secCadastroGerente'].forEach(id=>{
@@ -2092,15 +2266,12 @@ window.openObraModal=function(obraId){
   // reset oArmazenado to disabled (will be re-enabled by checkArmazenamentoDeps)
   const armEl=document.getElementById('oArmazenado'); if(armEl) armEl.disabled=true;
 
-  // Restrições de data: passado para campos normais, futuro para desligamento
+  // Restrições de data: passado para campos normais
   const hoje_s=hojeStr();
   ['oAbertura','oConclusao','oKaffa','oFiscalizacao','oCadastro','oMedicao',
    'oMedida70','oMedida230','oMedida280'].forEach(id=>{
     const el=document.getElementById(id); if(el){ el.max=hoje_s; el.removeAttribute('min'); }
   });
-  // Desligamento: presente ou futuro (pode ser hoje ou futuro)
-  const desEl=document.getElementById('oDesligamento');
-  if(desEl){ desEl.min=hoje_s; desEl.removeAttribute('max'); }
 
   // setChk disponível em todo o escopo do modal (usada dentro e fora do bloco isEdit)
   const setChk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=!!v; };
@@ -2183,7 +2354,16 @@ window.openObraModal=function(obraId){
     initEquipFromObra(obra);
     set('oPotencia',obra.potencia||''); set('oDataTransf',obra.dataTransf||''); set('oPotenciaRet',obra.potenciaRet||'');
     set('oSAPRet',obra.sapRet||''); set('oSerieRet',obra.serieRet||''); set('oFabricanteRet',obra.fabricanteRet||'');
-    const retChk=document.getElementById('oTemRetirado'); if(retChk){ retChk.checked=!!obra.temRetirado; toggleRetirado(); } set('oDesligamento',obra.dataDesligamento);
+    const retChk=document.getElementById('oTemRetirado'); if(retChk){ retChk.checked=!!obra.temRetirado; toggleRetirado(); }
+    // Inicializa _desligamentosEdit com array existente (ou converte legado)
+    _desligamentosEdit = (obra.desligamentos && obra.desligamentos.length)
+      ? JSON.parse(JSON.stringify(obra.desligamentos))
+      : (obra.dataDesligamento ? [{
+          id:'legado-desl-1', data:obra.dataDesligamento,
+          status: obra.desligamentoCancelado?'cancelado':obra.desligamentoConfirmado?'aprovado':'pendente',
+          registradoPor:'', registradoEm:'', legado:true
+        }] : []);
+    renderDesligamentosModal();
     set('oConclusao',obra.conclusao); set('oPlacas',obra.placas); set('oSAP',obra.sap);
     set('oSerie',obra.serie); set('oFabricante',obra.fabricante);
     // kaffaEntries rendered via renderListaKaffas above
@@ -2459,9 +2639,9 @@ window.openObraModal=function(obraId){
     }
 
     // Desligamento: fiscal, empreiteira e gerente preenchem a data
-    if(p !== 'gerente' || true) showSec('secDesligData'); // todos veem
-    if(['gerente','fiscal'].includes(p) && isEdit && obra?.dataDesligamento) showSec('secDesligConfirm');
-    toggleDesligamento();
+    showSec('secDesligData'); // todos veem; contém a lista gerenciada por renderDesligamentosModal()
+    // secDesligConfirm agora é substituído por botões inline por item (manter oculto)
+    // renderDesligamentosModal() já foi chamado acima ao carregar isEdit
 
     // Cadastro: fiscal vê seção de envios; gerente vê ambas as listas (leitura)
     if(p === 'fiscal' || p === 'fiscal_adm'){
@@ -2815,6 +2995,68 @@ let _medicoesPendentes = [];
 let _kaffasPendentes = [];
 let _cadEnvPendentes  = [];   // envios para cadastro pendentes (fiscal)
 let _cadConfPendentes = [];   // confirmações de cadastro pendentes (genesis)
+let _desligamentosEdit = [];  // lista de desligamentos editável no modal (array source-of-truth)
+
+// ── DESLIGAMENTOS (array por obra) ────────────────────────────────────
+window.renderDesligamentosModal = function(){
+  const cont = document.getElementById('divDesligList');
+  if(!cont) return;
+  const p = me?.perfil||'';
+  const canApprove = ['fiscal','fiscal_adm','gerente'].includes(p);
+  const canAdd     = p==='empreiteira';
+  const statusLabel = {pendente:'🕐 Pendente',aprovado:'✓ Aprovado',cancelado:'✗ Cancelado'};
+  const statusColor = {pendente:'#F59E0B',aprovado:'#22C55E',cancelado:'#EF4444'};
+  let html = '';
+  if(_desligamentosEdit.length){
+    html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">';
+    _desligamentosEdit.forEach(function(d,idx){
+      const sc = statusColor[d.status]||'#888';
+      html += `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;background:var(--surface);border-radius:8px;border:1px solid ${sc}55">
+        <span style="font-size:13px;font-weight:600">${fmtTxt(d.data)}</span>
+        <span style="font-size:10px;font-weight:700;color:${sc};background:${sc}18;padding:2px 8px;border-radius:6px">${statusLabel[d.status]||d.status}</span>
+        ${d.registradoPor?`<span style="font-size:10px;color:var(--muted)">${d.registradoPor}</span>`:''}
+        ${canApprove && d.status==='pendente' ? `<span style="margin-left:auto;display:flex;gap:6px">
+          <button type="button" onclick="aprovarDesligamentoModal(${idx})" style="padding:3px 10px;background:#22c55e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">Aprovar</button>
+          <button type="button" onclick="cancelarDesligamentoModal(${idx})" style="padding:3px 10px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">Cancelar</button>
+        </span>` : ''}
+        ${canApprove && d.status==='aprovado' ? `<button type="button" onclick="cancelarDesligamentoModal(${idx})" style="margin-left:auto;padding:3px 10px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">Cancelar</button>` : ''}
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="color:var(--muted);font-size:11px;margin-bottom:8px">Nenhum desligamento registrado.</div>';
+  }
+  if(canAdd){
+    html += `<div id="divNovoDeslig" style="display:none;flex-direction:column;gap:8px;margin-top:4px;padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+      <div class="fg"><label style="font-size:11px">Data do Novo Desligamento (hoje ou futuro)</label>
+        <input type="date" id="oNovoDesligData" min="${hojeStr()}">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="button" onclick="adicionarDesligamento()" style="padding:5px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Adicionar</button>
+        <button type="button" onclick="document.getElementById('divNovoDeslig').style.display='none';document.getElementById('btnNovoDesligAction').style.display='inline-flex'" style="padding:5px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">Cancelar</button>
+      </div>
+    </div>
+    <button type="button" id="btnNovoDesligAction" onclick="document.getElementById('divNovoDeslig').style.display='flex';this.style.display='none'" style="padding:5px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;color:var(--text)">+ Registrar Desligamento</button>`;
+  }
+  cont.innerHTML = html;
+};
+window.adicionarDesligamento = function(){
+  const v = (document.getElementById('oNovoDesligData')?.value||'').trim();
+  if(!v){ toast('Informe a data do desligamento.','err'); return; }
+  if(v < hojeStr()){ toast('A data do novo desligamento deve ser hoje ou futura.','err'); return; }
+  const uid = 'desl-'+Date.now();
+  _desligamentosEdit.push({id:uid, data:v, status:'pendente',
+    registradoPor: me?.nome||me?.vinculo||'', registradoEm:hojeStr()});
+  window.renderDesligamentosModal();
+};
+window.aprovarDesligamentoModal = function(idx){
+  if(_desligamentosEdit[idx]) _desligamentosEdit[idx].status='aprovado';
+  window.renderDesligamentosModal();
+};
+window.cancelarDesligamentoModal = function(idx){
+  if(_desligamentosEdit[idx]) _desligamentosEdit[idx].status='cancelado';
+  window.renderDesligamentosModal();
+};
 
 // ── KAFFA ENTRIES (parcial/final) ─────────────────────────────────────
 function tipoKaffa(obra){
@@ -3193,13 +3435,7 @@ window.togglePrazoCustom=function(){
   atualizarInfoLimite();
 };
 window.toggleDesligamento=function(){
-  const conf=document.getElementById('oDesligConfirmado')?.checked;
-  const canc=document.getElementById('oDesligCancelado')?.checked;
-  // se confirmou, desmarcar cancelado e vice-versa
-  if(conf) { const el=document.getElementById('oDesligCancelado'); if(el) el.checked=false; }
-  if(canc) { const el=document.getElementById('oDesligConfirmado'); if(el) el.checked=false; }
-  document.getElementById('secDesligMotivo').style.display=
-    document.getElementById('oDesligCancelado')?.checked?'block':'none';
+  // Legacy: noop — desligamentos agora gerenciados por renderDesligamentosModal()
 };
 
 // Lê os checkboxes de tipos de pendência
@@ -3236,6 +3472,17 @@ window.saveObra=async function(){
     const ab=g('oAbertura'), pr=g('oPrazo');
     const dataLimite=ab&&pr?addDias(ab,parseInt(pr)):null;
 
+    // ── Desligamentos: computa scalars para backward compat ────────────
+    const _deslActive = _desligamentosEdit.filter(d=>d.status!=='cancelado');
+    const _deslLast   = _desligamentosEdit.length ? _desligamentosEdit[_desligamentosEdit.length-1] : null;
+    const deslScalar  = {
+      desligamentos: _desligamentosEdit,
+      dataDesligamento: _deslActive.length ? _deslActive[_deslActive.length-1].data : '',
+      desligamentoConfirmado: !!(_deslActive.length && _deslActive[_deslActive.length-1].status==='aprovado'),
+      desligamentoCancelado:  !!(_desligamentosEdit.length && _deslActive.length===0),
+      desligamentoCanceladoMotivo: _deslLast?.motivoCancelamento || g('oDesligMotivo') || '',
+    };
+
     // ── VALIDAÇÕES — skip entirely for genesis and estagiário ──
     const erros=[];
     const skipValidations = ['genesis','estagiario'].includes(me.perfil);
@@ -3253,8 +3500,7 @@ window.saveObra=async function(){
         [g('oMedida280'),'Data Medida 280'],
       ];
       datasPassadas.forEach(([v,l])=>{ const e=validarDataPassada(v,l); if(e) erros.push(e); });
-      const errDes=validarDataFutura(g('oDesligamento'),'Data de Desligamento');
-      if(errDes) erros.push(errDes);
+      // Desligamentos agora são gerenciados como array; validação de nova data ocorre em adicionarDesligamento()
       const concl=g('oConclusao')||(obraAntiga?.conclusao||'');
       const fisc=g('oFiscalizacao')||(obraAntiga?.fiscalizacao||'');
       if(fisc&&concl&&fisc<concl) erros.push('Fiscalização não pode ser anterior à Conclusão.');
@@ -3293,9 +3539,7 @@ window.saveObra=async function(){
         dataLimite, usc:g('oUSC')?parseFloat(g('oUSC')):null, ulv:g('oULV')?parseFloat(g('oULV')):null,
         uscMedidoGerente:g('oUSCMedidoGerente')?parseFloat(g('oUSCMedidoGerente')):null,
         ulvMedidoGerente:g('oULVMedidoGerente')?parseFloat(g('oULVMedidoGerente')):null,
-        dataDesligamento:g('oDesligamento'),
-        desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
-        desligamentoCanceladoMotivo:g('oDesligMotivo'),
+        ...deslScalar,
         conclusao:g('oConclusao'), placas:g('oPlacas'), sap:g('oSAP'), serie:g('oSerie'), fabricante:g('oFabricante'),
         // Reset ciente do fiscal quando empreiteira informa kaffa/conclusão
         cienFisc: false,
@@ -3404,7 +3648,7 @@ window.saveObra=async function(){
         temRetirado:document.getElementById('oTemRetirado')?.checked||false,
         potenciaRet:g('oPotenciaRet')?parseFloat(g('oPotenciaRet'))||null:null,
         sapRet:g('oSAPRet')||null, serieRet:g('oSerieRet')||null, fabricanteRet:g('oFabricanteRet')||null,
-        dataDesligamento:g('oDesligamento'),
+        ...deslScalar,
         impedimento:gChk('oTemImpedimento'), tipoImpedimento:g('oTipoImpedimento'), impedimentoOutro:g('oImpedimentoOutro'),
         regularizacaoData:g('oRegularizacao'),
         // Reset flag de devolução quando empreiteira informa regularização novamente
@@ -3424,9 +3668,7 @@ window.saveObra=async function(){
       const finalMedsF = allMedsF.filter(m=>m.tipo==='final');
       const lastMedDate = finalMedsF.map(m=>m.data).filter(Boolean).sort().slice(-1)[0] || obraAntiga?.medicao || '';
       patch={
-        dataDesligamento:g('oDesligamento'),
-        desligamentoConfirmado:gChk('oDesligConfirmado'), desligamentoCancelado:gChk('oDesligCancelado'),
-        desligamentoCanceladoMotivo:g('oDesligMotivo'),
+        ...deslScalar,
         fiscalizacao:g('oFiscalizacao'), pendencia:gChk('oTemPendencia'),
         locaisTrabalho:(obraAntiga?.locaisTrabalho||[]).concat(_locaisPendentes),
         // Reset cienMed quando fiscal confirma nova fiscalização (spread condicional evita undefined)
@@ -3491,7 +3733,8 @@ window.saveObra=async function(){
 
     // Patches para genesis (confirmar cadastro via array) e estagiario (só armazenamento)
     if(me.perfil==='genesis'){
-      const existingConf = obraAntiga?.cadastrosConfirmados || [];
+      const existingConf = obraAntiga?.cadastrosConfirmados ||
+        (obraAntiga?.cadastroConfirmado ? [{id:'legado-conf-1',data:obraAntiga.dataCadastroConfirmado||'',tipo:'final',legado:true}] : []);
       const allConf = [...existingConf, ..._cadConfPendentes];
       const hasFinal   = allConf.some(c=>c.tipo==='final');
       const hasParcial = allConf.some(c=>c.tipo==='parcial');
@@ -3582,7 +3825,9 @@ window.saveObra=async function(){
         patch.dataCadastroConfirmado = hojeStr();
       }
       // Email: kaffa registrado pela empreiteira → avisa fiscal
-      if(me.perfil==='empreiteira' && _kaffasPendentes.length > 0 && patch.kaffaEntries){
+      // Nota: _kaffasPendentes já foi limpado na linha acima (empreiteira path).
+      // Compara tamanhos antigo vs. novo para detectar se houve adição.
+      if(me.perfil==='empreiteira' && patch.kaffaEntries){
         // Apenas os kaffas realmente novos (proteção contra slice(-0) que retorna array completo)
         const qtdAntigos = (obraAntiga?.kaffaEntries||[]).length;
         const qtdNovos   = patch.kaffaEntries.length - qtdAntigos;
@@ -3919,6 +4164,9 @@ async function enviarEmailPendencia(obra){
   const chave = `pendencia_${obra.id}`;
   if(await jaEnviou(chave)) return;
   const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
+  // CC: fiscal que registrou a pendência + gerente
+  const fiscalPend = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  const ccEmails = [fiscalPend?.email, EMAILJS_CONFIG.emailGerente].filter(Boolean).join(',');
   await enviarEmail(
     `SPPC ARLAG – Pendência registrada | Obra ${obra.numero} – ${obra.cidade}`,
     `Atenção, Empreiteira!
@@ -3928,9 +4176,10 @@ Foi registrada uma pendência na sua obra.
 • Obra: ${obra.numero} – ${obra.cidade}
 • Tipo: ${tipos}
 • Prazo para regularização: ${fmtTxt(obra.prazoPendencia)}
+• Fiscal responsável: ${obra.fiscal||'—'}
 
 Acesse o sistema SPPC ARLAG para regularizar.`,
-    emp.email, EMAILJS_CONFIG.emailGerente
+    emp.email, ccEmails
   );
   // (sem marcarEnviado)
 }
