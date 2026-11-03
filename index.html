@@ -3,11 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SPCC_ARLAG [v2608]</title>
+<title>SPCC_ARLAG [v2611]</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- v2611: Mapa da Rede -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
 
@@ -26,7 +30,7 @@
 <!-- APP -->
 <div id="appScreen" style="display:none">
   <header>
-    <div class="h-logo">SPCC_<span>ARLAG</span> <span style="font-size:9px;background:#7c6af7;color:#fff;padding:1px 6px;border-radius:4px;vertical-align:middle">v2608</span></div>
+    <div class="h-logo">SPCC_<span>ARLAG</span> <span style="font-size:9px;background:#7c6af7;color:#fff;padding:1px 6px;border-radius:4px;vertical-align:middle">v2611</span></div>
     <div class="h-right">
       <div class="h-user">Olá, <strong id="hName"></strong></div>
       <span class="role-badge" id="hRole"></span>
@@ -57,7 +61,6 @@
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
-        <button class="btn btn-secondary btn-sm" id="btnExportHistorico" onclick="exportarBaseHistorica()" title="Exporta obras encerradas (280 + armazenado) em dois tabs: RD e ODI">📦 Exportar Histórico</button>
         <button class="btn btn-secondary btn-sm" id="btnEquipDB" onclick="uploadEquipDB()" title="Carregar base de equipamentos para otimização" style="font-size:10px">📡 Base Equipamentos</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none" onclick="abrirBulk('medidas')">📐 Medidas em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkFisc" style="display:none" onclick="abrirBulk('fisc')">🔍 Fiscalização em Lote</button>
@@ -203,7 +206,6 @@
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida70')">📋 Sem Med. 70</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida230')">📋 Sem Med. 230</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('med230_sem280')">📋 Med.230 s/ 280</button>
-        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('ag_armazenar')" style="color:#F59E0B;border-color:rgba(245,158,11,.4)">📦 Ag. Armazenar</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_conclusao')">🔲 Sem Conclusão</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('fisc_sem_cad')">📋 Fisc. s/ Cadastro</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('fisc_sem_med')">📐 Fisc. s/ Medição</button>
@@ -296,10 +298,162 @@
     </div>
   </div>
 
-  <!-- PEDIDOS -->
   <div class="page" id="pgPedidos">
     <div id="pgPedidosContent"><div class="loading">Carregando...</div></div>
   </div>
+
+  <!-- MAPA DA REDE (v2611) -->
+  <div class="page" id="pgMapa"><div class="loading">Carregando mapa...</div></div>
+</div>
+
+<!-- MODAL PEDIDO -->
+<div class="overlay" id="ovPedido">
+ <div class="modal">
+  <h2 id="pedidoModalTit">Novo Pedido</h2>
+  <input type="hidden" id="pedidoId">
+  <div class="modal-section">
+    <div class="modal-section-title">📋 Identificação do Pedido</div>
+    <div class="fg-grid">
+      <div class="fg"><label>Nota (nº do projeto) *</label><input type="text" id="pdNota" placeholder="Ex: 123456"></div>
+      <div class="fg">
+        <label>Tipo de Solicitação *</label>
+        <select id="pdTipoSolicitacao" onchange="onTipoSolicitacaoChange()">
+          <option value="">— selecione —</option>
+          <option value="Alimentadores">Alimentadores</option>
+          <option value="Equipamentos Especiais">Equipamentos Especiais</option>
+          <option value="Ext. para Ilum. Pública">Ext. para Ilum. Pública</option>
+          <option value="Interligação Proj. Particular">Interligação Proj. Particular</option>
+          <option value="Ligação nova Rural">Ligação nova Rural</option>
+          <option value="Ligação Nova Urbana">Ligação Nova Urbana</option>
+          <option value="Loteamento – Conexão">Loteamento – Conexão</option>
+          <option value="Melhorias">Melhorias</option>
+          <option value="Outros (Descrever)">Outros (Descrever)</option>
+          <option value="PVNT">PVNT</option>
+          <option value="Remoção e Deslocamento">Remoção e Deslocamento</option>
+          <option value="Troca de Padrão">Troca de Padrão</option>
+        </select>
+        <div id="pdTipoPedidoPreview" style="font-size:10px;color:var(--muted);margin-top:3px">—</div>
+      </div>
+      <div class="fg"><label>Data de Abertura do Pedido *</label><input type="date" id="pdDataAbertura"></div>
+      <div class="fg">
+        <label>Município *</label>
+        <select id="pdMunicipio">
+          <option value="">— selecione —</option>
+          <option value="ANITA GARIBALDI">ANITA GARIBALDI</option>
+          <option value="BOCAINA DO SUL">BOCAINA DO SUL</option>
+          <option value="BOM JARDIM DA SERRA">BOM JARDIM DA SERRA</option>
+          <option value="BOM RETIRO">BOM RETIRO</option>
+          <option value="CAMPO BELO DO SUL">CAMPO BELO DO SUL</option>
+          <option value="CAPAO ALTO">CAPAO ALTO</option>
+          <option value="CELSO RAMOS">CELSO RAMOS</option>
+          <option value="CERRO NEGRO">CERRO NEGRO</option>
+          <option value="CORREIA PINTO">CORREIA PINTO</option>
+          <option value="CURITIBANOS">CURITIBANOS</option>
+          <option value="FREI ROGERIO">FREI ROGERIO</option>
+          <option value="LAGES">LAGES</option>
+          <option value="OTACILIO COSTA">OTACILIO COSTA</option>
+          <option value="PAINEL">PAINEL</option>
+          <option value="PALMEIRA">PALMEIRA</option>
+          <option value="PONTE ALTA">PONTE ALTA</option>
+          <option value="PONTE ALTA DO NORTE">PONTE ALTA DO NORTE</option>
+          <option value="RIO RUFINO">RIO RUFINO</option>
+          <option value="SANTA CECILIA">SANTA CECILIA</option>
+          <option value="SAO CRISTOVAO DO SUL">SAO CRISTOVAO DO SUL</option>
+          <option value="SAO JOAQUIM">SAO JOAQUIM</option>
+          <option value="SAO JOSE DO CERRITO">SAO JOSE DO CERRITO</option>
+          <option value="URUBICI">URUBICI</option>
+          <option value="URUPEMA">URUPEMA</option>
+        </select>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:8px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="pdFlagOrgaoPublico" style="width:auto">
+        Pedido envolve município / órgão público (exige Ofício no checklist)
+      </label>
+    </div>
+  </div>
+
+  <div class="modal-section">
+    <div class="modal-section-title">🧑‍💼 Ação do Analista</div>
+    <div class="fg-grid">
+      <div class="fg">
+        <label>Ação *</label>
+        <select id="pdAcaoAnalista" onchange="onAcaoAnalistaChange()">
+          <option value="">— selecione —</option>
+          <option value="Enviado para Projeto">Enviado para Projeto</option>
+          <option value="Liberado sem Obra">Liberado sem Obra</option>
+          <option value="Cancelado">Cancelado</option>
+          <option value="Abertura de Obra (Loteamento)">Abertura de Obra (Loteamento)</option>
+          <option value="Abertura de Obra (Iluminação Pública)">Abertura de Obra (Iluminação Pública)</option>
+        </select>
+      </div>
+      <div class="fg" id="fgProjetista" style="display:none">
+        <label>Projetista</label>
+        <select id="pdProjetista">
+          <option value="">— selecione —</option>
+          <option value="Tonimar">Tonimar</option>
+          <option value="Valdir">Valdir</option>
+          <option value="Claudionei">Claudionei</option>
+          <option value="Não informado">Não informado</option>
+          <option value="Copia">Copia</option>
+          <option value="Jucimar Outro">Jucimar Outro</option>
+        </select>
+      </div>
+      <div class="fg" id="fgDataEncaminhamento" style="display:none">
+        <label>Data de Encaminhamento ao Projetista</label>
+        <input type="date" id="pdDataEncaminhamento">
+      </div>
+      <div class="fg" id="fgMotivoCancelamento" style="display:none">
+        <label>Motivo do Cancelamento</label>
+        <input type="text" id="pdMotivoCancelamento" placeholder="Descreva o motivo">
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-section" id="pedidoMedida34Wrap" style="display:none">
+    <div class="modal-section-title">⏸️ Medida 34</div>
+    <div id="secMedida34Analista" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
+      <span>Medida 34 (Analista): <span id="medida34AnalistaStatus">—</span></span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Analista" onclick="toggleMedida34('analista')">Ativar</button>
+    </div>
+    <div id="secMedida34Gerente" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
+      <span>Medida 34 (Gerente): <span id="medida34GerenteStatus">—</span></span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Gerente" onclick="toggleMedida34('gerente')">Ativar</button>
+    </div>
+  </div>
+
+  <div class="modal-section" id="pedidoChecklistWrap" style="display:none">
+    <div class="modal-section-title">✅ Checklist Documental (Estagiário)</div>
+    <div id="checklistPendenciaWarning" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:8px 10px;color:#EF4444;font-size:12px;font-weight:700;margin-bottom:10px">⚠️ Pendência Documental</div>
+    <div id="checklistItemsList"></div>
+    <div class="fg-grid" style="margin-top:12px">
+      <div class="fg"><label>Data de Retorno do Projetista</label><input type="date" id="pdDataRetornoProjetista"></div>
+      <div class="fg" id="fgLatLong" style="display:none">
+        <label>Latitude / Longitude do Transformador</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="pdLatitude" placeholder="Latitude">
+          <input type="text" id="pdLongitude" placeholder="Longitude">
+        </div>
+      </div>
+    </div>
+    <div class="fg" style="margin-top:8px">
+      <label>Feedback do Checklist Documental (o que está faltando)</label>
+      <textarea id="pdChecklistFeedback" rows="2" style="width:100%;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+      <span id="checklistConcluidoStatus">—</span>
+      <button type="button" class="btn btn-secondary btn-sm" id="btnConcluirChecklist" onclick="toggleChecklistConcluido()">Concluir Checklist</button>
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="btnSalvarChecklist" style="margin-top:10px" onclick="salvarAcompanhamentoChecklist()">Salvar Acompanhamento</button>
+  </div>
+
+  <div class="modal-footer">
+    <button class="btn btn-danger" id="btnExcluirPedido" style="display:none;margin-right:auto" onclick="deletePedido()">🗑️ Excluir Pedido</button>
+    <button class="btn btn-secondary" onclick="closePedidoModal()">Fechar</button>
+    <button class="btn btn-primary" id="btnSalvarPedido" onclick="savePedido()">Salvar</button>
+  </div>
+ </div>
 </div>
 
 <!-- ══ MODAL IMPORT EXCEL ══ -->
@@ -477,19 +631,26 @@
         <input type="number" id="oULVMedidoGerente" placeholder="Quantidade já medida" min="0" step="0.01">
       </div>
     </div>
-    <div class="modal-section-title" style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">⚡ Desligamentos Programados</div>
-    <div id="secDesligData">
-      <!-- Lista de desligamentos gerenciada por renderDesligamentosModal() -->
-      <div id="divDesligList" style="margin-bottom:6px"></div>
-      <!-- Inputs legados (hidden, backward compat com toggleDesligamento e código legado) -->
-      <input type="hidden" id="oDesligamento" value="">
-      <input type="hidden" id="oDesligConfirmado" value="">
-      <input type="hidden" id="oDesligCancelado" value="">
-      <input type="hidden" id="oDesligMotivo" value="">
+    <div class="fg" id="secDesligData"><label>Data de Desligamento Programado</label>
+      <input type="date" id="oDesligamento" min="">
     </div>
     <div id="dataLimiteInfo" style="font-size:11px;color:var(--accent);margin-top:4px;display:none"></div>
-    <!-- secDesligConfirm mantido oculto para compatibilidade com código que faz showSec -->
-    <div id="secDesligConfirm" style="display:none"></div>
+    <!-- Confirmação só pelo fiscal -->
+    <div id="secDesligConfirm" style="display:none;margin-top:10px">
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oDesligConfirmado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:#22c55e;font-weight:600">✓ Desligamento confirmado</span>
+      </div>
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oDesligCancelado" onchange="toggleDesligamento()"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:var(--red);font-weight:600">✗ Desligamento cancelado</span>
+      </div>
+      <div id="secDesligMotivo" style="display:none">
+        <div class="fg"><label>Motivo do cancelamento do desligamento</label>
+          <textarea id="oDesligMotivo" rows="2" placeholder="Descreva o motivo..."></textarea>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="modal-section" id="secExec">
     <div class="modal-section-title">⚡ Execução — Empreiteira</div>
@@ -564,11 +725,6 @@
   </div>
   <div class="modal-section" id="secFisc">
     <div class="modal-section-title">🔍 Fiscalização</div>
-    <!-- Impedimento registrado pela empreiteira — leitura para fiscal/gerente -->
-    <div id="secImpedimentoView" style="display:none;margin-bottom:14px;padding:12px;background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:8px">
-      <div style="font-size:10px;font-weight:700;color:#EF4444;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">🚫 Problema Executivo — registrado pela empreiteira</div>
-      <div id="secImpedimentoViewBody" style="font-size:13px;color:var(--text)"></div>
-    </div>
     <!-- Dados do transformador — leitura para fiscal/gerente quando empreiteira já informou -->
     <div id="secTransfView" style="display:none;margin-bottom:14px;padding:12px;background:rgba(124,106,247,.06);border:1px solid rgba(124,106,247,.2);border-radius:8px">
       <div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">🔩 Equipamentos — informado pela empreiteira (visualização)</div>
@@ -636,72 +792,12 @@
   <!-- SEÇÃO CADASTRO — separada da fiscalização -->
   <div class="modal-section" id="secCadastro">
     <div class="modal-section-title">📋 Cadastro</div>
-
-    <!-- Aviso de pendência (visível para todos) -->
-    <div id="msgCadastroPendenciaWarn" style="display:none;margin-bottom:10px;padding:8px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);border-radius:6px;font-size:12px;color:#EF4444"></div>
-
-    <!-- FISCAL / FISCAL_ADM: registrar envios para cadastro -->
-    <div id="secCadastroFiscal" style="display:none">
-      <div style="font-size:11px;font-weight:600;color:var(--fg2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📤 Enviados para Cadastro</div>
-      <div id="listaCadastrosEnviados" style="margin-bottom:8px"></div>
-      <div id="formCadastroEnvio" style="display:none;margin-bottom:8px;padding:10px 12px;background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.2);border-radius:6px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <div class="fg" style="margin:0"><label style="color:var(--accent)">Data do Envio</label><input type="date" id="novoCadEnvioData"></div>
-          <div class="fg" style="margin:0"><label style="color:var(--accent)">Tipo</label>
-            <select id="novoCadEnvioTipo">
-              <option value="">Selecione…</option>
-              <option value="parcial">📋 Parcial</option>
-              <option value="final">✅ Final</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-primary btn-sm" style="flex:1" onclick="confirmarCadastroEnvio()">✔ Adicionar Envio</button>
-          <button class="btn btn-secondary btn-sm" onclick="cancelarFormCadEnvio()">✕ Cancelar</button>
-        </div>
+    <div class="fg"><label>Data Envio para Cadastro</label><input type="date" id="oCadastro"></div>
+    <div id="secCadastroConfirm" style="display:none">
+      <div class="toggle-row">
+        <label class="toggle"><input type="checkbox" id="oCadastroConfirmado"><span class="toggle-slider"></span></label>
+        <span class="toggle-lbl" style="color:var(--accent)">✓ Confirmar Cadastro</span>
       </div>
-      <button id="btnAddCadEnvio" class="btn btn-secondary btn-sm" onclick="abrirFormCadEnvio()">＋ Registrar Envio para Cadastro</button>
-    </div>
-
-    <!-- GENESIS: ver enviados (leitura) + registrar confirmações + pendência -->
-    <div id="secCadastroGenesis" style="display:none">
-      <div style="font-size:11px;font-weight:600;color:var(--fg2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">📤 Enviados pelo Fiscal</div>
-      <div id="listaCadEnvRef" style="margin-bottom:12px"></div>
-      <div style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">✅ Confirmações Genesis</div>
-      <div id="listaCadastrosConfirmados" style="margin-bottom:8px"></div>
-      <div id="formCadastroConf" style="display:none;margin-bottom:8px;padding:10px 12px;background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.2);border-radius:6px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <div class="fg" style="margin:0"><label style="color:var(--accent)">Data do Cadastro</label><input type="date" id="novoCadConfData"></div>
-          <div class="fg" style="margin:0"><label style="color:var(--accent)">Tipo</label>
-            <select id="novoCadConfTipo">
-              <option value="">Selecione…</option>
-              <option value="parcial">📋 Parcial</option>
-              <option value="final">✅ Final</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-primary btn-sm" style="flex:1" onclick="confirmarCadastroConf()">✔ Adicionar Confirmação</button>
-          <button class="btn btn-secondary btn-sm" onclick="cancelarFormCadConf()">✕ Cancelar</button>
-        </div>
-      </div>
-      <button id="btnAddCadConf" class="btn btn-secondary btn-sm" onclick="abrirFormCadConf()">＋ Registrar Confirmação de Cadastro</button>
-      <!-- Pendência de cadastro (somente genesis) -->
-      <div class="toggle-row" style="margin-top:12px">
-        <label class="toggle"><input type="checkbox" id="oCadastroPendencia" onchange="toggleCadastroPendencia()"><span class="toggle-slider" style="--c:#EF4444"></span></label>
-        <span class="toggle-lbl" style="color:#EF4444">⚠️ Registrar Pendência de Cadastro</span>
-      </div>
-      <div id="secCadastroPendenciaDesc" style="display:none;margin-top:8px">
-        <div class="fg"><label>Descrição da Pendência</label><textarea id="oCadastroPendenciaDesc" rows="2" style="resize:vertical" placeholder="Ex.: Nota não encontrada no sistema; via não chegou para cadastro…"></textarea></div>
-      </div>
-    </div>
-
-    <!-- GERENTE: ver ambos (leitura) -->
-    <div id="secCadastroGerente" style="display:none">
-      <div style="font-size:11px;font-weight:600;color:var(--fg2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">📤 Enviados pelo Fiscal</div>
-      <div id="listaCadastrosEnviadosGer" style="margin-bottom:12px"></div>
-      <div style="font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">✅ Confirmações Genesis</div>
-      <div id="listaCadConfGer"></div>
     </div>
   </div>
 
@@ -780,7 +876,7 @@
       <label class="toggle"><input type="checkbox" id="oContratosAssinado" onchange="checkArmazenamentoDeps()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Contratos Assinados</span>
     </div>
-    <div class="toggle-row" id="rowMedicoesAssinadas">
+    <div class="toggle-row">
       <label class="toggle"><input type="checkbox" id="oMedicoesAssinadas" onchange="checkArmazenamentoDeps()"><span class="toggle-slider"></span></label>
       <span class="toggle-lbl">Medições Assinadas</span>
     </div>
@@ -903,6 +999,7 @@
       <option value="genesis">Genesis</option>
               <option value="adm_odi">Adm. ODI</option>
       <option value="estagiario">Estagiário</option>
+      <option value="analista">Analista</option>
     </select>
   </div>
   <div class="fg" id="fgVincEmp" style="display:none">
@@ -921,159 +1018,7 @@
  </div>
 </div>
 
-
-
-<!-- MODAL PEDIDO -->
-<div class="overlay" id="ovPedido">
- <div class="modal">
-  <h2 id="pedidoModalTit">Novo Pedido</h2>
-  <input type="hidden" id="pedidoId">
-  <div class="modal-section">
-    <div class="modal-section-title">📋 Identificação do Pedido</div>
-    <div class="fg-grid">
-      <div class="fg"><label>Nota (nº do projeto) *</label><input type="text" id="pdNota" placeholder="Ex: 123456"></div>
-      <div class="fg">
-        <label>Tipo de Solicitação *</label>
-        <select id="pdTipoSolicitacao" onchange="onTipoSolicitacaoChange()">
-          <option value="">— selecione —</option>
-          <option value="Alimentadores">Alimentadores</option>
-          <option value="Equipamentos Especiais">Equipamentos Especiais</option>
-          <option value="Ext. para Ilum. Pública">Ext. para Ilum. Pública</option>
-          <option value="Interligação Proj. Particular">Interligação Proj. Particular</option>
-          <option value="Ligação nova Rural">Ligação nova Rural</option>
-          <option value="Ligação Nova Urbana">Ligação Nova Urbana</option>
-          <option value="Loteamento – Conexão">Loteamento – Conexão</option>
-          <option value="Melhorias">Melhorias</option>
-          <option value="Outros (Descrever)">Outros (Descrever)</option>
-          <option value="PVNT">PVNT</option>
-          <option value="Remoção e Deslocamento">Remoção e Deslocamento</option>
-          <option value="Troca de Padrão">Troca de Padrão</option>
-        </select>
-        <div id="pdTipoPedidoPreview" style="font-size:10px;color:var(--muted);margin-top:3px">—</div>
-      </div>
-      <div class="fg"><label>Data de Abertura do Pedido *</label><input type="date" id="pdDataAbertura"></div>
-      <div class="fg">
-        <label>Município *</label>
-        <select id="pdMunicipio">
-          <option value="">— selecione —</option>
-          <option value="ANITA GARIBALDI">ANITA GARIBALDI</option>
-          <option value="BOCAINA DO SUL">BOCAINA DO SUL</option>
-          <option value="BOM JARDIM DA SERRA">BOM JARDIM DA SERRA</option>
-          <option value="BOM RETIRO">BOM RETIRO</option>
-          <option value="CAMPO BELO DO SUL">CAMPO BELO DO SUL</option>
-          <option value="CAPAO ALTO">CAPAO ALTO</option>
-          <option value="CELSO RAMOS">CELSO RAMOS</option>
-          <option value="CERRO NEGRO">CERRO NEGRO</option>
-          <option value="CORREIA PINTO">CORREIA PINTO</option>
-          <option value="CURITIBANOS">CURITIBANOS</option>
-          <option value="FREI ROGERIO">FREI ROGERIO</option>
-          <option value="LAGES">LAGES</option>
-          <option value="OTACILIO COSTA">OTACILIO COSTA</option>
-          <option value="PAINEL">PAINEL</option>
-          <option value="PALMEIRA">PALMEIRA</option>
-          <option value="PONTE ALTA">PONTE ALTA</option>
-          <option value="PONTE ALTA DO NORTE">PONTE ALTA DO NORTE</option>
-          <option value="RIO RUFINO">RIO RUFINO</option>
-          <option value="SANTA CECILIA">SANTA CECILIA</option>
-          <option value="SAO CRISTOVAO DO SUL">SAO CRISTOVAO DO SUL</option>
-          <option value="SAO JOAQUIM">SAO JOAQUIM</option>
-          <option value="SAO JOSE DO CERRITO">SAO JOSE DO CERRITO</option>
-          <option value="URUBICI">URUBICI</option>
-          <option value="URUPEMA">URUPEMA</option>
-        </select>
-      </div>
-    </div>
-    <div class="fg" style="margin-top:8px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="pdFlagOrgaoPublico" style="width:auto">
-        Pedido envolve município / órgão público (exige Ofício no checklist)
-      </label>
-    </div>
-  </div>
-
-  <div class="modal-section">
-    <div class="modal-section-title">🧑‍💼 Ação do Analista</div>
-    <div class="fg-grid">
-      <div class="fg">
-        <label>Ação *</label>
-        <select id="pdAcaoAnalista" onchange="onAcaoAnalistaChange()">
-          <option value="">— selecione —</option>
-          <option value="Enviado para Projeto">Enviado para Projeto</option>
-          <option value="Liberado sem Obra">Liberado sem Obra</option>
-          <option value="Cancelado">Cancelado</option>
-          <option value="Abertura de Obra (Loteamento)">Abertura de Obra (Loteamento)</option>
-          <option value="Abertura de Obra (Iluminação Pública)">Abertura de Obra (Iluminação Pública)</option>
-        </select>
-      </div>
-      <div class="fg" id="fgProjetista" style="display:none">
-        <label>Projetista</label>
-        <select id="pdProjetista">
-          <option value="">— selecione —</option>
-          <option value="Tonimar">Tonimar</option>
-          <option value="Valdir">Valdir</option>
-          <option value="Claudionei">Claudionei</option>
-          <option value="Não informado">Não informado</option>
-          <option value="Copia">Copia</option>
-          <option value="Jucimar Outro">Jucimar Outro</option>
-        </select>
-      </div>
-      <div class="fg" id="fgDataEncaminhamento" style="display:none">
-        <label>Data de Encaminhamento ao Projetista</label>
-        <input type="date" id="pdDataEncaminhamento">
-      </div>
-      <div class="fg" id="fgMotivoCancelamento" style="display:none">
-        <label>Motivo do Cancelamento</label>
-        <input type="text" id="pdMotivoCancelamento" placeholder="Descreva o motivo">
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-section" id="pedidoMedida34Wrap" style="display:none">
-    <div class="modal-section-title">⏸️ Medida 34</div>
-    <div id="secMedida34Analista" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
-      <span>Medida 34 (Analista): <span id="medida34AnalistaStatus">—</span></span>
-      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Analista" onclick="toggleMedida34('analista')">Ativar</button>
-    </div>
-    <div id="secMedida34Gerente" class="fg" style="display:none;align-items:center;justify-content:space-between;flex-direction:row">
-      <span>Medida 34 (Gerente): <span id="medida34GerenteStatus">—</span></span>
-      <button type="button" class="btn btn-secondary btn-sm" id="btnToggleMedida34Gerente" onclick="toggleMedida34('gerente')">Ativar</button>
-    </div>
-  </div>
-
-  <div class="modal-section" id="pedidoChecklistWrap" style="display:none">
-    <div class="modal-section-title">✅ Checklist Documental (Estagiário)</div>
-    <div id="checklistPendenciaWarning" style="display:none;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:8px 10px;color:#EF4444;font-size:12px;font-weight:700;margin-bottom:10px">⚠️ Pendência Documental</div>
-    <div id="checklistItemsList"></div>
-    <div class="fg-grid" style="margin-top:12px">
-      <div class="fg"><label>Data de Retorno do Projetista</label><input type="date" id="pdDataRetornoProjetista"></div>
-      <div class="fg" id="fgLatLong" style="display:none">
-        <label>Latitude / Longitude do Transformador</label>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="pdLatitude" placeholder="Latitude">
-          <input type="text" id="pdLongitude" placeholder="Longitude">
-        </div>
-      </div>
-    </div>
-    <div class="fg" style="margin-top:8px">
-      <label>Feedback do Checklist Documental (o que está faltando)</label>
-      <textarea id="pdChecklistFeedback" rows="2" style="width:100%;resize:vertical"></textarea>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
-      <span id="checklistConcluidoStatus">—</span>
-      <button type="button" class="btn btn-secondary btn-sm" id="btnConcluirChecklist" onclick="toggleChecklistConcluido()">Concluir Checklist</button>
-    </div>
-    <button type="button" class="btn btn-primary btn-sm" id="btnSalvarChecklist" style="margin-top:10px" onclick="salvarAcompanhamentoChecklist()">Salvar Acompanhamento</button>
-  </div>
-
-  <div class="modal-footer">
-    <button class="btn btn-danger" id="btnExcluirPedido" style="display:none;margin-right:auto" onclick="deletePedido()">🗑️ Excluir Pedido</button>
-    <button class="btn btn-secondary" onclick="closePedidoModal()">Fechar</button>
-    <button class="btn btn-primary" id="btnSalvarPedido" onclick="savePedido()">Salvar</button>
-  </div>
- </div>
-</div>
-
-<!-- MODAL CHECKLIST CONFIG -->
+<!-- MODAL CONFIGURAR CHECKLIST (por tipo de solicitação) -->
 <div class="overlay" id="ovChecklistConfig">
  <div class="modal modal-sm">
   <h2>Configurar Checklist por Tipo de Solicitação</h2>
@@ -1105,7 +1050,6 @@
   </div>
  </div>
 </div>
-
 
 <!-- MODAL EMPREITEIRA -->
 <div class="overlay" id="ovEmp">
