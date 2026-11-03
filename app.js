@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
-console.log('%c[SPPC] app.js v2616 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
+console.log('%c[SPPC] app.js v2617 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -11917,7 +11917,7 @@ window.mapaUploadKMZ=function(){
   inp.click();
 };
 
-// ══ PLANEJAMENTO — núcleo de análise (v2616) ══
+// ══ PLANEJAMENTO — núcleo de análise (v2617) ══
 // ══ PLANEJAMENTO — núcleo de análise (sem dependências; roda no navegador e no node) ══
 const PLAN_AMP = { // ampacidade de referência (A) — valores aproximados, ajustar conforme padrão CELESC
   '6 CU':120,'6 CAA':105,'4 CA':135,'4 CAA':140,'3 CAA':160,'2 CA':180,'2 CAA':180,'1/0 CA':240,'1/0 CAA':230,
@@ -12107,6 +12107,18 @@ function planBuild(K, eqRows, carg, opt={}){
       for(const e of adjAll[a]){const w=EA[e]===a?EB[e]:EA[e];if(!seen.has(w)){seen.add(w);q.push(w);}}}
     return best;};
   for(const it of inter){it.lados=it.al.map(a=>({al:a,v:fI.has(a)?fvByFeeder(it.x,it.y,fI.get(a)):-1}));}
+  // NA que termina a rede sem tocar o outro alimentador (falha de desenho): procura nó de outro alimentador por proximidade
+  const gridN=new Map();const gk2=(x,y)=>Math.round(x*500)+','+Math.round(y*500); // células ~200 m
+  for(let i=0;i<N;i++){const k=gk2(V.x[i],V.y[i]);if(!gridN.has(k))gridN.set(k,[]);gridN.get(k).push(i);}
+  const perto=(x,y,fi,raioKm)=>{let best=null;const cx=Math.round(x*500),cy=Math.round(y*500),r=Math.ceil(raioKm/0.2)+1;
+    for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++)for(const i of(gridN.get((cx+dx)+','+(cy+dy))||[])){if(V.f[i]===fi)continue;const d=_pkm(x,y,V.x[i],V.y[i]);if(d<=raioKm&&(!best||d<best.d))best={d,i};}return best;};
+  const chOf=new Int32Array(N);for(let i=0;i<N;i++)if(V.par[i]>=0)chOf[V.par[i]]++;
+  const gapKm=(opt.gapM??50)/1000;const naPonta=[];
+  for(const d of dev){if(!d.na||usedNA.has(d.nr)||chOf[d.v]>0)continue;const fi=V.f[d.v];const x=V.x[d.v],y=V.y[d.v];
+    const b=perto(x,y,fi,gapKm);
+    if(b){usedNA.add(d.nr);const outro=feeders[V.f[b.i]].nome;inter.push({nr:d.nr,x,y,al:[feeders[fi].nome,outro],dNA:0,gapM:Math.round(b.d*1000),lados:[{al:feeders[fi].nome,v:d.v},{al:outro,v:b.i}]});}
+    else{const sug=perto(x,y,fi,2);naPonta.push({tipo:'Chave NA na ponta da rede (sem continuidade)',x,y,al:[feeders[fi].nome],nr:d.nr,sug:sug?`${feeders[V.f[sug.i]].nome} a ${Math.round(sug.d*1000)} m`:''});}}
+  log(`NA na ponta da rede: ${inter.filter(i=>i.gapM!=null).length} ligadas por proximidade (≤ ${opt.gapM??50} m), ${naPonta.length} sem continuidade`);
   // ── árvore operativa da planilha: agregados por equipamento ──
   const tdInfo=new Map(td.map(t=>[t.nr,t]));const naInter=new Set(inter.filter(i=>i.al.length>1).map(i=>i.nr));
   const pk=new Map();for(const r of eqRows){const a=String(r.ant);if(!pk.has(a))pk.set(a,[]);pk.get(a).push(String(r.nr));}
@@ -12119,7 +12131,7 @@ function planBuild(K, eqRows, carg, opt={}){
       eqAg.set(n,a);}};
   for(const r of eqRows)if(!r.ant||!EQ.has(String(r.ant)))visit(String(r.nr));
   const eqInfo=Object.fromEntries([...EQ].map(([n,r])=>[n,{ant:String(r.ant),sg:r.sg,uc:r.uc}]));
-  incons.push(...chavesFora);
+  incons.push(...chavesFora,...naPonta);
   const stats={vertices:N,km:Array.from(V.len).reduce((a,b)=>a+b,0),trafos:td.length,disp:dev.length,na:dev.filter(d=>d.na).length,inter:inter.length,incons:incons.length,alimentadores:feeders.length,
     trafosSemUC:td.filter(t=>!t.uc).length,trafosSemCarreg:td.filter(t=>t.carreg==null).length};
   log(`Interligações: ${inter.length} · trocas de alimentador sem chave: ${incons.length}`);
@@ -12133,7 +12145,7 @@ function planPrep(B){ // estruturas derivadas (uma vez por carga)
   const N=B.N,V=B.V;const ch=Array.from({length:N},()=>[]);for(let i=0;i<N;i++)if(V.par[i]>=0)ch[V.par[i]].push(i);
   const cutDev=new Map();for(const d of B.dev)if(!d.na)for(const c of d.prot){if(!cutDev.has(c))cutDev.set(c,d);}
   const tdAt=new Map();B.td.forEach((t,i)=>{if(t.v>=0){if(!tdAt.has(t.v))tdAt.set(t.v,[]);tdAt.get(t.v).push(i);}});
-  const anchor=new Int32Array(N);for(const it of B.inter)for(const l of it.lados)if(l.v>=0)anchor[l.v]++;
+  const anchor=new Int32Array(N);for(const it of B.inter)for(const l of(it.lados||[]))if(l.v>=0)anchor[l.v]++;
   // agregados de subárvore
   const sKm=new Float64Array(N),sUC=new Float64Array(N),sTD=new Int32Array(N),sKVA=new Float64Array(N),sNA=new Int32Array(N),sUCu=new Float64Array(N);
   for(let i=N-1;i>=0;i--){sKm[i]+=V.len[i];sNA[i]+=anchor[i];
@@ -12149,18 +12161,26 @@ function planAnalyze(B,P){
   P={...PLAN_PARAM_PADRAO,...(P||{})};const V=B.V,N=B.N;const X=B._p||planPrep(B);const {ch,cutDev,sKm,sUC,sTD,sKVA,sNA,sUCu}=X;
   const F=i=>B.feeders[V.f[i]]?.nome;const r1=v=>Math.round(v*10)/10;const pt=i=>[+V.y[i].toFixed(6),+V.x[i].toFixed(6)];
   const R={P};
+  // Interligações = detectadas na base + registradas manualmente pelo gerente (NA cuja ligação não está desenhada)
+  const fIdx=new Map(B.feeders.map((f,i)=>[f.nome,i]));const devNr=new Map(B.dev.map(d=>[d.nr,d]));
+  const interTodas=[...B.inter];
+  for(const m of(P.interManuais||[])){const d=devNr.get(String(m.nr));if(!d||!fIdx.has(m.al))continue;const fa=V.f[d.v];if(B.feeders[fa].nome===m.al)continue;
+    let best=-1,bd=1e9;const fb=fIdx.get(m.al);for(let i=0;i<N;i++){if(V.f[i]!==fb)continue;const dd=_pkm(V.x[d.v],V.y[d.v],V.x[i],V.y[i]);if(dd<bd){bd=dd;best=i;}}
+    const it={nr:d.nr,x:V.x[d.v],y:V.y[d.v],al:[B.feeders[fa].nome,m.al],dNA:0,manual:true,gapM:Math.round(bd*1000),lados:[{al:B.feeders[fa].nome,v:d.v},{al:m.al,v:best}]};
+    const k=interTodas.findIndex(i=>i.nr===d.nr);if(k>=0)interTodas[k]=it;else interTodas.push(it);}
+  const naDesc=new Map();for(const it of interTodas){if(it.al.length<2)continue;let a=B.eqInfo[it.nr]?.ant,k=0;while(a&&k<300){naDesc.set(a,(naDesc.get(a)||0)+1);a=B.eqInfo[a]?.ant;k++;}}
   // Itens 1 e 2 — ramais a jusante de dispositivo acima do limite de UCs sem interligação (árvore operativa da planilha)
   const ram=[];const flag=new Set();const devByNr=new Map(B.dev.map(d=>[d.nr,d]));
   for(const d of B.dev){if(d.na)continue;const ag=B.eqAg[d.nr];if(!ag||!ag.td)continue;
     const urb=ag.uc>0?ag.ucu/ag.uc>=0.5:V.urb[d.v]===1;const lim=urb?P.ucUrb:P.ucRur;const uc=d.uc!=null&&d.uc>0?d.uc:ag.uc;
-    if(uc>lim&&ag.na===0){flag.add(d.nr);d._m={uc,urb,ag};}}
+    if(uc>lim&&!(naDesc.get(d.nr)>0)){flag.add(d.nr);d._m={uc,urb,ag};}}
   for(const nr of flag){let a=B.eqInfo[nr]?.ant,sub=false,k=0;while(a&&k<200){if(flag.has(a)){sub=true;break;}a=B.eqInfo[a]?.ant;k++;}
     if(sub)continue;const d=devByNr.get(nr);let km=0,tdg=0;for(const c of d.prot){km+=sKm[c];tdg+=sTD[c];}
     const ok=d._m.ag.td>0&&tdg/d._m.ag.td>0.75&&tdg/d._m.ag.td<1.33;
     const nest=[...flag].filter(n=>{let a=B.eqInfo[n]?.ant,k=0;while(a&&k<200){if(a===nr)return true;a=B.eqInfo[a]?.ant;k++;}return false;}).length;
     ram.push({nr,tipo:d.tipo,sg:d.sg,al:F(d.v),area:d._m.urb?'Urbana':'Rural',uc:Math.round(d._m.uc),km:ok?r1(km):null,trafos:d._m.ag.td,kva:Math.round(d._m.ag.kva),aninhados:nest,pos:pt(d.v),v:d.v,cut:d.prot});}
   ram.sort((a,b)=>b.uc-a.uc);for(const x of ram)x.key='RAMAL|'+x.nr;R.ramaisSemManobra=ram;R._ramFlag=new Set(flag);
-  const alNA={};for(const it of B.inter)for(const a of it.al)alNA[a]=(alNA[a]||0)+(it.al.length>1?1:0);
+  const alNA={};for(const it of interTodas)for(const a of it.al)alNA[a]=(alNA[a]||0)+(it.al.length>1?1:0);
   R.alimSemInter=B.feeders.map(f=>({al:f.nome,uc:Math.round(sUC[f.root]),km:r1(sKm[f.root]),inter:alNA[f.nome]||0})).filter(x=>x.inter===0&&x.uc>0);
   // Item 3 — blocos entre dispositivos
   const blk=new Int32Array(N);const blocks=[];
@@ -12222,7 +12242,7 @@ function planAnalyze(B,P){
     return{pior,garg,ramalCab,ramalKm};};
   const menorCaboEntre=(de,ate)=>{let n=de,m=null,k=0;while(n>=0&&n!==ate&&V.par[n]>=0&&k<200000){const cb=B.cabos[V.cab[n]];if(!m||(PLAN_AMP[cb]??1e9)<(PLAN_AMP[m]??1e9))m=cb;n=V.par[n];k++;}return m;};
   const inter=[];
-  for(const it of B.inter){const L=it.lados.filter(l=>l.v>=0);const o={nr:it.nr,al:it.al.join(' / '),pos:[+it.y.toFixed(6),+it.x.toFixed(6)],dNA:it.dNA,dirs:[]};
+  for(const it of interTodas){const L=it.lados.filter(l=>l.v>=0);const o={nr:it.nr,al:it.al.join(' / '),pos:[+it.y.toFixed(6),+it.x.toFixed(6)],dNA:it.dNA,gapM:it.gapM,manual:!!it.manual,dirs:[]};
     if(L.length===2){for(const [s,r] of [[L[0],L[1]],[L[1],L[0]]]){const t=transf(s.v,it.nr,s.al);const c=caminhoTronco(r.v,t.kva);
         o.dirs.push({de:s.al,para:r.al,abre:t.dev?`${t.dev.sg} ${t.dev.nr}`:'saída do alimentador',kva:Math.round(t.kva*P.fc),uc:Math.round(t.uc),
           util:c.pior?Math.round(c.pior.util*100):null,critico:c.pior?.cabo||null,critPos:c.pior?.pos||null,gargalo:c.garg?.cabo||null,
@@ -12232,6 +12252,7 @@ function planAnalyze(B,P){
     else{o.externo=true;o.utilMax=null;o.alerta=false;}
     inter.push(o);}
   inter.sort((a,b)=>(b.utilMax||0)-(a.utilMax||0));for(const x of inter)x.key='INTER|'+x.nr;R.interligacoes=inter;
+  R._interTodas=interTodas;
   // Item 10 — carregamento dos cabos na configuração atual
   const cc=[];const vis=new Uint8Array(N);const kvx=P.kv;
   const util=i=>{const amp=PLAN_AMP[B.cabos[V.cab[i]]];if(!amp)return null;return _plCorrente(sKVA[i]*P.fc,V.fase[i]||3,kvx)/amp;};
@@ -12265,7 +12286,7 @@ function planOportunidadesNoTrecho(B,R,nr){const loc=planLocalizarEquip(B,nr);if
   const brot=[...bset].map(b=>R._blocos[b].rot).join('+');
   if(mono>0.005)itens.push({key:'MONO|'+brot,tipo:'Monofásico urbano',titulo:'Rede monofásica em área urbana',det:`${r1(mono)} km neste trecho`,pos:[V.y[loc.ref],V.x[loc.ref]]});
   for(const [cb,km] of Object.entries(cab))if(km>0.005)itens.push({key:`CABO|${cb}|${brot}`,tipo:'Cabo fora de padrão',titulo:`Substituir cabo ${cb}`,det:`${Math.round(km*100)/100} km de ${cb} neste trecho`,pos:[V.y[loc.ref],V.x[loc.ref]]});
-  for(const it of R.interligacoes){if(it.externo)continue;const no=(B.inter.find(i=>i.nr===it.nr)?.lados||[]).some(l=>l.v>=0&&nset.has(l.v));if(!no)continue;
+  for(const it of R.interligacoes){if(it.externo)continue;const no=((R._interTodas||B.inter).find(i=>i.nr===it.nr)?.lados||[]).some(l=>l.v>=0&&nset.has(l.v));if(!no)continue;
     const crit=it.dirs.some(d=>(d.util||0)>=70||d.naEmRamal);if(crit)itens.push({key:it.key,tipo:'Interligação',titulo:`Reforçar interligação NA ${it.nr} (${it.al})`,det:it.dirs.map(d=>`${d.de}→${d.para} ${d.util??'—'}% em ${d.critico||'—'}${d.naEmRamal?' · NA em ramal':''}`).join(' | '),pos:it.pos});}
   for(const c of R.cargaCabos)if(c.nodes.some(n=>nset.has(n)))itens.push({key:c.key,tipo:'Carregamento de cabo',titulo:`Cabo ${c.cabo} com ${c.util}% de utilização`,det:`${c.km} km · ${c.I} A de ${c.amp} A${c.conf==='Baixa'?' · baixa confiança':''}`,pos:c.pos});
   const tdSet=new Set(B.td.filter(t=>nset.has(t.v)).map(t=>t.nr));
@@ -12319,7 +12340,7 @@ function planSerializar(B){const V=B.V;
     par:_encI(V.par),f:_encI(V.f),cab:_encI(V.cab),fase:Array.from(V.fase).join(''),urb:Array.from(V.urb).join(''),mun:_encI(V.mun),len:Array.from(V.len,z=>Math.round(z*1e4)).join(','),
     feeders:B.feeders,cabos:B.cabos,muns:B.muns,
     td:B.td.map(t=>[t.v,t.nr,t.uc,t.kva,t.tot,t.carreg,t.fases,t.urb,t.al,+t.x.toFixed(6),+t.y.toFixed(6),t.q]),
-    dev:B.dev.map(d=>[d.v,d.nr,d.tipo,d.sg,d.uc,d.na?1:0,d.prot]),inter:B.inter,incons:B.incons.map(i=>[+i.x.toFixed(6),+i.y.toFixed(6),i.al,i.tipo,i.nr||'']),stats:B.stats,
+    dev:B.dev.map(d=>[d.v,d.nr,d.tipo,d.sg,d.uc,d.na?1:0,d.prot]),inter:B.inter,incons:B.incons.map(i=>[+i.x.toFixed(6),+i.y.toFixed(6),i.al,i.tipo,i.nr||'',i.sug||'']),stats:B.stats,
     eqAg:Object.entries(B.eqAg).filter(([n,a])=>a.td>0||a.na>0).map(([n,a])=>[n,a.uc,a.ucu,Math.round(a.kva),a.td,a.na]),
     eqInfo:Object.entries(B.eqInfo).filter(([n,e])=>e.sg!=='FT').map(([n,e])=>[n,e.ant,e.sg,e.uc]),
     eqTdPai:Object.entries(B.eqInfo).filter(([n,e])=>e.sg==='FT').map(([n,e])=>[n,e.ant])});}
@@ -12330,7 +12351,7 @@ function planDesserializar(str){const o=JSON.parse(str);const N=o.N;
   const dev=o.dev.map(a=>({v:a[0],nr:a[1],tipo:a[2],sg:a[3],uc:a[4],na:!!a[5],prot:a[6]}));
   const eqAg={};for(const a of o.eqAg)eqAg[a[0]]={uc:a[1],ucu:a[2],kva:a[3],td:a[4],na:a[5]};
   const eqInfo={};for(const a of o.eqInfo)eqInfo[a[0]]={ant:a[1],sg:a[2],uc:a[3]};for(const a of o.eqTdPai)eqInfo[a[0]]={ant:a[1],sg:'FT'};
-  return{V,N,feeders:o.feeders,cabos:o.cabos,muns:o.muns,td,dev,inter:o.inter,incons:o.incons.map(a=>({tipo:a[3]||'Troca de alimentador sem chave',x:a[0],y:a[1],al:a[2],nr:a[4]||''})),stats:o.stats,eqAg,eqInfo};}
+  return{V,N,feeders:o.feeders,cabos:o.cabos,muns:o.muns,td,dev,inter:o.inter,incons:o.incons.map(a=>({tipo:a[3]||'Troca de alimentador sem chave',x:a[0],y:a[1],al:a[2],nr:a[4]||'',sug:a[5]||''})),stats:o.stats,eqAg,eqInfo};}
 // ── Atuações (relatório SIMO "Atuações por Equipamento") ──
 function planParseAtuacoes(linhas){
   const rx=/^\s*(?:(\d+)\s+([A-Z]{2})\s+)?([A-Z]{3})\s*-\s*(\d+)\s+(\d{2}\/\d{4})\s+(\d+)\s+(.*?)\s+(\d+)\s*$/;
@@ -12480,8 +12501,18 @@ async function _plGarantirBase(){ // carrega base + análise sem depender da tel
   _pl._carregando=(async()=>{const m=await getDoc(doc(db,'plan_meta','atual'));if(!m.exists())return false;_pl.meta=m.data();const partes=[];
     for(let i=0;i<_pl.meta.partes;i++){const d=await getDoc(doc(db,'plan_base','p'+i));partes.push(d.data().dados);}
     const z=await JSZip.loadAsync(partes.join(''),{base64:true});_pl.B=planDesserializar(await z.file('b.json').async('string'));planPrep(_pl.B);
-    if(!_pl.P)_pl.P=_plParams();_pl.R=planAnalyze(_pl.B,_pl.P);await _plCarregarOps();return true;})();
+    if(!_pl.P)_pl.P=_plParams();await _plCarregarInterManuais();_pl.R=planAnalyze(_pl.B,_pl.P);await _plCarregarOps();return true;})();
   try{return await _pl._carregando;}finally{_pl._carregando=null;}}
+async function _plCarregarInterManuais(){try{const m=await getDoc(doc(db,'plan_meta','interManuais'));_pl.interManuais=m.exists()?(m.data().lista||[]):[];}catch(e){_pl.interManuais=[];}
+  if(_pl.P)_pl.P.interManuais=_pl.interManuais;}
+async function _plSalvarInterManuais(){await setDoc(doc(db,'plan_meta','interManuais'),{lista:_pl.interManuais,atualizadoEm:serverTimestamp(),por:me.nome||me.email});_pl.P.interManuais=_pl.interManuais;_plAnalisar();_plMostrar(false);}
+window.plRegistrarInter=async function(nr){const sel=document.getElementById('plInterAl');const al=sel?.value;if(!al){toast('Escolha o alimentador do outro lado da chave.','warn');return;}
+  _pl.interManuais=(_pl.interManuais||[]).filter(i=>String(i.nr)!==String(nr));_pl.interManuais.push({nr:String(nr),al,por:me.nome||me.email,em:new Date().toISOString().slice(0,10)});
+  try{await _plSalvarInterManuais();toast(`Interligação ${nr} ↔ ${al} registrada.`);_pl.map.closePopup();}catch(e){toast('Erro ao registrar: '+e.message,'err');}};
+window.plRemoverInter=async function(nr){_pl.interManuais=(_pl.interManuais||[]).filter(i=>String(i.nr)!==String(nr));
+  try{await _plSalvarInterManuais();toast(`Registro manual da chave ${nr} removido.`,'warn');_pl.map.closePopup();}catch(e){toast('Erro: '+e.message,'err');}};
+function _plOpcoesAlim(x,y,proprio){const B=_pl.B,V=B.V;const dist=new Map();for(let i=0;i<B.N;i++){const n=B.feeders[V.f[i]].nome;if(n===proprio)continue;const d=_pkm(x,y,V.x[i],V.y[i]);if(!dist.has(n)||d<dist.get(n))dist.set(n,d);}
+  return [...dist.entries()].sort((a,b)=>a[1]-b[1]).map(([n,d])=>`<option value="${_plEsc(n)}">${_plEsc(n)} — ${d<1?Math.round(d*1000)+' m':_plNum(d,1)+' km'}</option>`).join('');}
 async function _plCarregarOps(){_pl.ops=new Map();try{const s=await getDocs(collection(db,'oportunidades'));s.docs.forEach(d=>_pl.ops.set(d.data().key,{id:d.id,...d.data()}));}catch(e){console.warn('[Plan] oportunidades',e);}}
 async function _plCarregar(){
   const ok=await _plGarantirBase();
@@ -12554,12 +12585,12 @@ const PL_COLS={
   deriv:[['al','Alim.'],['area','Área'],['uc','UCs'],['km','km'],['trafos','Trafos']],
   mono:[['al','Alim.'],['mun','Município'],['km','km']],
   cabos:[['cabo','Cabo'],['km','km'],['amp','Ampac. ref. (A)'],['pequeno','Fora de padrão']],
-  inter:[['nr','Chave NA'],['al','Alimentadores'],['utilMax','Util. máx tronco (%)'],['resumo','Transferência / cabo crítico no tronco']],
+  inter:[['nr','Chave NA'],['al','Alimentadores'],['obs','Obs.'],['utilMax','Util. máx tronco (%)'],['resumo','Transferência / cabo crítico no tronco']],
   cargacabo:[['al','Alim.'],['cabo','Cabo'],['fases','Fases'],['ramal','Tronco/Ramal'],['area','Área'],['km','km'],['util','Util. (%)'],['I','Corrente (A)'],['amp','Ampac. ref. (A)'],['kva','kVA'],['uc','UCs'],['conf','Confiança']],
   calor:[['tipo','Tipo'],['nr','Equip.'],['al','Alim.'],['q','Atuações'],['uc','UCs'],['ucq','UCs × atuações'],['km','km protegidos'],['porKm','Atuações/km'],['causas','Principais causas']],
   carreg:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['carreg','Carreg. (%)'],['uc','UCs'],['queda','Queda (%)']],
   ucs:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['uc','UCs'],['ucKva','UCs/kVA'],['carreg','Carreg. (%)']],
-  incons:[['tipo','Tipo'],['al','Alimentadores'],['nr','Equip.'],['pos','Coordenadas']],
+  incons:[['tipo','Tipo'],['al','Alimentadores'],['nr','Equip.'],['sugAl','Alimentador mais próximo'],['reg','Interligação registrada'],['pos','Coordenadas']],
   oport:[['obraNum','Obra'],['obraTipo','Tipo'],['obraStatus','Status da obra'],['al','Alim.'],['trecho','Trecho'],['tipo','Oportunidade'],['titulo','Descrição'],['det','Detalhe'],['situacao','Situação'],['r2','R2 vinculada']]};
 for(const k of ['ramais','secc','deriv','inter','cargacabo','carreg','ucs'])PL_COLS[k].push(['situacao','Situação']);
 function _plLinhas(){const rows=_plLinhas0();for(const r of rows)if(r.key&&r.situacao===undefined)r.situacao=_plStatusOp(r.key).txt;return rows;}
@@ -12570,12 +12601,12 @@ function _plLinhas0(){const R=_pl.R;if(!R)return[];const f=r=>!_pl.al||String(r.
     case 'deriv':return R.derivacoes.filter(f);
     case 'mono':return R.monoUrbano.lista.filter(f);
     case 'cabos':return R.cabos.map(c=>({...c,km:_pl.al?(c.por[_pl.al]||0):c.km,pequeno:c.pequeno?'Sim':''})).filter(c=>c.km>0);
-    case 'inter':return R.interligacoes.map(i=>({...i,resumo:i.externo?'Alimentador de outra regional':i.dirs.map(d=>`${d.de}→${d.para}: abre ${d.abre}, ${_plNum(d.kva)} kVA, ${d.util??'—'}% em ${d.critico||'—'}${d.naEmRamal?' (NA em ramal)':''}`).join(' | ')})).filter(f);
+    case 'inter':return R.interligacoes.map(i=>({...i,obs:i.manual?'Registrada manualmente':i.gapM?`Falha de desenho (${i.gapM} m)`:'',resumo:i.externo?'Alimentador de outra regional':i.dirs.map(d=>`${d.de}→${d.para}: abre ${d.abre}, ${_plNum(d.kva)} kVA, ${d.util??'—'}% em ${d.critico||'—'}${d.naEmRamal?' (NA em ramal)':''}`).join(' | ')})).filter(f);
     case 'cargacabo':return R.cargaCabos.filter(f);
     case 'calor':return _pl.H?_plCalorLista().filter(f):[];
     case 'carreg':return R.trafosCarregados.filter(f);
     case 'ucs':return R.trafosMuitasUC.filter(f);
-    case 'incons':return _pl.B.incons.map(i=>({tipo:i.tipo,nr:i.nr||'',al:i.al.join(' / '),pos:`${i.y.toFixed(5)}, ${i.x.toFixed(5)}`,_x:i.x,_y:i.y})).filter(f);
+    case 'incons':return _pl.B.incons.map(i=>{const m=(_pl.interManuais||[]).find(x=>String(x.nr)===String(i.nr));return{tipo:i.tipo,nr:i.nr||'',al:i.al.join(' / '),sugAl:i.sug||'',reg:m?`↔ ${m.al}`:'',pos:`${i.y.toFixed(5)}, ${i.x.toFixed(5)}`,_x:i.x,_y:i.y};}).filter(f);
     case 'oport':return _plOportLinhas().filter(f);}return[];}
 function _plMostrar(fit){if(!_pl.map)return;const tab=document.getElementById('plTab');
   const [,tit,desc]=PL_ANALISES.find(a=>a[0]===_pl.an);document.getElementById('plTit').textContent=tit;document.getElementById('plDesc').textContent=desc;
@@ -12645,6 +12676,7 @@ function _plSelecionar(r){_pl.lay.hl.clearLayers();const B=_pl.B,V=B.V;let pop='
   if(_pl.an==='deriv'){const seg=_plSeg(_plSub([r.c]));L.polyline(seg,{color:'#a855f7',weight:3.5,opacity:.95}).addTo(_pl.lay.hl);foco=seg.length?L.polyline(seg).getBounds():null;
     pop=`<b>Derivação sem chave</b> · ${r.al}<br>${r.area} · ${_plNum(r.uc)} UCs · ${_plNum(r.km,1)} km · ${r.trafos} trafos`;}
   if(_pl.an==='inter'){pop=`<b>Chave NA ${r.nr}</b> · ${_plEsc(r.al)}${r.dNA?`<br><span style="color:#888">Chave a ${r.dNA} m do ponto de troca de alimentador</span>`:''}`+
+    (r.manual?`<br><span style="color:#7c6af7">Interligação registrada manualmente (o trecho não está desenhado no cadastro).</span> <a href="#" onclick="plRemoverInter('${_plEsc(r.nr)}');return false">Remover</a>`:r.gapM?`<br><span style="color:#d97706">Rede não desenhada até a chave: falha de ${r.gapM} m no cadastro (ligação deduzida por proximidade).</span>`:'')+
     (r.externo?'<br>Interligação com alimentador de outra regional.':r.dirs.map(d=>`<hr style="border:0;border-top:1px solid #ddd;margin:4px 0"><b>${d.de} → ${d.para}</b><br>Abrir ${_plEsc(d.abre)} e fechar a NA transfere ${_plNum(d.kva)} kVA (${_plNum(d.uc)} UCs)<br>Utilização máx. estimada no tronco do ${d.para}: <b>${d.util??'—'}%</b> em ${_plEsc(d.critico||'—')}${d.gargalo&&d.gargalo!==d.critico?`<br>Menor cabo do tronco no caminho: ${_plEsc(d.gargalo)}`:''}`+
       (d.naEmRamal?`<br><span style="color:#d97706">A NA está num ramal do ${d.para}: ${_plEsc(d.naEmRamal)}. O ramal limita a manobra; ver Carregamento de cabos.</span>`:'')+
       (d.trechoTransf?`<br>Menor cabo no trecho transferido (entre a NA e ${_plEsc(d.abre)}): ${_plEsc(d.trechoTransf)}`:'')).join(''));
@@ -12660,15 +12692,21 @@ function _plSelecionar(r){_pl.lay.hl.clearLayers();const B=_pl.B,V=B.V;let pop='
     pop=`<b>${_plEsc(r.tipo)} ${_plEsc(r.nr)}</b> · ${_plEsc(r.al)}<br><b>${r.q}</b> atuações não programadas${r.uc!=null?` · ${_plNum(r.uc)} UCs a jusante`:''}${r.km!=null?`<br>Trecho protegido: ${_plNum(r.km,1)} km (${_plNum(r.porKm,1)} atuações/km)`:''}<br><span style="font-size:10px">${_plEsc(r.causas)}</span>${r.obs?`<br><span style="color:#d97706;font-size:10px">${_plEsc(r.obs)}</span>`:''}`;}
   if(_pl.an==='oport'){pop=`<b>${_plEsc(r.tipo)}</b> · ${_plEsc(r.al)} · trecho ${_plEsc(r.trecho)}<br>${_plEsc(r.titulo)}<br><span style="font-size:10px">${_plEsc(r.det)}</span><br>Obra ${_plEsc(r.obraNum)} (${_plEsc(r.obraStatus)}) · <b>${_plEsc(r.situacao)}</b>`+
       (r.obraId?`<br><button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="openObraModal('${_plEsc(r.obraId)}')">Abrir obra ${_plEsc(r.obraNum)}</button>`:'');foco=r.pos?L.latLng(r.pos).toBounds(800):null;}
-  if(_pl.an==='incons'){pop=`<b>${_plEsc(r.tipo)}</b>${r.nr?` · ${_plEsc(r.nr)}`:''}<br>${_plEsc(r.al)}<br>${r.tipo.startsWith('Troca')?'Verificar cadastro: o trecho muda de alimentador sem chave neste ponto.':'Verificar cadastro: a chave não está ligada à rede da subestação no KMZ e fica fora das análises.'}`;foco=L.latLng(r._y,r._x).toBounds(500);}
+  if(_pl.an==='incons'&&r.tipo.startsWith('Chave NA na ponta')){const m=(_pl.interManuais||[]).find(x=>String(x.nr)===String(r.nr));
+    pop=`<b>Chave NA ${_plEsc(r.nr)}</b> · ${_plEsc(r.al)}<br>A rede termina nesta chave e o outro lado não está desenhado no cadastro.${r.sugAl?`<br>Alimentador mais próximo: ${_plEsc(r.sugAl)}`:'<br>Nenhum outro alimentador a menos de 2 km.'}`+
+      (m?`<br><b>Registrada como interligação com ${_plEsc(m.al)}</b> (${_plEsc(m.por||'')}, ${_plEsc(m.em||'')})<br><button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="plRemoverInter('${_plEsc(r.nr)}')">Remover registro</button>`
+        :`<br><span style="font-size:10px">Se esta chave interliga com outro alimentador, informe qual:</span><br><select id="plInterAl" style="margin-top:4px;max-width:230px"><option value="">— alimentador do outro lado —</option>${_plOpcoesAlim(r._x,r._y,r.al)}</select>
+         <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="plRegistrarInter('${_plEsc(r.nr)}')">Registrar interligação</button>`);
+    foco=L.latLng(r._y,r._x).toBounds(500);}
+  else if(_pl.an==='incons'){pop=`<b>${_plEsc(r.tipo)}</b>${r.nr?` · ${_plEsc(r.nr)}`:''}<br>${_plEsc(r.al)}<br>${r.tipo.startsWith('Troca')?'Verificar cadastro: o trecho muda de alimentador sem chave neste ponto.':'Verificar cadastro: a chave não está ligada à rede da subestação no KMZ e fica fora das análises.'}`;foco=L.latLng(r._y,r._x).toBounds(500);}
   if(_pl.an==='mono'){const seg=[];const mi=B.muns.indexOf(r.mun);for(let i=0;i<B.N;i++)if(V.par[i]>=0&&V.fase[i]===1&&V.urb[i]===1&&V.mun[i]===mi&&B.feeders[V.f[i]].nome===r.al)seg.push([[V.y[V.par[i]],V.x[V.par[i]]],[V.y[i],V.x[i]]]);
     L.polyline(seg,{color:'#f59e0b',weight:5,opacity:.9}).addTo(_pl.lay.hl);foco=seg.length?L.polyline(seg).getBounds():null;pop=`<b>${_plEsc(r.al)} · ${_plEsc(r.mun)}</b><br>${_plNum(r.km,2)} km de rede monofásica urbana`;}
   if(foco)_pl.map.flyToBounds(foco.pad?foco.pad(.2):foco,{duration:.6,maxZoom:16});
-  if(pop){const pos=r.sug||r.pos||(r._y?[r._y,r._x]:null);if(pos)setTimeout(()=>L.popup({maxWidth:340}).setLatLng(pos).setContent(`<div class="pl-pop">${pop}</div>`).openOn(_pl.map),650);}
+  if(pop){const pos=Array.isArray(r.sug)?r.sug:Array.isArray(r.pos)?r.pos:(r._y!=null?[r._y,r._x]:null);if(pos)setTimeout(()=>L.popup({maxWidth:340}).setLatLng(pos).setContent(`<div class="pl-pop">${pop}</div>`).openOn(_pl.map),650);}
   const i=(_pl.rows||[]).indexOf(r);const tr=document.querySelector(`#plTab tr[data-i="${i}"]`);if(tr){tr.classList.add('sel');tr.scrollIntoView({block:'nearest'});}
 }
 window.plExportar=()=>{if(!_pl.rows||!window.XLSX)return;const cols=PL_COLS[_pl.an];
-  const data=_pl.rows.map(r=>{const o={};for(const [k,l] of cols)o[l]=r[k];const pos=r.sug||r.pos;if(Array.isArray(pos)){o['Latitude']=pos[0];o['Longitude']=pos[1];}return o;});
+  const data=_pl.rows.map(r=>{const o={};for(const [k,l] of cols)o[l]=r[k];const pos=Array.isArray(r.sug)?r.sug:Array.isArray(r.pos)?r.pos:(r._y!=null?[r._y,r._x]:null);if(Array.isArray(pos)){o['Latitude']=pos[0];o['Longitude']=pos[1];}return o;});
   const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Planejamento');
   XLSX.writeFile(wb,`Planejamento_${_pl.an}_${new Date().toISOString().slice(0,10)}.xlsx`);};
 
