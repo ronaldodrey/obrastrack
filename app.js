@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
-console.log('%c[SPPC] app.js v2612 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
+console.log('%c[SPPC] app.js v2613 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -303,6 +303,7 @@ async function iniciarApp(){
     ['pgObras','🏗️ Obras'],
     ...(canSeePedidos?[['pgPedidos','📋 Pedidos']]:[]),
     ...(['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil)?[['pgMapa','🗺️ Mapa']]:[]), // v2612: Mapa da Rede
+    ...(me.perfil==='gerente'?[['pgPlanejamento','🧭 Planejamento']]:[]), // v2613: Planejamento da Rede
     ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
@@ -378,6 +379,7 @@ window.showPage=function(id){
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
   if(id==='pgPedidos') renderPedidos();
   if(id==='pgMapa') window.renderMapa(); // v2612
+  if(id==='pgPlanejamento') window.renderPlanejamento(); // v2613
 };
 // Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
 window.switchObrasSubTab = function(tipo){
@@ -11913,4 +11915,607 @@ window.mapaUploadKMZ=function(){
     if(ok) await window.mapaRecarregar();
   };
   inp.click();
+};
+
+// ══ PLANEJAMENTO — núcleo de análise (v2613) ══
+// ══ PLANEJAMENTO — núcleo de análise (sem dependências; roda no navegador e no node) ══
+const PLAN_AMP = { // ampacidade de referência (A) — valores aproximados, ajustar conforme padrão CELESC
+  '6 CU':120,'6 CAA':105,'4 CA':135,'4 CAA':140,'3 CAA':160,'2 CA':180,'2 CAA':180,'1/0 CA':240,'1/0 CAA':230,
+  '2/0 CA':280,'2/0 CAA':270,'3/0 CA':320,'3/0 CAA':300,'4/0 CA':370,'4/0 CAA':340,'336.4 CA':510,'336.4 CAA':530,
+  '477 CA':640,'477 CAA':670,'4.8 mm2-HS-ACO':40,'4.8 mm2-HS-ACO-ZIN':40,
+  '35 mm2-SP-CAA-25kV-XLPE':190,'50 mm2-SP-AL-25kV-XLPE':225,'150 mm2-SP-AL-25kV-XLPE':420,'150 mm2-SP-AL-15kV-XLPE':420,
+  '150 mm2-SP-AL-25kV-HDPE/XLPE':420,'185 mm2-SP-AL-25kV-XLPE':480,
+  '35 mm2-RDS-CU-25kV-XLPE':190,'35 mm2-RDS-CU-25kV-EPR':190,'50 mm2-RDS-AL-25kV-XLPE':180,'50 mm2-RDS-AL-25kV-EPR':180,
+  '50 mm2-RDS-CU-25kV-XLPE':220,'70 mm2-RDS-AL-25kV-XLPE':220,'120 mm2-RDS-AL-25kV-XLPE':300,'120 mm2-RDS-AL-25kV-EPR':300,
+  '150 mm2-RDST-CU-25kV-XLPE':400
+};
+const PLAN_SECC = new Set(['FR','FU','CD','CE','RE','CP']); // dispositivos de seccionamento (sg da base de equipamentos)
+const PLAN_MANOBRA = new Set(['CD','CE','RE','CP']);         // dispositivos que permitem manobra (transferência)
+function _pkm(x1,y1,x2,y2){const t=Math.PI/180,dLa=(y2-y1)*t,dLo=(x2-x1)*t;const h=Math.sin(dLa/2)**2+Math.cos(y1*t)*Math.cos(y2*t)*Math.sin(dLo/2)**2;return 12742*Math.asin(Math.sqrt(h));}
+
+// ── 1. Leitura do KML (string) ───────────────────────────────────────────
+function planParseKML(s, onProg){
+  const out={trechos:[],pts:[],ses:[]};let i=0,n=0;const L=s.length;
+  while(true){
+    const a=s.indexOf('<Placemark',i); if(a<0)break; const b=s.indexOf('</Placemark>',a); if(b<0)break; i=b+12;
+    const p=s.slice(a,b);const d={};
+    const re=/<SimpleData name="([^"]+)">([^<]*)<\/SimpleData>/g;let m;while((m=re.exec(p)))d[m[1]]=m[2].trim();
+    const nm=(p.match(/<name>([^<]*)<\/name>/)||[])[1]||'';
+    const cs=[];const rc=/<coordinates>([^<]*)<\/coordinates>/g;let c;while((c=rc.exec(p)))cs.push(c[1]);
+    const pts=[];for(const cc of cs)for(const q of cc.trim().split(/\s+/)){const v=q.split(',');if(v.length>=2)pts.push([+v[0],+v[1]]);}
+    const tipo=d.tipo||'';
+    if(tipo.startsWith('TrechoPrimario')){ if(pts.length>=2) out.trechos.push({pts,alim:d.alim||'',cabo:d.cabo||'?',fase:d.fase||'',area:d.id_area_objeto||'',mun:d.nm_municipio||'',sub:tipo.endsWith('Subterraneo')}); }
+    else if(tipo==='Subestacao') out.ses.push({nome:nm,pts});
+    else if(pts.length) out.pts.push({tipo,nr:(d.nr_operacional||nm||'').replace(/\.0$/,''),alim:d.alim||'',area:d.id_area_objeto||'',mun:d.nm_municipio||'',fase:d.fase||'',x:pts[0][0],y:pts[0][1],nome:nm});
+    if(onProg && (++n%5000===0)) onProg(a/L);
+  }
+  return out;
+}
+
+// ── 2. Base: árvore radial por alimentador + equipamentos + carregamento ─────
+// eqRows: [{nr,ant,sg,uc,alimNum}] (planilha Qtd UC) ; carg: [{al,nr,kva,fases,tot,carreg,ucs}] (CSV)
+function planBuild(K, eqRows, carg, opt={}){
+  const log=opt.log||(()=>{});
+  const kid=new Map();const X=[],Y=[];const vid=(x,y)=>{const k=Math.round(x*1e6)+','+Math.round(y*1e6);let v=kid.get(k);if(v===undefined){v=X.length;kid.set(k,v);X.push(x);Y.push(y);}return v;};
+  const cabos=[],cabI=new Map(),muns=[],munI=new Map();
+  const idx=(arr,map,v)=>{let i=map.get(v);if(i===undefined){i=arr.length;map.set(v,i);arr.push(v);}return i;};
+  // arestas rotuladas
+  const EA=[],EB=[],EL=[],ECab=[],EF=[],EAr=[],EMun=[],EAl=[];
+  const alims=[],alI=new Map();
+  for(const t of K.trechos){
+    const al=idx(alims,alI,t.alim||'?'),cb=idx(cabos,cabI,t.cabo||'?'),mu=idx(muns,munI,t.mun||'');
+    const nf=(t.fase||'').replace(/[^RST]/g,'').length||3;
+    let pv=vid(t.pts[0][0],t.pts[0][1]);
+    for(let k=1;k<t.pts.length;k++){const v=vid(t.pts[k][0],t.pts[k][1]);if(v===pv)continue;
+      EA.push(pv);EB.push(v);EL.push(_pkm(X[pv],Y[pv],X[v],Y[v]));ECab.push(cb);EF.push(nf);EAr.push(t.area==='U'?1:0);EMun.push(mu);EAl.push(al);pv=v;}
+  }
+  const NV=X.length,NE=EA.length; log(`Rede: ${NV} vértices, ${NE} segmentos, ${alims.length} rótulos de alimentador`);
+  // adjacência por alimentador (arestas com o mesmo rótulo)
+  const adjAll=Array.from({length:NV},()=>[]);
+  for(let e=0;e<NE;e++){adjAll[EA[e]].push(e);adjAll[EB[e]].push(e);}
+  const heads=K.pts.filter(p=>p.tipo==='Alimentador');
+  const feeders=[];const fI=new Map();
+  // chaves abertas (NA): seccionadora/religador sem UC e sem filhos na planilha — a busca não atravessa
+  const EQ0=new Map();for(const r of eqRows)EQ0.set(String(r.nr),r);const filhos0=new Set(eqRows.map(r=>String(r.ant)));
+  const naOld=new Set();if(opt.bloquearNA!==false)for(const p of K.pts){if(p.tipo!=='ChaveSeccionadora'&&p.tipo!=='ChaveSubterranea'&&p.tipo!=='Religador')continue;
+    const e=EQ0.get(p.nr);if(e&&(+e.uc||0)===0&&!filhos0.has(p.nr)){
+      const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined)naOld.add(o);}}
+  // UC (planilha) de dispositivos por vértice — usada para localizar o ponto aberto de laços sem NA
+  const ucDevOld=new Map();for(const p of K.pts){if(!/Chave|Religador/.test(p.tipo))continue;const e=EQ0.get(p.nr);if(!e||e.sg==='FT'||e.sg==='FP')continue;
+    const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined)ucDevOld.set(o,+e.uc||0);}
+  // árvore: BFS por alimentador só por arestas do próprio rótulo (vértice pode existir em mais de um alimentador).
+  // Laços: quebrados na chave NA que pertence ao laço (se houver), senão na aresta que fecha o laço.
+  const nodeOld=[],nodePar=[],nodeE=[],nodeF=[];const nodeOf=new Map();let lacos=0,lacosNA=0;
+  const bfs=(hv,al,forb)=>{const parE=new Map([[hv,-1]]);const q=[hv];const chords=[];
+    for(let qi=0;qi<q.length;qi++){const v=q[qi];for(const e of adjAll[v]){if(EAl[e]!==al||forb.has(e))continue;const w=EA[e]===v?EB[e]:EA[e];
+      if(parE.has(w)){if(parE.get(v)!==e&&parE.get(w)!==e)chords.push(e);continue;}parE.set(w,e);q.push(w);}}
+    return{parE,q,chords:[...new Set(chords)]};};
+  for(const h of heads){
+    const al=alI.get(h.nome); if(al===undefined) continue;
+    const hv=kid.get(Math.round(h.x*1e6)+','+Math.round(h.y*1e6)); if(hv===undefined) continue;
+    const fi=feeders.length; feeders.push({nome:h.nome,x:h.x,y:h.y,area:h.area,mun:h.mun}); fI.set(h.nome,fi);
+    const forb=new Set();let r=bfs(hv,al,forb);
+    for(let it=0;it<3&&r.chords.length;it++){
+      const up=v=>{const p=[];let x=v,k=0;while(x!==undefined&&k<1e6){const e=r.parE.get(x);if(e===undefined||e<0)break;p.push([x,e]);x=EA[e]===x?EB[e]:EA[e];k++;}return p;};
+      let mudou=false;
+      for(const c of r.chords){lacos++;const pa=up(EA[c]),pb=up(EB[c]);const sb=new Set(pb.map(z=>z[0]));
+        // caminho do laço: pa até o LCA + pb até o LCA + corda
+        let lca=null;const ciclo=[[EA[c],c]];for(const [x,e] of pa){if(sb.has(x)){lca=x;break;}ciclo.push([x,e]);}
+        for(const [x,e] of pb){if(x===lca)break;ciclo.push([x,e]);}
+        if(lca===null){const sa=new Set(pa.map(z=>z[0]));for(const [x] of pb)if(sa.has(x)){lca=x;break;}}
+        const naV=ciclo.find(([x])=>naOld.has(x));
+        if(naV){lacosNA++;const x=naV[0];// proíbe as arestas do laço incidentes na NA (abre a chave)
+          for(const e of adjAll[x]){if(EAl[e]!==al)continue;const w=EA[e]===x?EB[e]:EA[e];if(ciclo.some(([y])=>y===w)||e===c){forb.add(e);mudou=true;}}}
+        else{ // sem NA: abre logo a jusante do dispositivo com menor UC no laço
+          const ord=[];for(let k=pa.length-1;k>=0;k--){} // (ordem não necessária)
+          const cyc=ciclo.map(z=>z[0]);const devs=cyc.map((x,i)=>[i,ucDevOld.get(x)]).filter(z=>z[1]!==undefined);
+          if(devs.length>=2){devs.sort((a,b)=>a[1]-b[1]);const [im,um]=devs[0];const n=cyc.length;
+            // direção a jusante: vizinho de laço cujo dispositivo mais próximo tem UC menor ou igual
+            const near=(dir)=>{for(let k=1;k<n;k++){const u=ucDevOld.get(cyc[(im+dir*k+n)%n]);if(u!==undefined)return u;}return Infinity;};
+            const dir=near(1)<=near(-1)?1:-1;const a1=cyc[im],a2=cyc[(im+dir+n)%n];
+            const e=adjAll[a1].find(e=>(EA[e]===a2||EB[e]===a2)&&EAl[e]===al);if(e!==undefined&&!forb.has(e)){forb.add(e);mudou=true;lacosNA++;}}}
+      }
+      if(!mudou)break;r=bfs(hv,al,forb);
+    }
+    nodeF.length;const base=nodeOld.length;feeders[fi].root=base;
+    for(const v of r.q){nodeOf.set(v*64+fi,nodeOld.length);nodeOld.push(v);nodeF.push(fi);}
+    for(let k=base;k<nodeOld.length;k++){const v=nodeOld[k];const e=r.parE.get(v);nodeE.push(e);
+      nodePar.push(e<0?-1:nodeOf.get((EA[e]===v?EB[e]:EA[e])*64+fi));}
+  }
+  log(`Laços na rede: ${lacos} (${lacosNA} abertos na chave NA do próprio laço)`);
+  const N=nodeOld.length;
+  log(`Árvores: ${feeders.length} alimentadores, ${N} nós (${new Set(nodeOld).size} de ${NV} vértices)`);
+  const V={x:new Float64Array(N),y:new Float64Array(N),par:new Int32Array(N),f:new Int16Array(N),cab:new Int16Array(N),fase:new Int8Array(N),urb:new Int8Array(N),mun:new Int16Array(N),len:new Float32Array(N)};
+  for(let i=0;i<N;i++){const v=nodeOld[i];V.x[i]=X[v];V.y[i]=Y[v];V.par[i]=nodePar[i];V.f[i]=nodeF[i];const e=nodeE[i];
+    if(e>=0){V.cab[i]=ECab[e];V.fase[i]=EF[e];V.urb[i]=EAr[e];V.mun[i]=EMun[e];V.len[i]=EL[e];}else{V.cab[i]=-1;V.fase[i]=3;V.urb[i]=0;V.mun[i]=-1;V.len[i]=0;}}
+  // nós de um vértice antigo (pode haver mais de um alimentador); preferência pelo rótulo informado
+  const nodesOfOld=new Map();for(let i=0;i<N;i++){const v=nodeOld[i];if(!nodesOfOld.has(v))nodesOfOld.set(v,[]);nodesOfOld.get(v).push(i);}
+  const newId={};// compat
+  const vAt=(x,y,al)=>{const o=kid.get(Math.round(x*1e6)+','+Math.round(y*1e6));if(o===undefined)return -1;const ns=nodesOfOld.get(o);if(!ns)return -1;
+    if(al&&ns.length>1){const f=fI.get(al);const m=ns.find(n=>V.f[n]===f);if(m!==undefined)return m;}return ns[0];};
+  const oldOfNode=i=>nodeOld[i];
+  // ── equipamentos (planilha) ──
+  const EQ=new Map();for(const r of eqRows){EQ.set(String(r.nr),r);}
+  const filhosEq=new Map();for(const r of eqRows){const a=String(r.ant);if(!filhosEq.has(a))filhosEq.set(a,[]);filhosEq.get(a).push(String(r.nr));}
+  const CG=new Map();for(const r of carg)CG.set(String(r.nr),r);
+  // trafos
+  const td=[];const tdV=new Map();
+  for(const p of K.pts){if(!p.tipo.startsWith('TrafoDist'))continue;const v=vAt(p.x,p.y,p.alim);const e=EQ.get(p.nr),c=CG.get(p.nr);
+    const uc=c&&c.ucs!=null?c.ucs:(e&&e.uc!=null?e.uc:0);
+    const t={v,nr:p.nr,uc:+uc||0,kva:c?c.kva:null,tot:c?c.tot:null,carreg:c?c.carreg:null,fases:c?c.fases:(p.fase.replace(/[^RST]/g,'').length||null),urb:p.area==='U'?1:0,al:p.alim,x:p.x,y:p.y,q:c?c.queda:null};
+    td.push(t);if(v>=0){if(!tdV.has(v))tdV.set(v,[]);tdV.get(v).push(td.length-1);}}
+  // ancestrais (planilha) de cada trafo, p/ desambiguar ramo protegido
+  const anc=nr=>{const s=new Set();let n=EQ.get(nr)?.ant,k=0;while(n&&k<80){s.add(String(n));n=EQ.get(String(n))?.ant;k++;}return s;};
+  // filhos geométricos
+  const ch=Array.from({length:N},()=>[]);for(let i=1;i<N;i++)if(V.par[i]>=0)ch[V.par[i]].push(i);
+  // conjunto de trafos sob cada vértice (amostra limitada p/ desambiguação)
+  // dispositivos
+  const DEVT=new Set(['ChaveSeccionadora','ChaveFusivel','Religador','ChaveSubterranea']);
+  const tdNr=new Set(td.map(t=>t.nr));
+  const dev=[];const cut=new Uint8Array(N); // cut[c]=1 → aresta par(c)->c tem dispositivo
+  const tdUnder=(c,lim=400)=>{const out=[];const st=[c];while(st.length&&out.length<lim){const x=st.pop();for(const ti of(tdV.get(x)||[]))out.push(td[ti].nr);for(const y of ch[x])st.push(y);}return out;};
+  let ambig=0;
+  for(const p of K.pts){if(!DEVT.has(p.tipo))continue;const e=EQ.get(p.nr);const sg=e?.sg||'';
+    if(p.tipo==='ChaveFusivel'&&(sg==='FT'||sg==='FP'||(!sg&&tdNr.has(p.nr))))continue; // fusível de trafo
+    const v=vAt(p.x,p.y,p.alim);if(v<0)continue;
+    const na=(p.tipo==='ChaveSeccionadora'||p.tipo==='ChaveSubterranea'||p.tipo==='Religador')&&e&&(+e.uc||0)===0&&!(filhosEq.get(p.nr)||[]).length;
+    const d={v,nr:p.nr,tipo:p.tipo,sg:sg||({ChaveFusivel:'FR',ChaveSeccionadora:'CD',Religador:'RE',ChaveSubterranea:'CD'}[p.tipo]),uc:e?+e.uc||0:null,na,prot:[]};
+    if(!na){const cs=ch[v];
+      if(cs.length===1)d.prot=[cs[0]];
+      else if(cs.length>1){ // escolhe ramos cujos trafos descendem do dispositivo na planilha
+        const hit=cs.filter(c=>{const tl=tdUnder(c,60);return tl.some(n=>anc(n).has(p.nr));});
+        if(hit.length&&hit.length<cs.length){d.prot=hit;}
+        else if(hit.length===cs.length){d.prot=cs.slice();}
+        else{ // sem trafos identificáveis: protege o menor ramo (derivação) se o dispositivo não estiver no tronco
+          d.prot=cs.slice();ambig++;}
+      }
+      for(const c of d.prot)cut[c]=1;}
+    dev.push(d);}
+  log(`Dispositivos de seccionamento: ${dev.length} (${dev.filter(d=>d.na).length} NA, ${ambig} ambíguos)`);
+  // ── interligações ──
+  // vértice de fronteira: arestas de rótulos diferentes (ambos alimentadores existentes)
+  const inSE=(x,y)=>K.ses.some(se=>{const P=se.pts;let ins=false;for(let i=0,j=P.length-1;i<P.length;j=i++){const xi=P[i][0],yi=P[i][1],xj=P[j][0],yj=P[j][1];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))ins=!ins;}return ins;});
+  const nearHead=(x,y)=>feeders.some(f=>_pkm(x,y,f.x,f.y)<0.3);
+  const naByOld=new Map();for(const d of dev)if(d.na){const o=nodeOld[d.v];naByOld.set(o,d);}
+  // NA não alcançadas na árvore (fora dos rótulos) também
+  for(const p of K.pts){if(p.tipo!=='ChaveSeccionadora'&&p.tipo!=='ChaveSubterranea'&&p.tipo!=='Religador')continue;const e=EQ.get(p.nr);
+    if(!(e&&(+e.uc||0)===0&&!(filhosEq.get(p.nr)||[]).length))continue;const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined&&!naByOld.has(o))naByOld.set(o,{v:(nodesOfOld.get(o)||[-1])[0],nr:p.nr,tipo:p.tipo,sg:e.sg,uc:0,na:true,prot:[]});}
+  const inter=[],incons=[];const usedNA=new Set();
+  const front=new Map();
+  for(let v=0;v<NV;v++){const s=new Set();for(const e of adjAll[v])s.add(EAl[e]);if(s.size>1){const names=[...s].map(a=>alims[a]).filter(a=>a&&a!=='?');if(new Set(names).size>1)front.set(v,[...new Set(names)]);}}
+  for(const [v,names] of front){
+    if(inSE(X[v],Y[v])||nearHead(X[v],Y[v]))continue;
+    // busca NA mais próxima pelo grafo completo (até 600 m)
+    const dist=new Map([[v,0]]);const q=[v];let found=null;
+    for(let qi=0;qi<q.length;qi++){const a=q[qi];if(naByOld.has(a)){found=naByOld.get(a);break;}
+      for(const e of adjAll[a]){const w=EA[e]===a?EB[e]:EA[e];const d=dist.get(a)+EL[e];if(d>0.6)continue;if(!dist.has(w)||dist.get(w)>d){dist.set(w,d);q.push(w);}}}
+    if(found){if(usedNA.has(found.nr))continue;usedNA.add(found.nr);
+      inter.push({nr:found.nr,x:X[v],y:Y[v],al:names,dNA:Math.round((dist.get(nodeOld[found.v]??-1)||0)*1000)});}
+    else incons.push({tipo:'Troca de alimentador sem chave',x:X[v],y:Y[v],al:names});
+  }
+  // NA com rótulos diferentes ao redor e não usadas
+  for(const [o,d] of naByOld){if(usedNA.has(d.nr))continue;const s=new Set();for(const e of adjAll[o])s.add(alims[EAl[e]]);
+    if(s.size>1){usedNA.add(d.nr);inter.push({nr:d.nr,x:X[o],y:Y[o],al:[...s].filter(a=>a&&a!=='?'),dNA:0});}}
+  // vértice de ancoragem em cada lado: o mais próximo pertencente à árvore de cada alimentador
+  const fvByFeeder=(x,y,fi)=>{let best=-1,bd=1e9;const q=[kid.get(Math.round(x*1e6)+','+Math.round(y*1e6))];const seen=new Set(q);
+    for(let qi=0;qi<q.length&&qi<4000;qi++){const a=q[qi];const nv=(nodesOfOld.get(a)||[]).find(n=>V.f[n]===fi);if(nv!==undefined){const d=_pkm(x,y,X[a],Y[a]);if(d<bd){bd=d;best=nv;}if(bd<0.001)break;}
+      for(const e of adjAll[a]){const w=EA[e]===a?EB[e]:EA[e];if(!seen.has(w)){seen.add(w);q.push(w);}}}
+    return best;};
+  for(const it of inter){it.lados=it.al.map(a=>({al:a,v:fI.has(a)?fvByFeeder(it.x,it.y,fI.get(a)):-1}));}
+  // ── árvore operativa da planilha: agregados por equipamento ──
+  const tdInfo=new Map(td.map(t=>[t.nr,t]));const naInter=new Set(inter.filter(i=>i.al.length>1).map(i=>i.nr));
+  const pk=new Map();for(const r of eqRows){const a=String(r.ant);if(!pk.has(a))pk.set(a,[]);pk.get(a).push(String(r.nr));}
+  const eqAg=new Map();const visit=(nr,depth)=>{ // pós-ordem iterativa
+    const st=[[nr,0]];const outS=[];while(st.length){const [n,s_]=st.pop();if(s_===0){st.push([n,1]);for(const c of(pk.get(n)||[]))st.push([c,0]);}else outS.push(n);}
+    for(const n of outS){const t=tdInfo.get(n);const a={uc:0,ucu:0,kva:0,td:0,na:0};
+      if(t){a.uc+=t.uc;a.ucu+=t.urb?t.uc:0;a.kva+=(t.tot??(t.kva!=null?t.kva*0.5:0));a.td++;}
+      if(naInter.has(n))a.na++;
+      for(const c of(pk.get(n)||[])){const b=eqAg.get(c);if(b){a.uc+=b.uc;a.ucu+=b.ucu;a.kva+=b.kva;a.td+=b.td;a.na+=b.na;}}
+      eqAg.set(n,a);}};
+  for(const r of eqRows)if(!r.ant||!EQ.has(String(r.ant)))visit(String(r.nr));
+  const eqInfo=Object.fromEntries([...EQ].map(([n,r])=>[n,{ant:String(r.ant),sg:r.sg,uc:r.uc}]));
+  const stats={vertices:N,km:Array.from(V.len).reduce((a,b)=>a+b,0),trafos:td.length,disp:dev.length,na:dev.filter(d=>d.na).length,inter:inter.length,incons:incons.length,alimentadores:feeders.length,
+    trafosSemUC:td.filter(t=>!t.uc).length,trafosSemCarreg:td.filter(t=>t.carreg==null).length};
+  log(`Interligações: ${inter.length} · trocas de alimentador sem chave: ${incons.length}`);
+  return {V,N,feeders,cabos,muns,td,dev,inter,incons,stats,eqAg:Object.fromEntries(eqAg),eqInfo};
+}
+
+// ── 3. Análise (roda no cliente a cada mudança de parâmetro) ───────────────
+const PLAN_PARAM_PADRAO={ucUrb:500,ucRur:300,kmRur:5,kmUrb:2,ucBloco:150,derivTD:5,derivKm:2,derivProtM:50,kv:23,fc:0.7,utilMax:1.0,carregMax:100,ucPorKva:1.5,cabosPequenos:['6 CU','6 CAA','4 CA','2 CA','2 CAA','3 CAA','4.8 mm2-HS-ACO','4.8 mm2-HS-ACO-ZIN']};
+function planPrep(B){ // estruturas derivadas (uma vez por carga)
+  const N=B.N,V=B.V;const ch=Array.from({length:N},()=>[]);for(let i=0;i<N;i++)if(V.par[i]>=0)ch[V.par[i]].push(i);
+  const cutDev=new Map();for(const d of B.dev)if(!d.na)for(const c of d.prot){if(!cutDev.has(c))cutDev.set(c,d);}
+  const tdAt=new Map();B.td.forEach((t,i)=>{if(t.v>=0){if(!tdAt.has(t.v))tdAt.set(t.v,[]);tdAt.get(t.v).push(i);}});
+  const anchor=new Int32Array(N);for(const it of B.inter)for(const l of it.lados)if(l.v>=0)anchor[l.v]++;
+  // agregados de subárvore
+  const sKm=new Float64Array(N),sUC=new Float64Array(N),sTD=new Int32Array(N),sKVA=new Float64Array(N),sNA=new Int32Array(N),sUCu=new Float64Array(N);
+  for(let i=N-1;i>=0;i--){sKm[i]+=V.len[i];sNA[i]+=anchor[i];
+    for(const ti of(tdAt.get(i)||[])){const t=B.td[ti];sUC[i]+=t.uc;sTD[i]++;sKVA[i]+=(t.tot??(t.kva!=null?t.kva*0.5:0));if(t.urb)sUCu[i]+=t.uc;}
+    const p=V.par[i];if(p>=0){sKm[p]+=sKm[i];sUC[p]+=sUC[i];sTD[p]+=sTD[i];sKVA[p]+=sKVA[i];sNA[p]+=sNA[i];sUCu[p]+=sUCu[i];}}
+  B._p={ch,cutDev,tdAt,anchor,sKm,sUC,sTD,sKVA,sNA,sUCu};return B._p;}
+function planAnalyze(B,P){
+  P={...PLAN_PARAM_PADRAO,...(P||{})};const V=B.V,N=B.N;const X=B._p||planPrep(B);const {ch,cutDev,sKm,sUC,sTD,sKVA,sNA,sUCu}=X;
+  const F=i=>B.feeders[V.f[i]]?.nome;const r1=v=>Math.round(v*10)/10;const pt=i=>[+V.y[i].toFixed(6),+V.x[i].toFixed(6)];
+  const R={P};
+  // Itens 1 e 2 — ramais a jusante de dispositivo acima do limite de UCs sem interligação (árvore operativa da planilha)
+  const ram=[];const flag=new Set();const devByNr=new Map(B.dev.map(d=>[d.nr,d]));
+  for(const d of B.dev){if(d.na)continue;const ag=B.eqAg[d.nr];if(!ag||!ag.td)continue;
+    const urb=ag.uc>0?ag.ucu/ag.uc>=0.5:V.urb[d.v]===1;const lim=urb?P.ucUrb:P.ucRur;const uc=d.uc!=null&&d.uc>0?d.uc:ag.uc;
+    if(uc>lim&&ag.na===0){flag.add(d.nr);d._m={uc,urb,ag};}}
+  for(const nr of flag){let a=B.eqInfo[nr]?.ant,sub=false,k=0;while(a&&k<200){if(flag.has(a)){sub=true;break;}a=B.eqInfo[a]?.ant;k++;}
+    if(sub)continue;const d=devByNr.get(nr);let km=0,tdg=0;for(const c of d.prot){km+=sKm[c];tdg+=sTD[c];}
+    const ok=d._m.ag.td>0&&tdg/d._m.ag.td>0.75&&tdg/d._m.ag.td<1.33;
+    const nest=[...flag].filter(n=>{let a=B.eqInfo[n]?.ant,k=0;while(a&&k<200){if(a===nr)return true;a=B.eqInfo[a]?.ant;k++;}return false;}).length;
+    ram.push({nr,tipo:d.tipo,sg:d.sg,al:F(d.v),area:d._m.urb?'Urbana':'Rural',uc:Math.round(d._m.uc),km:ok?r1(km):null,trafos:d._m.ag.td,kva:Math.round(d._m.ag.kva),aninhados:nest,pos:pt(d.v),v:d.v,cut:d.prot});}
+  ram.sort((a,b)=>b.uc-a.uc);R.ramaisSemManobra=ram;
+  const alNA={};for(const it of B.inter)for(const a of it.al)alNA[a]=(alNA[a]||0)+(it.al.length>1?1:0);
+  R.alimSemInter=B.feeders.map(f=>({al:f.nome,uc:Math.round(sUC[f.root]),km:r1(sKm[f.root]),inter:alNA[f.nome]||0})).filter(x=>x.inter===0&&x.uc>0);
+  // Item 3 — blocos entre dispositivos
+  const blk=new Int32Array(N);const blocks=[];
+  for(let i=0;i<N;i++){const p=V.par[i];if(p<0||cutDev.has(i)){blk[i]=blocks.length;blocks.push({head:i,dev:cutDev.get(i)||null,al:F(i),km:0,uc:0,ucu:0,td:0});}else blk[i]=blk[p];
+    const b=blocks[blk[i]];b.km+=V.len[i];for(const ti of(X.tdAt.get(i)||[])){const t=B.td[ti];b.uc+=t.uc;b.td++;if(t.urb)b.ucu+=t.uc;}}
+  // subárvore dentro do bloco
+  const bKm=new Float64Array(N),bUC=new Float64Array(N);
+  for(let i=N-1;i>=0;i--){bKm[i]+=V.len[i];for(const ti of(X.tdAt.get(i)||[]))bUC[i]+=B.td[ti].uc;const p=V.par[i];if(p>=0&&blk[p]===blk[i]){bKm[p]+=bKm[i];bUC[p]+=bUC[i];}}
+  const best=new Map();
+  for(let i=0;i<N;i++){const b=blk[i];if(i===blocks[b].head)continue;const B_=blocks[b];
+    const sk=Math.max(bKm[i],B_.km-bKm[i]),su=Math.max(bUC[i],B_.uc-bUC[i]);const cur=best.get(b);
+    if(!cur||sk<cur.sk)best.set(b,{...(cur||{}),sk,vk:i});const c2=best.get(b);if(c2.su===undefined||su<c2.su){c2.su=su;c2.vu=i;}}
+  const secc=[];
+  blocks.forEach((b,bi)=>{const urb=b.uc>0?b.ucu/b.uc>=0.5:V.urb[b.head]===1;const mot=[];
+    if(!urb&&b.km>P.kmRur)mot.push(`Rural ${r1(b.km)} km sem seccionamento`);
+    if(urb&&b.km>P.kmUrb)mot.push(`Urbano ${r1(b.km)} km sem seccionamento`);
+    if(b.uc>P.ucBloco)mot.push(`${Math.round(b.uc)} UCs sem seccionamento`);
+    if(!mot.length)return;const bb=best.get(bi)||{};const porKm=mot[0].includes('km');const v=porKm?bb.vk:bb.vu;
+    secc.push({al:b.al,area:urb?'Urbana':'Rural',inicio:b.dev?`${b.dev.sg} ${b.dev.nr}`:'Saída do alimentador',km:r1(b.km),uc:Math.round(b.uc),trafos:b.td,motivo:mot.join(' · '),
+      sug:v!=null?pt(v):null,divide:v!=null?(porKm?`${r1(bKm[v])} km / ${r1(b.km-bKm[v])} km`:`${Math.round(bUC[v])} / ${Math.round(b.uc-bUC[v])} UCs`):'',head:b.head,v,blk:bi});});
+  secc.sort((a,b)=>b.uc-a.uc||b.km-a.km);R.seccionamento=secc;R._blk=blk;
+  // Item 4 — derivações sem chave
+  const deriv=[];
+  for(let v=0;v<N;v++){const cs=ch[v];if(cs.length<2)continue;let main=cs[0];for(const c of cs)if(sKm[c]>sKm[main])main=c;
+    for(const c of cs){if(c===main||cutDev.has(c))continue;
+      // dispositivo logo no início (até derivProtM metros, sem bifurcar)?
+      let x=c,acc=V.len[c],prot=false;while(acc*1000<=P.derivProtM){if(cutDev.has(x)){prot=true;break;}if(ch[x].length!==1)break;x=ch[x][0];acc+=V.len[x];}
+      if(prot)continue;if(sTD[c]<P.derivTD&&sKm[c]<P.derivKm)continue;
+      deriv.push({al:F(v),pos:pt(v),uc:Math.round(sUC[c]),km:r1(sKm[c]),trafos:sTD[c],area:(sUC[c]>0?sUCu[c]/sUC[c]>=0.5:V.urb[c]===1)?'Urbana':'Rural',v,c});}}
+  deriv.sort((a,b)=>b.uc-a.uc);R.derivacoes=deriv;
+  // Item 5 e 6 — trechos
+  const monoKm={},cabKm={};let monoTot=0;
+  for(let i=0;i<N;i++){if(V.par[i]<0)continue;const al=F(i),cb=B.cabos[V.cab[i]]||'?';
+    (cabKm[cb]=cabKm[cb]||{total:0,por:{}}).total+=V.len[i];cabKm[cb].por[al]=(cabKm[cb].por[al]||0)+V.len[i];
+    if(V.fase[i]===1&&V.urb[i]===1){const m=B.muns[V.mun[i]]||'—';const k=al+'|'+m;monoKm[k]=(monoKm[k]||0)+V.len[i];monoTot+=V.len[i];}}
+  R.monoUrbano={total:r1(monoTot),lista:Object.entries(monoKm).map(([k,v])=>({al:k.split('|')[0],mun:k.split('|')[1],km:Math.round(v*100)/100})).sort((a,b)=>b.km-a.km)};
+  R.cabos=Object.entries(cabKm).map(([c,o])=>({cabo:c,km:r1(o.total),amp:PLAN_AMP[c]??null,pequeno:P.cabosPequenos.includes(c),por:Object.fromEntries(Object.entries(o.por).map(([a,v])=>[a,r1(v)]))})).sort((a,b)=>b.km-a.km);
+  // Item 7 — interligações x cabo
+  const kv3=Math.sqrt(3)*P.kv;const inter=[];
+  // carga transferível: a jusante da 1ª chave de manobra acima da NA (planilha); fallback geométrico
+  const transf=(v,naNr,lado)=>{const info=B.eqInfo[naNr];const pai=info?.ant;const ladoPai=pai&&devByNr.get(pai)?F(devByNr.get(pai).v):null;
+    if(pai&&ladoPai===lado){let a=pai,k=0;while(a&&k<200){const e=B.eqInfo[a];if(e&&PLAN_MANOBRA.has(e.sg)){const ag=B.eqAg[a]||{kva:0,uc:0};return{dev:{sg:e.sg,nr:a},kva:ag.kva,uc:ag.uc};}if(e&&e.sg==='AL'){const ag=B.eqAg[a]||{kva:0,uc:0};return{dev:null,kva:ag.kva,uc:ag.uc};}a=e?.ant;k++;}}
+    let n=v,k=0;while(n>=0&&k<200000){const d=cutDev.get(n);if(d&&PLAN_MANOBRA.has(d.sg))return{dev:d,kva:sKVA[n],uc:sUC[n]};n=V.par[n];k++;}const f=B.feeders[V.f[v]];return{dev:null,kva:sKVA[f.root],uc:sUC[f.root]};};
+  const caminho=(v,extra)=>{let n=v,pior=null,garg=null,k=0;while(n>=0&&V.par[n]>=0&&k<200000){const cb=B.cabos[V.cab[n]];const amp=PLAN_AMP[cb];
+      if(amp){const I=(sKVA[n]+extra)*P.fc/kv3;const u=I/amp;if(!pior||u>pior.util)pior={util:u,cabo:cb,I,amp,pos:pt(n)};if(!garg||amp<garg.amp)garg={cabo:cb,amp,pos:pt(n)};}
+      n=V.par[n];k++;}return{pior,garg};};
+  for(const it of B.inter){const L=it.lados.filter(l=>l.v>=0);const o={nr:it.nr,al:it.al.join(' / '),pos:[+it.y.toFixed(6),+it.x.toFixed(6)],dNA:it.dNA,dirs:[]};
+    if(L.length===2){for(const [s,r] of [[L[0],L[1]],[L[1],L[0]]]){const t=transf(s.v,it.nr,s.al);const c=caminho(r.v,t.kva);
+        o.dirs.push({de:s.al,para:r.al,abre:t.dev?`${t.dev.sg} ${t.dev.nr}`:'saída do alimentador',kva:Math.round(t.kva*P.fc),uc:Math.round(t.uc),util:c.pior?Math.round(c.pior.util*100):null,critico:c.pior?.cabo||null,critPos:c.pior?.pos||null,gargalo:c.garg?.cabo||null});}
+      o.utilMax=Math.max(...o.dirs.map(d=>d.util||0));o.alerta=o.utilMax>P.utilMax*100;}
+    else{o.externo=true;o.utilMax=null;o.alerta=false;}
+    inter.push(o);}
+  inter.sort((a,b)=>(b.utilMax||0)-(a.utilMax||0));R.interligacoes=inter;
+  // Itens 8 e 9 — trafos
+  R.trafos=B.td.filter(t=>t.v>=0).map(t=>({nr:t.nr,al:t.al||F(t.v),pos:[+t.y.toFixed(6),+t.x.toFixed(6)],kva:t.kva,carreg:t.carreg,uc:t.uc,ucKva:t.kva?Math.round(t.uc/t.kva*100)/100:null,urb:t.urb,queda:t.q}));
+  R.trafosCarregados=R.trafos.filter(t=>t.carreg!=null&&t.carreg>P.carregMax).sort((a,b)=>b.carreg-a.carreg);
+  R.trafosMuitasUC=R.trafos.filter(t=>t.ucKva!=null&&t.ucKva>P.ucPorKva&&(t.carreg==null||t.carreg<=P.carregMax)).sort((a,b)=>b.ucKva-a.ucKva);
+  R.resumo={ramaisSemManobra:ram.length,alimSemInter:R.alimSemInter.length,seccionamento:secc.length,derivacoes:deriv.length,monoUrbanoKm:R.monoUrbano.total,
+    cabosPequenosKm:r1(R.cabos.filter(c=>c.pequeno).reduce((a,c)=>a+c.km,0)),interligacoes:inter.length,interAlerta:inter.filter(i=>i.alerta).length,trafosCarregados:R.trafosCarregados.length,trafosMuitasUC:R.trafosMuitasUC.length,inconsistencias:B.incons.length};
+  return R;}
+// ── 4. Serialização compacta da base (para gravar no Firestore) ──
+function _encI(a){let p=0,o=[];for(let i=0;i<a.length;i++){const v=a[i];o.push(v-p);p=v;}return o.join(',');}
+function _decI(s,T){const p=s?s.split(','):[];const a=new T(p.length);let v=0;for(let i=0;i<p.length;i++){v+=+p[i];a[i]=v;}return a;}
+function planSerializar(B){const V=B.V;
+  return JSON.stringify({v:2,N:B.N,x:_encI(Array.from(V.x,z=>Math.round(z*1e6))),y:_encI(Array.from(V.y,z=>Math.round(z*1e6))),
+    par:_encI(V.par),f:_encI(V.f),cab:_encI(V.cab),fase:Array.from(V.fase).join(''),urb:Array.from(V.urb).join(''),mun:_encI(V.mun),len:Array.from(V.len,z=>Math.round(z*1e4)).join(','),
+    feeders:B.feeders,cabos:B.cabos,muns:B.muns,
+    td:B.td.map(t=>[t.v,t.nr,t.uc,t.kva,t.tot,t.carreg,t.fases,t.urb,t.al,+t.x.toFixed(6),+t.y.toFixed(6),t.q]),
+    dev:B.dev.map(d=>[d.v,d.nr,d.tipo,d.sg,d.uc,d.na?1:0,d.prot]),inter:B.inter,incons:B.incons.map(i=>[+i.x.toFixed(6),+i.y.toFixed(6),i.al]),stats:B.stats,
+    eqAg:Object.entries(B.eqAg).filter(([n,a])=>a.td>0||a.na>0).map(([n,a])=>[n,a.uc,a.ucu,Math.round(a.kva),a.td,a.na]),
+    eqInfo:Object.entries(B.eqInfo).filter(([n,e])=>e.sg!=='FT').map(([n,e])=>[n,e.ant,e.sg,e.uc]),
+    eqTdPai:Object.entries(B.eqInfo).filter(([n,e])=>e.sg==='FT').map(([n,e])=>[n,e.ant])});}
+function planDesserializar(str){const o=JSON.parse(str);const N=o.N;
+  const V={x:Float64Array.from(_decI(o.x,Int32Array),z=>z/1e6),y:Float64Array.from(_decI(o.y,Int32Array),z=>z/1e6),par:_decI(o.par,Int32Array),f:_decI(o.f,Int16Array),cab:_decI(o.cab,Int16Array),
+    fase:Int8Array.from(o.fase,c=>+c),urb:Int8Array.from(o.urb,c=>+c),mun:_decI(o.mun,Int16Array),len:Float32Array.from(o.len.split(','),z=>+z/1e4)};
+  const td=o.td.map(a=>({v:a[0],nr:a[1],uc:a[2],kva:a[3],tot:a[4],carreg:a[5],fases:a[6],urb:a[7],al:a[8],x:a[9],y:a[10],q:a[11]}));
+  const dev=o.dev.map(a=>({v:a[0],nr:a[1],tipo:a[2],sg:a[3],uc:a[4],na:!!a[5],prot:a[6]}));
+  const eqAg={};for(const a of o.eqAg)eqAg[a[0]]={uc:a[1],ucu:a[2],kva:a[3],td:a[4],na:a[5]};
+  const eqInfo={};for(const a of o.eqInfo)eqInfo[a[0]]={ant:a[1],sg:a[2],uc:a[3]};for(const a of o.eqTdPai)eqInfo[a[0]]={ant:a[1],sg:'FT'};
+  return{V,N,feeders:o.feeders,cabos:o.cabos,muns:o.muns,td,dev,inter:o.inter,incons:o.incons.map(a=>({tipo:'Troca de alimentador sem chave',x:a[0],y:a[1],al:a[2]})),stats:o.stats,eqAg,eqInfo};}
+
+// ══════════════════════════════════════════════════════════════════════
+//  PLANEJAMENTO DA REDE (v2613) — aba exclusiva do gerente
+//  Bases: KMZ da rede MT (ARLAG), planilha de UCs por equipamento (com árvore operativa)
+//  e CSV de carregamento dos trafos. Processadas no navegador e gravadas no Firestore
+//  (coleções 'plan_base' e 'plan_meta'). Análises recalculadas no cliente com parâmetros editáveis.
+// ══════════════════════════════════════════════════════════════════════
+const _pl={map:null,B:null,R:null,meta:null,an:'ramais',P:null,lay:{},sel:null,al:'',carregado:false,arquivos:{}};
+const PL_ANALISES=[
+  ['ramais','Ramais sem manobra','Itens 1 e 2 — ramais acima do limite de UCs sem chave NA para outro alimentador'],
+  ['secc','Seccionamento','Item 3 — trechos longos ou com muitas UCs sem chave no meio, com ponto sugerido'],
+  ['deriv','Derivações sem chave','Item 4 — novos ramais saindo do tronco ou de ramais sem chave no início'],
+  ['mono','Monofásico urbano','Item 5 — rede monofásica em área urbana'],
+  ['cabos','Cabos','Item 6 — filtro por tipo de cabo'],
+  ['inter','Interligações x cabo','Item 7 — carga transferível e cabo crítico em cada chave NA entre alimentadores'],
+  ['carreg','Trafos carregados','Item 8 — carregamento acima do limite'],
+  ['ucs','Trafos com muitas UCs','Item 9 — muitas UCs para a potência, mesmo sem sobrecarga'],
+  ['incons','Inconsistências','Pontos onde o alimentador do trecho muda sem chave (revisar cadastro)']];
+const PL_PARAM_LBL=[['ucUrb','Limite UCs ramal urbano'],['ucRur','Limite UCs ramal rural'],['kmRur','Extensão máx. rural sem seccionar (km)'],['kmUrb','Extensão máx. urbana sem seccionar (km)'],
+  ['ucBloco','UCs máx. sem seccionar'],['derivTD','Derivação: mín. trafos'],['derivKm','Derivação: mín. km'],['derivProtM','Chave até (m) do início da derivação'],
+  ['kv','Tensão (kV)'],['fc','Fator de coincidência'],['utilMax','Utilização máx. do cabo (1 = 100%)'],['carregMax','Carregamento máx. trafo (%)'],['ucPorKva','UCs por kVA máx.']];
+function _plEsc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _plNum(v,d=0){return v==null||isNaN(v)?'—':Number(v).toLocaleString('pt-BR',{maximumFractionDigits:d,minimumFractionDigits:0});}
+function _plParams(){let p={};try{p=JSON.parse(localStorage.getItem('sppc_plan_params')||'{}');}catch(e){}return{...PLAN_PARAM_PADRAO,...p};}
+
+function _plHTML(){return `
+<style>
+ #pgPlanejamento .pl-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+ #pgPlanejamento .pl-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px}
+ #pgPlanejamento .pl-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:8px 0}
+ #pgPlanejamento .pl-files label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;display:flex;flex-direction:column;gap:4px}
+ #pgPlanejamento .pl-files input{font-size:11px;color:var(--text)}
+ #pgPlanejamento .pl-log{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);white-space:pre-wrap;max-height:120px;overflow:auto;margin-top:6px}
+ #pgPlanejamento .pl-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+ #pgPlanejamento .pl-kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 11px;cursor:pointer;text-align:left;color:var(--text);font:inherit}
+ #pgPlanejamento .pl-kpi.on{border-color:#7c6af7;box-shadow:0 0 0 1px #7c6af7 inset}
+ #pgPlanejamento .pl-kpi .k{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+ #pgPlanejamento .pl-kpi .v{font-family:'DM Mono',monospace;font-size:18px;font-weight:500}
+ #pgPlanejamento .pl-main{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:10px}
+ @media(max-width:1000px){#pgPlanejamento .pl-main{grid-template-columns:minmax(0,1fr)}}
+ #pgPlanejamento .pl-mapbox{position:relative;height:calc(100vh - 330px);min-height:480px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface2)}
+ #plMap{position:absolute;inset:0;background:var(--surface2)}
+ #pgPlanejamento .pl-base{position:absolute;top:10px;right:10px;z-index:1000;display:flex;background:var(--surface);border:1px solid var(--border);border-radius:7px;overflow:hidden}
+ #pgPlanejamento .pl-base button{border:0;background:transparent;color:var(--muted);padding:5px 9px;font-size:11px;cursor:pointer}
+ #pgPlanejamento .pl-base button.on{background:#7c6af7;color:#fff}
+ #pgPlanejamento .pl-side{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;height:calc(100vh - 330px);min-height:480px;overflow:hidden}
+ #pgPlanejamento .pl-sh{padding:10px 12px;border-bottom:1px solid var(--border)}
+ #pgPlanejamento .pl-sh .t{font-weight:700;font-size:13px}#pgPlanejamento .pl-sh .d{font-size:10px;color:var(--muted)}
+ #pgPlanejamento .pl-tab{overflow:auto;flex:1}
+ #pgPlanejamento table.pl{width:100%;border-collapse:collapse;font-size:11px}
+ #pgPlanejamento table.pl th{position:sticky;top:0;background:var(--surface2);text-align:left;padding:5px 6px;font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;cursor:pointer;white-space:nowrap}
+ #pgPlanejamento table.pl td{padding:5px 6px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap}
+ #pgPlanejamento table.pl tr:hover td{background:var(--surface2);cursor:pointer}
+ #pgPlanejamento table.pl tr.sel td{background:rgba(124,106,247,.18)}
+ #pgPlanejamento .pl-params{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}
+ #pgPlanejamento .pl-params label{font-size:10px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+ #pgPlanejamento select,#pgPlanejamento input[type=number]{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;color:var(--text);font-family:'DM Mono',monospace;font-size:11px}
+ #pgPlanejamento .pl-cabos{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border);max-height:110px;overflow:auto}
+ #pgPlanejamento .pl-cabos label{font-size:10px;border:1px solid var(--border);border-radius:12px;padding:2px 8px;display:flex;gap:4px;align-items:center;cursor:pointer}
+ #pgPlanejamento .pl-leg{position:absolute;left:10px;bottom:22px;z-index:1000;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:10px;color:var(--text);max-width:260px}
+ #pgPlanejamento .pl-leg div{display:flex;gap:6px;align-items:center;margin:2px 0}
+ #pgPlanejamento .pl-leg i{display:inline-block;width:14px;height:4px;border-radius:2px}
+ .pl-pop{font-size:11px;line-height:1.45}.pl-pop b{font-size:12px}
+</style>
+<div class="pl-top">
+  <div class="page-title">🧭 Planejamento da Rede</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span id="plMeta" style="font-size:11px;color:var(--muted)"></span>
+    <button class="btn btn-secondary btn-sm" onclick="plToggle('plBases')">⚙️ Atualizar bases</button>
+    <button class="btn btn-secondary btn-sm" onclick="plToggle('plParams')">🎚️ Parâmetros</button>
+  </div>
+</div>
+<div class="pl-box" id="plBases" style="display:none">
+  <div style="font-size:11px;color:var(--muted)">Envie as três bases e clique em Processar. O processamento é feito no seu navegador (leva cerca de 10 a 30 segundos) e o resultado fica salvo para os demais gerentes.</div>
+  <div class="pl-files">
+    <label>1. Rede MT (KMZ da ARLAG)<input type="file" id="plFKmz" accept=".kmz,.kml"></label>
+    <label>2. Qtd. UC por equipamento (Excel)<input type="file" id="plFUc" accept=".xlsx,.xls"></label>
+    <label>3. Carregamento dos trafos (CSV)<input type="file" id="plFCg" accept=".csv,.txt"></label>
+  </div>
+  <button class="btn btn-primary btn-sm" id="plBtnProc" onclick="plProcessar()">⚡ Processar e salvar</button>
+  <div class="pl-log" id="plLog"></div>
+</div>
+<div class="pl-box" id="plParams" style="display:none">
+  <div class="pl-params" id="plParamsGrid"></div>
+  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary btn-sm" onclick="plAplicarParams()">Aplicar</button><button class="btn btn-secondary btn-sm" onclick="plParamsPadrao()">Restaurar padrão</button>
+  <span style="font-size:10px;color:var(--muted);align-self:center">Ampacidades e fator de coincidência são valores de referência para triagem; confirme com estudo de fluxo antes de decidir obras.</span></div>
+</div>
+<div class="pl-kpis" id="plKpis"></div>
+<div class="pl-main">
+  <div class="pl-mapbox"><div id="plMap"></div>
+    <div class="pl-base"><button id="plbR" class="on" onclick="plBase('r')">Ruas</button><button id="plbS" onclick="plBase('s')">Satélite</button><button id="plbN" onclick="plBase('n')">Sem fundo</button></div>
+    <div class="pl-leg" id="plLeg"></div>
+  </div>
+  <div class="pl-side">
+    <div class="pl-sh"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div><div class="t" id="plTit"></div><div class="d" id="plDesc"></div></div>
+      <div style="display:flex;gap:6px;align-items:center"><select id="plAl" title="Alimentador"></select><button class="btn btn-secondary btn-sm" onclick="plExportar()" title="Exportar tabela para Excel">⬇️ Excel</button></div></div></div>
+    <div class="pl-cabos" id="plCabos" style="display:none"></div>
+    <div class="pl-tab" id="plTab"></div>
+  </div>
+</div>`;}
+
+window.renderPlanejamento=async function(){
+  if(me.perfil!=='gerente')return;const pg=document.getElementById('pgPlanejamento');if(!pg)return;
+  if(typeof L==='undefined'){pg.innerHTML='<div class="empty"><p>Biblioteca de mapas não carregou.</p></div>';return;}
+  if(!_pl.map){pg.innerHTML=_plHTML();_pl.P=_plParams();
+    _pl.map=L.map('plMap',{preferCanvas:true}).setView([-27.8,-50.3],9);
+    _pl.bases={r:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Mapa © Esri'}),
+      s:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagens © Esri'})};
+    _pl.baseK='r';_pl.base=_pl.bases.r.addTo(_pl.map);
+    _pl.lay.rede=L.layerGroup().addTo(_pl.map);_pl.lay.an=L.layerGroup().addTo(_pl.map);_pl.lay.hl=L.layerGroup().addTo(_pl.map);
+    document.getElementById('plAl').onchange=e=>{_pl.al=e.target.value;_plDesenharRede();_plMostrar(true);};
+    _plParamsUI();}
+  setTimeout(()=>_pl.map.invalidateSize(),50);
+  if(!_pl.carregado){document.getElementById('plTab').innerHTML='<div style="padding:16px;font-size:11px;color:var(--muted)">Carregando base de planejamento…</div>';
+    try{await _plCarregar();}catch(e){console.error('[Plan]',e);toast('Erro ao carregar a base de planejamento: '+e.message,'err');}}
+  _plMostrar(true);
+};
+window.plToggle=id=>{const el=document.getElementById(id);if(el)el.style.display=el.style.display==='block'?'none':'block';};
+window.plBase=k=>{if(_pl.base)_pl.map.removeLayer(_pl.base);_pl.base=k==='n'?null:_pl.bases[k].addTo(_pl.map);_pl.baseK=k;
+  ['R','S','N'].forEach(x=>document.getElementById('plb'+x).classList.toggle('on',x.toLowerCase()===k));_plDesenharRede();_plMostrar(false);};
+
+async function _plCarregar(){
+  const m=await getDoc(doc(db,'plan_meta','atual'));
+  if(!m.exists()){_pl.carregado=true;_pl.B=null;document.getElementById('plMeta').textContent='Nenhuma base processada ainda.';document.getElementById('plBases').style.display='block';return;}
+  _pl.meta=m.data();const partes=[];
+  for(let i=0;i<_pl.meta.partes;i++){const d=await getDoc(doc(db,'plan_base','p'+i));partes.push(d.data().dados);}
+  const z=await JSZip.loadAsync(partes.join(''),{base64:true});const s=await z.file('b.json').async('string');
+  _pl.B=planDesserializar(s);planPrep(_pl.B);_pl.carregado=true;
+  const dt=_pl.meta.atualizadoEm?.toDate?_pl.meta.atualizadoEm.toDate().toLocaleString('pt-BR'):'—';
+  document.getElementById('plMeta').textContent=`Base de ${dt} · ${_pl.meta.por||''} · ${_plNum(_pl.B.stats.km)} km · ${_plNum(_pl.B.stats.trafos)} trafos`;
+  const sel=document.getElementById('plAl');sel.innerHTML='<option value="">Todos os alimentadores</option>'+_pl.B.feeders.map(f=>f.nome).sort().map(n=>`<option>${_plEsc(n)}</option>`).join('');
+  _plAnalisar();_plDesenharRede(true);
+}
+function _plAnalisar(){if(!_pl.B)return;const t=performance.now();_pl.R=planAnalyze(_pl.B,_pl.P);console.log('[Plan] análise',Math.round(performance.now()-t),'ms');_plKpis();}
+
+// ── parâmetros ──
+function _plParamsUI(){const g=document.getElementById('plParamsGrid');if(!g)return;
+  g.innerHTML=PL_PARAM_LBL.map(([k,l])=>`<label>${l}<input type="number" step="any" id="plp_${k}" value="${_pl.P[k]}"></label>`).join('');}
+window.plAplicarParams=()=>{for(const [k] of PL_PARAM_LBL){const v=parseFloat(document.getElementById('plp_'+k).value);if(!isNaN(v))_pl.P[k]=v;}
+  try{localStorage.setItem('sppc_plan_params',JSON.stringify(Object.fromEntries(PL_PARAM_LBL.map(([k])=>[k,_pl.P[k]]))));}catch(e){}
+  _plAnalisar();_plMostrar(false);toast('Parâmetros aplicados.');};
+window.plParamsPadrao=()=>{_pl.P={...PLAN_PARAM_PADRAO};try{localStorage.removeItem('sppc_plan_params');}catch(e){}_plParamsUI();_plAnalisar();_plMostrar(false);};
+
+// ── KPIs ──
+function _plKpis(){const R=_pl.R;if(!R)return;const r=R.resumo;
+  const v={ramais:r.ramaisSemManobra+(r.alimSemInter?` + ${r.alimSemInter} alim.`:''),secc:r.seccionamento,deriv:r.derivacoes,mono:_plNum(r.monoUrbanoKm,1)+' km',cabos:_plNum(r.cabosPequenosKm,0)+' km',
+    inter:r.interligacoes+(r.interAlerta?` (${r.interAlerta}⚠️)`:''),carreg:r.trafosCarregados,ucs:r.trafosMuitasUC,incons:r.inconsistencias};
+  document.getElementById('plKpis').innerHTML=PL_ANALISES.map(([k,t])=>`<button class="pl-kpi ${_pl.an===k?'on':''}" onclick="plAnalise('${k}')"><div class="k">${t}</div><div class="v">${v[k]}</div></button>`).join('');}
+window.plAnalise=k=>{_pl.an=k;_pl.sel=null;_plKpis();_plMostrar(true);};
+
+// ── desenho ──
+function _plCorRede(){return _pl.baseK==='s'?'#cbd5e1':(_pl.baseK==='r'||!document.body.classList.contains('light-theme'))?'#7d8f8c':'#94a3b8';}
+function _plSeg(nodes){const V=_pl.B.V;const out=[];for(const i of nodes){const p=V.par[i];if(p<0)continue;out.push([[V.y[p],V.x[p]],[V.y[i],V.x[i]]]);}return out;}
+function _plNoFiltro(i){return !_pl.al||_pl.B.feeders[_pl.B.V.f[i]]?.nome===_pl.al;}
+function _plDesenharRede(fit){if(!_pl.B||!_pl.lay.rede)return;_pl.lay.rede.clearLayers();const V=_pl.B.V,N=_pl.B.N;const seg=[];
+  for(let i=0;i<N;i++){if(V.par[i]<0||!_plNoFiltro(i))continue;seg.push([[V.y[V.par[i]],V.x[V.par[i]]],[V.y[i],V.x[i]]]);}
+  const l=L.polyline(seg,{color:_plCorRede(),weight:1.2,opacity:.75,interactive:false}).addTo(_pl.lay.rede);
+  if(fit&&seg.length)_pl.map.fitBounds(l.getBounds().pad(.02));}
+function _plSub(roots){const ch=_pl.B._p.ch;const out=[];const st=[...roots];while(st.length){const x=st.pop();out.push(x);for(const y of ch[x])st.push(y);}return out;}
+function _plMarker(pos,cor,r=6,tip){const m=L.circleMarker(pos,{radius:r,color:'#fff',weight:1.5,fillColor:cor,fillOpacity:1});if(tip)m.bindTooltip(tip);return m;}
+
+const PL_COLS={
+  ramais:[['al','Alim.'],['sg','Tipo'],['nr','Equip.'],['area','Área'],['uc','UCs'],['trafos','Trafos'],['kva','kVA'],['km','km'],['aninhados','Aninhados']],
+  secc:[['al','Alim.'],['inicio','Início do trecho'],['area','Área'],['km','km'],['uc','UCs'],['trafos','Trafos'],['motivo','Motivo'],['divide','Divisão sugerida']],
+  deriv:[['al','Alim.'],['area','Área'],['uc','UCs'],['km','km'],['trafos','Trafos']],
+  mono:[['al','Alim.'],['mun','Município'],['km','km']],
+  cabos:[['cabo','Cabo'],['km','km'],['amp','Ampac. ref. (A)'],['pequeno','Fora de padrão']],
+  inter:[['nr','Chave NA'],['al','Alimentadores'],['utilMax','Util. máx (%)'],['resumo','Transferência / cabo crítico']],
+  carreg:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['carreg','Carreg. (%)'],['uc','UCs'],['queda','Queda (%)']],
+  ucs:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['uc','UCs'],['ucKva','UCs/kVA'],['carreg','Carreg. (%)']],
+  incons:[['al','Alimentadores'],['pos','Coordenadas']]};
+function _plLinhas(){const R=_pl.R;if(!R)return[];const f=r=>!_pl.al||String(r.al||'').split(' / ').includes(_pl.al)||(Array.isArray(r.al)&&r.al.includes(_pl.al));
+  switch(_pl.an){
+    case 'ramais':return[...R.alimSemInter.map(a=>({...a,sg:'ALIM',nr:a.al,area:'—',trafos:null,kva:null,aninhados:null,_alim:true})),...R.ramaisSemManobra].filter(f);
+    case 'secc':return R.seccionamento.filter(f);
+    case 'deriv':return R.derivacoes.filter(f);
+    case 'mono':return R.monoUrbano.lista.filter(f);
+    case 'cabos':return R.cabos.map(c=>({...c,km:_pl.al?(c.por[_pl.al]||0):c.km,pequeno:c.pequeno?'Sim':''})).filter(c=>c.km>0);
+    case 'inter':return R.interligacoes.map(i=>({...i,resumo:i.externo?'Alimentador de outra regional':i.dirs.map(d=>`${d.de}→${d.para}: abre ${d.abre}, ${_plNum(d.kva)} kVA, ${d.util??'—'}% em ${d.critico||'—'}`).join(' | ')})).filter(f);
+    case 'carreg':return R.trafosCarregados.filter(f);
+    case 'ucs':return R.trafosMuitasUC.filter(f);
+    case 'incons':return _pl.B.incons.map(i=>({al:i.al.join(' / '),pos:`${i.y.toFixed(5)}, ${i.x.toFixed(5)}`,_x:i.x,_y:i.y})).filter(f);}return[];}
+function _plMostrar(fit){if(!_pl.map)return;const tab=document.getElementById('plTab');
+  const [,tit,desc]=PL_ANALISES.find(a=>a[0]===_pl.an);document.getElementById('plTit').textContent=tit;document.getElementById('plDesc').textContent=desc;
+  _pl.lay.an.clearLayers();_pl.lay.hl.clearLayers();document.getElementById('plCabos').style.display=_pl.an==='cabos'?'flex':'none';
+  if(!_pl.B){tab.innerHTML='<div style="padding:16px;font-size:11px;color:var(--muted)">Nenhuma base processada. Use ⚙️ Atualizar bases para enviar o KMZ, a planilha de UCs e o CSV de carregamento.</div>';document.getElementById('plLeg').innerHTML='';return;}
+  const rows=_plLinhas();_pl.rows=rows;const cols=PL_COLS[_pl.an];const V=_pl.B.V;const leg=[];
+  // camada da análise
+  if(_pl.an==='ramais'){for(const r of rows)if(!r._alim)_plMarker(r.pos,r.area==='Urbana'?'#ef4444':'#f97316',6,`${r.sg} ${r.nr} · ${r.uc} UCs`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);
+    leg.push(['#ef4444','Ramal urbano sem manobra'],['#f97316','Ramal rural sem manobra']);}
+  if(_pl.an==='secc'){for(const r of rows)if(r.sug)_plMarker(r.sug,'#eab308',5,`Ponto sugerido · ${r.divide}`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);leg.push(['#eab308','Ponto sugerido para nova chave']);}
+  if(_pl.an==='deriv'){for(const r of rows)_plMarker(r.pos,'#a855f7',5,`Derivação · ${r.uc} UCs · ${r.km} km`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);leg.push(['#a855f7','Início de derivação sem chave']);}
+  if(_pl.an==='mono'){const seg=[];for(let i=0;i<_pl.B.N;i++)if(V.par[i]>=0&&V.fase[i]===1&&V.urb[i]===1&&_plNoFiltro(i))seg.push([[V.y[V.par[i]],V.x[V.par[i]]],[V.y[i],V.x[i]]]);
+    L.polyline(seg,{color:'#ef4444',weight:3,opacity:.95}).addTo(_pl.lay.an);leg.push(['#ef4444','Rede monofásica urbana']);}
+  if(_pl.an==='cabos'){_plCabosUI();_plDesenharCabos(leg);}
+  if(_pl.an==='inter'){for(const r of rows){const c=r.externo?'#64748b':r.utilMax>=_pl.P.utilMax*100?'#ef4444':r.utilMax>=70?'#f59e0b':'#22c55e';
+      _plMarker(r.pos,c,6,`NA ${r.nr} · ${r.al}`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);}
+    leg.push(['#22c55e','Utilização < 70%'],['#f59e0b','70% até o limite'],['#ef4444','Acima do limite'],['#64748b','Outra regional']);}
+  if(_pl.an==='carreg'||_pl.an==='ucs'){for(const r of rows){const c=_pl.an==='carreg'?(r.carreg>=150?'#7f1d1d':r.carreg>=120?'#ef4444':'#f97316'):'#3b82f6';
+      _plMarker(r.pos,c,5,`Trafo ${r.nr} · ${r.kva??'?'} kVA · ${_plNum(r.carreg,1)}% · ${r.uc} UCs`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);}
+    if(_pl.an==='carreg')leg.push(['#f97316',`${_pl.P.carregMax}–120%`],['#ef4444','120–150%'],['#7f1d1d','≥ 150%']);else leg.push(['#3b82f6',`> ${_pl.P.ucPorKva} UCs por kVA`]);}
+  if(_pl.an==='incons'){for(const r of rows)_plMarker([r._y,r._x],'#f43f5e',4,r.al).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);leg.push(['#f43f5e','Troca de alimentador sem chave']);}
+  document.getElementById('plLeg').innerHTML=leg.map(([c,t])=>`<div><i style="background:${c}"></i>${_plEsc(t)}</div>`).join('');
+  // tabela
+  const MAX=1500;tab.innerHTML=rows.length?`<table class="pl"><thead><tr>${cols.map(([k,l])=>`<th data-k="${k}">${l}</th>`).join('')}</tr></thead><tbody>`+
+    rows.slice(0,MAX).map((r,i)=>`<tr data-i="${i}">${cols.map(([k])=>`<td>${typeof r[k]==='number'?_plNum(r[k],k==='km'||k==='ucKva'||k==='carreg'?1:0):_plEsc(r[k]??'—')}</td>`).join('')}</tr>`).join('')+'</tbody></table>'+
+    (rows.length>MAX?`<div style="padding:8px;font-size:10px;color:var(--muted)">Mostrando ${MAX} de ${rows.length}. Exporte para ver todos.</div>`:'')
+    :'<div style="padding:16px;font-size:11px;color:var(--muted)">Nenhum item com os parâmetros atuais.</div>';
+  tab.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>_plSelecionar(rows[+tr.dataset.i]));
+  tab.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;_pl.ord=_pl.ord===k?'-'+k:k;const d=_pl.ord.startsWith('-')?-1:1;
+    const kk=_pl.ord.replace('-','');rows.sort((a,b)=>{const x=a[kk],y=b[kk];return(typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''),'pt-BR'))*d;});_pl.rowsOrd=rows;
+    const body=tab.querySelector('tbody');body.innerHTML=rows.slice(0,MAX).map((r,i)=>`<tr data-i="${i}">${cols.map(([k])=>`<td>${typeof r[k]==='number'?_plNum(r[k],k==='km'||k==='ucKva'||k==='carreg'?1:0):_plEsc(r[k]??'—')}</td>`).join('')}</tr>`).join('');
+    body.querySelectorAll('tr').forEach(tr=>tr.onclick=()=>_plSelecionar(rows[+tr.dataset.i]));});
+  if(fit&&_pl.al){const nodes=[];for(let i=0;i<_pl.B.N;i++)if(_plNoFiltro(i))nodes.push([V.y[i],V.x[i]]);if(nodes.length)_pl.map.fitBounds(L.latLngBounds(nodes).pad(.03));}
+}
+function _plCabosUI(){const box=document.getElementById('plCabos');if(!_pl.cabSel)_pl.cabSel=new Set(_pl.P.cabosPequenos);
+  box.innerHTML=_pl.R.cabos.map(c=>`<label><input type="checkbox" value="${_plEsc(c.cabo)}" ${_pl.cabSel.has(c.cabo)?'checked':''}>${_plEsc(c.cabo)} · ${_plNum(c.km)} km</label>`).join('');
+  box.querySelectorAll('input').forEach(inp=>inp.onchange=()=>{if(inp.checked)_pl.cabSel.add(inp.value);else _pl.cabSel.delete(inp.value);_pl.lay.an.clearLayers();const leg=[];_plDesenharCabos(leg);
+    document.getElementById('plLeg').innerHTML=leg.map(([c,t])=>`<div><i style="background:${c}"></i>${_plEsc(t)}</div>`).join('');});}
+function _plDesenharCabos(leg){const V=_pl.B.V;const PAL=['#ef4444','#f59e0b','#22c55e','#3b82f6','#a855f7','#ec4899','#14b8a6','#f97316','#84cc16','#06b6d4'];let k=0;
+  for(const c of _pl.R.cabos){if(!_pl.cabSel.has(c.cabo))continue;const ci=_pl.B.cabos.indexOf(c.cabo);const seg=[];
+    for(let i=0;i<_pl.B.N;i++)if(V.par[i]>=0&&V.cab[i]===ci&&_plNoFiltro(i))seg.push([[V.y[V.par[i]],V.x[V.par[i]]],[V.y[i],V.x[i]]]);
+    const cor=PAL[k++%PAL.length];if(seg.length)L.polyline(seg,{color:cor,weight:3,opacity:.95}).bindTooltip(c.cabo,{sticky:true}).addTo(_pl.lay.an);leg.push([cor,c.cabo]);}}
+function _plSelecionar(r){_pl.lay.hl.clearLayers();const B=_pl.B,V=B.V;let pop='';let foco=null;
+  document.querySelectorAll('#plTab tr.sel').forEach(t=>t.classList.remove('sel'));
+  if(_pl.an==='ramais'&&!r._alim){const seg=r.km!=null?_plSeg(_plSub(r.cut)):[];if(seg.length)L.polyline(seg,{color:'#ef4444',weight:3.5,opacity:.95}).addTo(_pl.lay.hl);
+    // trafos a jusante pela árvore operativa (planilha)
+    if(!_pl.kidsEq){_pl.kidsEq=new Map();for(const [n,e] of Object.entries(B.eqInfo)){if(!_pl.kidsEq.has(e.ant))_pl.kidsEq.set(e.ant,[]);_pl.kidsEq.get(e.ant).push(n);}_pl.tdByNr=new Map(B.td.map(t=>[t.nr,t]));}
+    const pts=[];const st=[r.nr];let k=0;while(st.length&&k<200000){const n=st.pop();k++;const t=_pl.tdByNr.get(n);if(t)pts.push([t.y,t.x]);for(const c of(_pl.kidsEq.get(n)||[]))st.push(c);}
+    for(const p of pts)L.circleMarker(p,{radius:3,color:'#ef4444',weight:1,fillColor:'#fca5a5',fillOpacity:.9,interactive:false}).addTo(_pl.lay.hl);
+    foco=pts.length?L.latLngBounds(pts):(seg.length?L.polyline(seg).getBounds():null);
+    pop=`<b>${r.sg} ${r.nr}</b> · ${r.al}<br>${r.area} · ${_plNum(r.uc)} UCs · ${r.trafos} trafos · ${_plNum(r.kva)} kVA<br>${r.km!=null?_plNum(r.km,1)+' km':'extensão não confirmada pela geometria'}<br>Sem chave NA para outro alimentador a jusante.${r.aninhados?`<br>${r.aninhados} ramal(is) menor(es) dentro também acima do limite.`:''}`;}
+  if(_pl.an==='ramais'&&r._alim){const f=B.feeders.find(f=>f.nome===r.al);pop=`<b>${r.al}</b><br>Alimentador sem nenhuma interligação · ${_plNum(r.uc)} UCs`;foco=L.latLng(f.y,f.x).toBounds(3000);}
+  if(_pl.an==='secc'){const nodes=[];const blk=_pl.R._blk;for(let i=0;i<B.N;i++)if(blk[i]===r.blk)nodes.push(i);const seg=_plSeg(nodes);
+    L.polyline(seg,{color:'#eab308',weight:3.5,opacity:.95}).addTo(_pl.lay.hl);if(r.sug)_plMarker(r.sug,'#eab308',8).addTo(_pl.lay.hl);foco=seg.length?L.polyline(seg).getBounds():null;
+    pop=`<b>Trecho a partir de ${_plEsc(r.inicio)}</b> · ${r.al}<br>${r.area} · ${_plNum(r.km,1)} km · ${_plNum(r.uc)} UCs · ${r.trafos} trafos<br>${_plEsc(r.motivo)}<br>Nova chave no ponto amarelo divide em <b>${_plEsc(r.divide)}</b>.`;}
+  if(_pl.an==='deriv'){const seg=_plSeg(_plSub([r.c]));L.polyline(seg,{color:'#a855f7',weight:3.5,opacity:.95}).addTo(_pl.lay.hl);foco=seg.length?L.polyline(seg).getBounds():null;
+    pop=`<b>Derivação sem chave</b> · ${r.al}<br>${r.area} · ${_plNum(r.uc)} UCs · ${_plNum(r.km,1)} km · ${r.trafos} trafos`;}
+  if(_pl.an==='inter'){pop=`<b>Chave NA ${r.nr}</b> · ${_plEsc(r.al)}${r.dNA?`<br><span style="color:#888">Chave a ${r.dNA} m do ponto de troca de alimentador</span>`:''}`+
+    (r.externo?'<br>Interligação com alimentador de outra regional.':r.dirs.map(d=>`<hr style="border:0;border-top:1px solid #ddd;margin:4px 0"><b>${d.de} → ${d.para}</b><br>Abrir ${_plEsc(d.abre)} e fechar a NA transfere ${_plNum(d.kva)} kVA (${_plNum(d.uc)} UCs)<br>Utilização máx. estimada no ${d.para}: <b>${d.util??'—'}%</b> em ${_plEsc(d.critico||'—')}${d.gargalo&&d.gargalo!==d.critico?`<br>Menor cabo no caminho: ${_plEsc(d.gargalo)}`:''}`).join(''));
+    if(!r.externo)pop+='<div style="margin-top:4px;font-size:10px;color:#888">Triagem com ampacidade de referência e fator de coincidência; confirmar com fluxo de carga.</div>';
+    for(const d of(r.dirs||[]))if(d.critPos)_plMarker(d.critPos,'#ef4444',5,`Ponto crítico ${d.de}→${d.para}: ${d.critico}`).addTo(_pl.lay.hl);foco=L.latLng(r.pos).toBounds(2500);}
+  if(_pl.an==='carreg'||_pl.an==='ucs'){pop=`<b>Trafo ${r.nr}</b> · ${r.al}<br>${r.kva??'?'} kVA · carregamento ${_plNum(r.carreg,1)}%<br>${r.uc} UCs (${_plNum(r.ucKva,2)} UCs/kVA)${r.queda!=null?`<br>Queda de tensão máx.: ${_plNum(r.queda,1)}%`:''}`;foco=L.latLng(r.pos).toBounds(600);}
+  if(_pl.an==='incons'){pop=`<b>Troca de alimentador sem chave</b><br>${_plEsc(r.al)}<br>Verificar cadastro: o trecho muda de alimentador sem chave neste ponto.`;foco=L.latLng(r._y,r._x).toBounds(500);}
+  if(_pl.an==='mono'){const seg=[];const mi=B.muns.indexOf(r.mun);for(let i=0;i<B.N;i++)if(V.par[i]>=0&&V.fase[i]===1&&V.urb[i]===1&&V.mun[i]===mi&&B.feeders[V.f[i]].nome===r.al)seg.push([[V.y[V.par[i]],V.x[V.par[i]]],[V.y[i],V.x[i]]]);
+    L.polyline(seg,{color:'#f59e0b',weight:5,opacity:.9}).addTo(_pl.lay.hl);foco=seg.length?L.polyline(seg).getBounds():null;pop=`<b>${_plEsc(r.al)} · ${_plEsc(r.mun)}</b><br>${_plNum(r.km,2)} km de rede monofásica urbana`;}
+  if(foco)_pl.map.flyToBounds(foco.pad?foco.pad(.2):foco,{duration:.6,maxZoom:16});
+  if(pop){const pos=r.sug||r.pos||(r._y?[r._y,r._x]:null);if(pos)setTimeout(()=>L.popup({maxWidth:340}).setLatLng(pos).setContent(`<div class="pl-pop">${pop}</div>`).openOn(_pl.map),650);}
+  const i=(_pl.rows||[]).indexOf(r);const tr=document.querySelector(`#plTab tr[data-i="${i}"]`);if(tr){tr.classList.add('sel');tr.scrollIntoView({block:'nearest'});}
+}
+window.plExportar=()=>{if(!_pl.rows||!window.XLSX)return;const cols=PL_COLS[_pl.an];
+  const data=_pl.rows.map(r=>{const o={};for(const [k,l] of cols)o[l]=r[k];const pos=r.sug||r.pos;if(Array.isArray(pos)){o['Latitude']=pos[0];o['Longitude']=pos[1];}return o;});
+  const ws=XLSX.utils.json_to_sheet(data);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Planejamento');
+  XLSX.writeFile(wb,`Planejamento_${_pl.an}_${new Date().toISOString().slice(0,10)}.xlsx`);};
+
+// ── processamento das bases (gerente) ──
+function _plLog(m){const el=document.getElementById('plLog');if(el){el.textContent+=m+'\n';el.scrollTop=el.scrollHeight;}console.log('[Plan]',m);}
+async function _plLerUC(file){const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});const ws=wb.Sheets[wb.SheetNames[0]];const rows=XLSX.utils.sheet_to_json(ws,{header:1});
+  const h=rows[0].map(x=>String(x||'').toUpperCase());const ci=n=>h.findIndex(x=>x.includes(n));
+  const iN=ci('NR_EQUIPAMENTO'),iA=ci('NR_EQPTO_ANTERIOR'),iS=ci('SG_EQUIPAMENTO'),iU=ci('QT_CONSUMIDOR'),iF=ci('NR_ALIMENTADOR');
+  if(iN<0||iA<0||iS<0||iU<0)throw new Error('Planilha de UCs sem as colunas NR_EQUIPAMENTO, NR_EQPTO_ANTERIOR, SG_EQUIPAMENTO e QT_CONSUMIDOR_CELESC.');
+  const out=[];for(let r=1;r<rows.length;r++){const x=rows[r];const nr=parseInt(x[iN]);if(!nr)continue;const u=x[iU];out.push({nr,ant:parseInt(x[iA])||0,sg:String(x[iS]||''),uc:u===''||u==null?null:+u,alimNum:parseInt(x[iF])||0});}return out;}
+async function _plLerCarreg(file){const txt=new TextDecoder('iso-8859-1').decode(await file.arrayBuffer());const lin=txt.split(/\r?\n/);
+  const h=lin.findIndex(l=>/^C[oó]digo do alimentador;/i.test(l));if(h<0)throw new Error('CSV de carregamento sem a linha de cabeçalho "Código do alimentador;…".');
+  const f=s=>{s=(s||'').trim();if(!s)return null;const v=parseFloat(s.replace(/\./g,'').replace(',','.'));return isNaN(v)?null:v;};const out=[];
+  for(const l of lin.slice(h+1)){const r=l.split(';');if(r.length<11||!r[1].trim())continue;const q=[f(r[5]),f(r[6]),f(r[7])].filter(v=>v!=null);
+    out.push({al:r[0].trim(),nr:r[1].trim(),kva:f(r[3]),fases:f(r[4]),tot:f(r[8]),carreg:f(r[9]),ucs:f(r[10]),queda:q.length?Math.max(...q):null});}return out;}
+window.plProcessar=async function(){
+  if(me.perfil!=='gerente')return;const fk=document.getElementById('plFKmz').files[0],fu=document.getElementById('plFUc').files[0],fc=document.getElementById('plFCg').files[0];
+  if(!fk||!fu||!fc){toast('Selecione os três arquivos: KMZ, planilha de UCs e CSV de carregamento.','warn');return;}
+  const btn=document.getElementById('plBtnProc');btn.disabled=true;document.getElementById('plLog').textContent='';const pausa=()=>new Promise(r=>setTimeout(r,30));
+  try{
+    _plLog('Lendo planilha de UCs…');await pausa();const eq=await _plLerUC(fu);_plLog(`  ${eq.length} equipamentos`);
+    _plLog('Lendo CSV de carregamento…');await pausa();const cg=await _plLerCarreg(fc);_plLog(`  ${cg.length} trafos com carregamento`);
+    _plLog('Descompactando KMZ…');await pausa();let kml;
+    if(fk.name.toLowerCase().endsWith('.kml'))kml=await fk.text();else{const z=await JSZip.loadAsync(fk);const n=Object.keys(z.files).find(x=>x.toLowerCase().endsWith('.kml'));if(!n)throw new Error('KMZ sem arquivo KML');kml=await z.file(n).async('string');}
+    _plLog(`  KML com ${Math.round(kml.length/1e6)} MB. Lendo elementos…`);await pausa();
+    const K=planParseKML(kml);kml=null;_plLog(`  ${K.trechos.length} trechos, ${K.pts.length} equipamentos`);await pausa();
+    _plLog('Montando topologia…');await pausa();const B=planBuild(K,eq,cg,{log:_plLog});
+    _plLog('Compactando e salvando…');await pausa();
+    const z=new JSZip();z.file('b.json',planSerializar(B));const b64=await z.generateAsync({type:'base64',compression:'DEFLATE',compressionOptions:{level:6}});
+    const T=900000;const partes=Math.ceil(b64.length/T);
+    for(let i=0;i<partes;i++){await setDoc(doc(db,'plan_base','p'+i),{dados:b64.slice(i*T,(i+1)*T)});_plLog(`  parte ${i+1}/${partes} salva`);}
+    await setDoc(doc(db,'plan_meta','atual'),{partes,tamanho:b64.length,atualizadoEm:serverTimestamp(),por:me.nome||me.email,stats:B.stats,
+      arquivos:{kmz:fk.name,uc:fu.name,carreg:fc.name}});
+    _plLog('Pronto.');toast(`Base de planejamento atualizada: ${Math.round(B.stats.km).toLocaleString('pt-BR')} km, ${B.stats.trafos} trafos.`);
+    _pl.carregado=false;await _plCarregar();_plMostrar(true);
+  }catch(e){console.error(e);_plLog('ERRO: '+e.message);toast('Erro ao processar: '+e.message,'err');}
+  finally{btn.disabled=false;}
 };
