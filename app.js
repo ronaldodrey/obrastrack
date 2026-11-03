@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
-console.log('%c[SPPC] app.js v2608 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
+console.log('%c[SPPC] app.js v2612 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -302,6 +302,7 @@ async function iniciarApp(){
     ['pgDash','📊 Dashboard'],
     ['pgObras','🏗️ Obras'],
     ...(canSeePedidos?[['pgPedidos','📋 Pedidos']]:[]),
+    ...(['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil)?[['pgMapa','🗺️ Mapa']]:[]), // v2612: Mapa da Rede
     ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
@@ -350,6 +351,7 @@ async function iniciarApp(){
     if(active?.id==='pgDash'){ renderDash(); }
     if(active?.id==='pgObras') window.renderObras();
     if(active?.id==='pgCarteira') renderCarteira();
+    if(active?.id==='pgMapa') window.mapaAtualizarObras?.(); // v2612
   });
 
   loadEquipDBFromStorage(); // Restore equipment database from localStorage
@@ -375,6 +377,7 @@ window.showPage=function(id){
   if(id==='pgOtimizacao') renderOtimizacao();
   if(id==='pgOtimizacaoPort') renderOtimizacaoPortfolio();
   if(id==='pgPedidos') renderPedidos();
+  if(id==='pgMapa') window.renderMapa(); // v2612
 };
 // Sub-tab toggle for RD/ODI inside pgObras (single page, no routing conflict)
 window.switchObrasSubTab = function(tipo){
@@ -11512,4 +11515,402 @@ window.savePedido=async function(){
   } finally {
     btn.disabled=false; btn.textContent='Salvar';
   }
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
+//  MAPA DA REDE — obras posicionadas pelo Equipamento de Referência
+//  Etapa 1 (v2612). Módulo aditivo: não altera nenhum fluxo existente.
+//  Mostra só obras em campo: Em Execução, Atrasada, Paralisada, Paral. Expirada, Prob. Executivo,
+//  Aguard. Fiscalização (RD) e Ag. Fiscalização/Kaffa (ODI). Empreiteira vê só as suas.
+//  Dados: coleções Firestore 'redes' (equipamentos/ramais) e 'redes_geo' (traçado),
+//  geradas no próprio navegador a partir do KMZ de cada alimentador (perfil gerente).
+// ══════════════════════════════════════════════════════════════════════
+// ── Núcleo de processamento de rede (KML → ramais), sem dependências ──
+function _rkm(a,b){const R=6371,t=Math.PI/180,dLa=(b[1]-a[1])*t,dLo=(b[0]-a[0])*t;const h=Math.sin(dLa/2)**2+Math.cos(a[1]*t)*Math.cos(b[1]*t)*Math.sin(dLo/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+function redeLerKML(s){
+  const out={};const reF=/<Folder>([\s\S]*?)<\/Folder>/g;let f;
+  while((f=reF.exec(s))){const reP=/<Placemark>([\s\S]*?)<\/Placemark>/g;let p;
+    while((p=reP.exec(f[1]))){const b=p[1];
+      const n=(b.match(/<name>([\s\S]*?)<\/name>/)||[])[1];const t=(b.match(/<description>([\s\S]*?)<\/description>/)||[])[1];
+      const c=(b.match(/<coordinates>([\s\S]*?)<\/coordinates>/)||[])[1];if(!n||!t||!c)continue;
+      const pts=c.trim().split(/\s+/).map(x=>{const v=x.split(',');return[+v[0],+v[1]];});
+      (out[t.trim()]=out[t.trim()]||[]).push([n.trim(),pts]);}}
+  return out;}
+function redeProcessar(K,opt={}){
+  const MIN_TDS=opt.minTds??2,MIN_KM=opt.minKm??1.0;
+  const tr=K['TRECHO']||[];if(!tr.length)throw new Error('KML sem trechos (pasta "Trechos").');
+  const pos=new Map(),adj=new Map(),edges=[];
+  const add=(a,b)=>{if(!adj.has(a))adj.set(a,[]);adj.get(a).push(b);};
+  for(const[n,pts]of tr){const[a,b]=n.replace('_lig','').split('_');
+    if(!pos.has(a))pos.set(a,pts[0]);if(!pos.has(b))pos.set(b,pts[pts.length-1]);
+    add(a,b);add(b,a);edges.push([a,b,_rkm(pts[0],pts[pts.length-1])]);}
+  const comp=new Map();let nc=0;
+  for(const n of adj.keys()){if(comp.has(n))continue;const st=[n];comp.set(n,nc);
+    while(st.length){const x=st.pop();for(const y of adj.get(x))if(!comp.has(y)){comp.set(y,nc);st.push(y);}}nc++;}
+  const r3=v=>Math.round(v*1000)/1000,gk=(x,y)=>r3(x)+'|'+r3(y);
+  const grid=new Map();for(const[n,p]of pos){const k=gk(p[0],p[1]);if(!grid.has(k))grid.set(k,[]);grid.get(k).push(n);}
+  const near=(p,r)=>{const o=[];for(const dx of[-.001,0,.001])for(const dy of[-.001,0,.001]){const l=grid.get(gk(p[0]+dx,p[1]+dy));if(l)for(const n of l)if(_rkm(p,pos.get(n))<=r)o.push(n);}return o;};
+  const SW=['CHAVE-FUSIVEL','CHAVE','RELIGADOR','DISJUNTOR','REGULADOR'];
+  const sw=[];for(const t of SW)for(const[n,pts]of(K[t]||[]))sw.push([t,n,pts[0]]);
+  const zkm0=new Map();for(const[a,b,l]of edges){const z=comp.get(a);zkm0.set(z,(zkm0.get(z)||0)+l);}
+  const grupos=new Map();for(const s of sw){const k=Math.round(s[2][0]*1e4)+'|'+Math.round(s[2][1]*1e4);if(!grupos.has(k))grupos.set(k,{p:s[2],d:[]});grupos.get(k).d.push(s);}
+  const gz=new Map(),zg=new Map();
+  for(const[k,g]of grupos){const zs=[...new Set(near(g.p,.015).map(x=>comp.get(x)))].sort((a,b)=>a-b);gz.set(k,zs);for(const z of zs){if(!zg.has(z))zg.set(z,[]);zg.get(z).push(k);}}
+  const first=tr[0][0].replace('_lig','').split('_')[0],root=comp.get(first);
+  const parent=new Map([[root,null]]),order=[root],q=[root],usado=new Set();
+  while(q.length){const z=q.shift();for(const k of(zg.get(z)||[]).slice().sort((a,b)=>{const A=a.split('|').map(Number),B=b.split('|').map(Number);return A[0]-B[0]||A[1]-B[1];})){if(usado.has(k))continue;usado.add(k);
+      const D=gz.get(k).filter(y=>!parent.has(y)).sort((a,b)=>(zkm0.get(b)||0)-(zkm0.get(a)||0));if(!D.length)continue;
+      const devs=grupos.get(k).d.slice().sort((a,b)=>((a[0]==='CHAVE-FUSIVEL')-(b[0]==='CHAVE-FUSIVEL'))||(a[1]<b[1]?-1:a[1]>b[1]?1:0));
+      D.forEach((y,i)=>{const d=devs[Math.min(i,devs.length-1)];parent.set(y,[z,d[0],d[1],d[2]]);order.push(y);q.push(y);});}}
+  const ram=new Map(),info=new Map([['Tronco',{parent:null,pos:pos.get(first),zones:[]}]]);
+  for(const z of order){const pr=parent.get(z);
+    if(!pr)ram.set(z,'Tronco');
+    else if(pr[1]==='CHAVE-FUSIVEL'){let rid='CF-'+pr[2];while(info.has(rid))rid+="'";info.set(rid,{parent:ram.get(pr[0]),pos:pr[3],zones:[]});ram.set(z,rid);}
+    else ram.set(z,ram.get(pr[0]));
+    info.get(ram.get(z)).zones.push(z);}
+  const zoneOf=p=>{const nn=near(p,.015);return nn.length?comp.get(nn[0]):null;};
+  const tdz=[];const ztd=new Map();
+  for(const[n,pts]of(K['TD']||[])){const z=zoneOf(pts[0]);tdz.push([n,pts[0],z]);if(z!=null)ztd.set(z,(ztd.get(z)||0)+1);}
+  const kids=new Map();for(const[k,v]of info)if(v.parent){if(!kids.has(v.parent))kids.set(v.parent,[]);kids.get(v.parent).push(k);}
+  const tot=new Map();
+  const post=[];const st=['Tronco'];while(st.length){const k=st.pop();post.push(k);for(const c of(kids.get(k)||[]))st.push(c);}
+  for(let i=post.length-1;i>=0;i--){const k=post[i];let a=0,b=0;for(const z of info.get(k).zones){a+=zkm0.get(z)||0;b+=ztd.get(z)||0;}
+    for(const c of(kids.get(k)||[])){const t=tot.get(c);a+=t[0];b+=t[1];}tot.set(k,[a,b]);}
+  const real=new Set([...info.keys()].filter(k=>k==='Tronco'||tot.get(k)[1]>=MIN_TDS||tot.get(k)[0]>=MIN_KM));
+  const up=k=>{while(!real.has(k))k=info.get(k).parent;return k;};
+  const chainOf=k=>{const c=[];k=up(k);while(k){c.push(k);const p=info.get(k).parent;k=p?up(p):null;}return c.reverse();};
+  const seg={},rkm={},rtd={};
+  for(const[a,b,l]of edges){const r=up(ram.get(comp.get(a)));(seg[r]=seg[r]||[]).push([pos.get(a),pos.get(b)]);rkm[r]=(rkm[r]||0)+l;}
+  const equip={};
+  for(const[n,p,z]of tdz){if(z==null)continue;const r=up(ram.get(z));rtd[r]=(rtd[r]||0)+1;equip['T'+n]=[p[1],p[0],r];}
+  const TM={'CHAVE-FUSIVEL':'F','CHAVE':'C','RELIGADOR':'R','REGULADOR':'G','DISJUNTOR':'D'};
+  const devs=[];
+  for(const[t,n,p]of sw){const z=zoneOf(p);const r=z!=null?up(ram.get(z)):'Tronco';equip[TM[t]+n]=[p[1],p[0],r];if(t!=='CHAVE-FUSIVEL'&&t!=='CHAVE')devs.push([t,n,p[1],p[0]]);}
+  const rinfo={};const subc={};for(const k of real){const c=chainOf(k);if(c.length>1)subc[c[c.length-2]]=(subc[c[c.length-2]]||0)+1;}
+  for(const k of real){const c=chainOf(k),p=info.get(k).pos,t=tot.get(k);
+    rinfo[k]={n:c.length-1,c:c,la:+p[1].toFixed(4),lo:+p[0].toFixed(4),kp:+(rkm[k]||0).toFixed(2),tp:rtd[k]||0,kj:+t[0].toFixed(2),tj:t[1],s:subc[k]||0};}
+  return{seg,ram:rinfo,equip,devs,stats:{trechos:tr.length,tds:(K['TD']||[]).length,manobras:sw.length,km:+tot.get('Tronco')[0].toFixed(1),ramais:real.size-1,principais:Object.values(rinfo).filter(r=>r.n===1).length}};
+}
+// Geometria: une segmentos em polilinhas e codifica em inteiros (1e-4 grau) com delta
+function redeCodificarGeo(seg){
+  const out={};
+  for(const[r,list]of Object.entries(seg)){
+    const key=p=>Math.round(p[0]*1e4)+','+Math.round(p[1]*1e4);
+    const adj=new Map();const E=list.map(([a,b],i)=>{const ka=key(a),kb=key(b);for(const k of[ka,kb]){if(!adj.has(k))adj.set(k,[]);}adj.get(ka).push(i);adj.get(kb).push(i);return[ka,kb];});
+    const used=new Array(E.length).fill(false);const lines=[];
+    const walk=(start,ei)=>{const pts=[start];let cur=start,e=ei;while(e!=null){used[e]=true;const nx=E[e][0]===cur?E[e][1]:E[e][0];pts.push(nx);cur=nx;const cand=adj.get(cur).filter(j=>!used[j]);e=(adj.get(cur).length===2&&cand.length===1)?cand[0]:null;}return pts;};
+    const ends=[...adj.keys()].filter(k=>adj.get(k).length!==2);
+    for(const k of ends)for(const e of adj.get(k))if(!used[e])lines.push(walk(k,e));
+    E.forEach((ed,i)=>{if(!used[i])lines.push(walk(ed[0],i));});
+    out[r]=lines.map(pts=>{let px=0,py=0;return pts.map(k=>{const[x,y]=k.split(',').map(Number);const s=(x-px)+','+(y-py);px=x;py=y;return s;}).join(' ');}).join('|');
+  }
+  return out;}
+function redeDecodificarGeo(str){return str.split('|').map(l=>{let x=0,y=0;return l.split(' ').map(s=>{const[dx,dy]=s.split(',').map(Number);x+=dx;y+=dy;return[y/1e4,x/1e4];});});}
+
+const MAPA_PERFIS = ['gerente','fiscal','fiscal_adm','empreiteira'];
+const MAPA_STATUS = ['Em Execução','Atrasada','Obra Paralisada','Paral. Expirada','Prob. Executivo – Celesc','Aguard. Fiscalização','Ag. Fiscalização/Kaffa'];
+const MAPA_COR_EXTRA = {'Obra Paralisada':'#9333EA','Paral. Expirada':'#7F1D1D','Ag. Fiscalização/Kaffa':'#EAB308'}; // cores próprias do mapa (distinguir de Atrasada)
+const MAPA_TIPO_PREF = ['T','F','C','R','G','D']; // ordem de busca do nº: trafo primeiro
+const MAPA_TIPO_NOME = {T:'Trafo',F:'Chave fusível',C:'Chave',R:'Religador',G:'Regulador',D:'Disjuntor'};
+const MAPA_PAL = ['#7c6af7','#00b37e','#ff6b35','#e0a800','#ff4d6d','#38bdf8','#84cc16','#e879f9','#14b8a6','#f97316'];
+const _mapa = { map:null, redes:{}, geo:{}, linhas:{}, net:null, pts:null, marks:{}, base:null, selR:null,
+                carregado:false, carregando:null, f:{al:'',tipo:'',classe:'',status:'',emp:'',fiscal:'',cor:'status',busca:''} };
+function _mEsc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _mClasse(o){ return o.tipo==='R1' ? (o.enquadramento||'R1 sem enquadramento')
+  : o.tipo==='ODI' ? (o.descricaoODI==='Loteamento'?'Loteamento':'ODI livre') : (o.programa||(o.tipo?o.tipo+' sem programa':'Sem tipo')); }
+function _mObras(){ return typeof visibleObras==='function' ? visibleObras() : (me.perfil==='empreiteira' ? obras.filter(o=>o.empreiteira===me.vinculo) : obras); }
+
+async function _mapaCarregarRedes(forcar){
+  if(_mapa.carregado && !forcar) return;
+  if(_mapa.carregando && !forcar) return _mapa.carregando;
+  _mapa.carregando = (async()=>{
+    const [s1,s2] = await Promise.all([getDocs(collection(db,'redes')), getDocs(collection(db,'redes_geo'))]);
+    _mapa.redes={}; _mapa.geo={};
+    s1.docs.forEach(d=>{ try{ const x=d.data(); _mapa.redes[d.id]={...JSON.parse(x.meta), stats:x.stats||{}, atualizadoEm:x.atualizadoEm, por:x.por||''}; }catch(e){ console.warn('[Mapa] rede inválida',d.id,e); } });
+    s2.docs.forEach(d=>{ try{ const g=JSON.parse(d.data().geo); _mapa.geo[d.id]=Object.fromEntries(Object.entries(g).map(([k,v])=>[k,redeDecodificarGeo(v)])); }catch(e){ console.warn('[Mapa] geo inválida',d.id,e); } });
+    _mapa.carregado=true;
+  })();
+  try{ await _mapa.carregando; } finally { _mapa.carregando=null; }
+}
+
+function _mapaLocalizar(nr){
+  if(nr==null||nr==='') return {erro:'Sem equipamento de referência'};
+  const n=String(parseInt(nr));
+  const achados=[];
+  for(const [al,R] of Object.entries(_mapa.redes))
+    for(const t of MAPA_TIPO_PREF){ const e=R.equip[t+n]; if(e) achados.push({al,t,lat:e[0],lon:e[1],ramal:e[2]}); }
+  if(achados.length){ const a=achados[0]; a.ambiguo=achados.length>1 ? achados.map(x=>MAPA_TIPO_NOME[x.t]+' '+x.al).join(', ') : ''; return a; }
+  const eq=window._equipDB?.get?.(parseInt(nr));
+  if(eq && eq.lat && eq.lon) return {al:eq.feed?String(eq.feed):'', t:null, lat:eq.lat, lon:eq.lon, ramal:null, base:true};
+  return {erro:`Equipamento ${n} não encontrado nas redes carregadas`};
+}
+
+function _mapaHTML(){
+  const ger=me.perfil==='gerente';
+  return `
+  <style>
+    #pgMapa .mp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px}
+    #pgMapa .mp-f{display:flex;flex-direction:column;gap:3px;min-width:130px;flex:1}
+    #pgMapa .mp-f label{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+    #pgMapa select,#pgMapa input[type=text]{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-family:'DM Mono',monospace;font-size:11px;width:100%}
+    #pgMapa .mp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+    #pgMapa .mp-kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+    #pgMapa .mp-kpi .k{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+    #pgMapa .mp-kpi .v{font-family:'DM Mono',monospace;font-size:18px;font-weight:500}
+    #pgMapa .mp-main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:10px}
+    @media(max-width:900px){#pgMapa .mp-main{grid-template-columns:minmax(0,1fr)}}
+    #pgMapa .mp-mapbox{position:relative;height:calc(100vh - 300px);min-height:460px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface2)}
+    #mapaLeaflet{position:absolute;inset:0;background:var(--surface2)}
+    #pgMapa .mp-base{position:absolute;top:10px;right:10px;z-index:1000;display:flex;background:var(--surface);border:1px solid var(--border);border-radius:7px;overflow:hidden}
+    #pgMapa .mp-base button{border:0;background:transparent;color:var(--muted);padding:5px 9px;font-size:11px;cursor:pointer}
+    #pgMapa .mp-base button.on{background:#7c6af7;color:#fff}
+    #pgMapa .mp-leg{position:absolute;left:10px;bottom:22px;z-index:1000;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:10px;max-height:45%;overflow:auto;max-width:240px;color:var(--text)}
+    #pgMapa .mp-leg div{display:flex;align-items:center;gap:6px;margin:2px 0}
+    #pgMapa .mp-side{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;height:calc(100vh - 300px);min-height:460px}
+    #pgMapa .mp-sh{padding:8px 12px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between}
+    #pgMapa .mp-list{overflow:auto;flex:1}
+    #pgMapa .mp-it{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:11px}
+    #pgMapa .mp-it:hover{background:var(--surface2)}
+    #pgMapa .mp-it .m{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+    #pgMapa .mk{display:block;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+    #pgMapa .mk.R1{width:13px;height:13px;border-radius:50%}
+    #pgMapa .mk.R2{width:13px;height:13px;border-radius:2px}
+    #pgMapa .mk.ODI{width:12px;height:12px;transform:rotate(45deg)}
+    #pgMapa .mp-sem{padding:8px 12px;font-size:10px;color:var(--muted);border-top:1px solid var(--border)}
+    #pgMapa .mp-sem summary{cursor:pointer;font-weight:700}
+    #pgMapa .mp-adm{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;display:none}
+    #pgMapa .mp-adm table{width:100%;font-size:11px;border-collapse:collapse}
+    #pgMapa .mp-adm td,#pgMapa .mp-adm th{padding:5px 6px;border-bottom:1px solid var(--border);text-align:left}
+    .mapa-pop{font-size:11px;line-height:1.45;min-width:220px}
+    .mapa-pop b.t{font-size:13px}
+    .mapa-pop .path{font-family:'DM Mono',monospace;font-size:10px;color:#666;margin:3px 0 6px;overflow-wrap:anywhere}
+  </style>
+  <div class="tbl-head" style="margin-bottom:10px">
+    <div class="page-title">🗺️ Mapa da Rede</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${ger?`<button class="btn btn-secondary btn-sm" onclick="mapaToggleAdm()">⚙️ Redes (KMZ)</button>`:''}
+      <button class="btn btn-secondary btn-sm" onclick="mapaRecarregar()">🔄 Recarregar redes</button>
+    </div>
+  </div>
+  ${ger?`<div class="mp-adm" id="mapaAdm">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted)">Envie o KMZ exportado de cada alimentador. O processamento é feito no navegador e a rede fica disponível para todos os usuários do mapa. Reenviar um alimentador substitui a versão anterior.</div>
+      <button class="btn btn-primary btn-sm" id="btnMapaKmz" onclick="mapaUploadKMZ()">⬆️ Enviar KMZ</button>
+    </div>
+    <div id="mapaAdmList"></div>
+  </div>`:''}
+  <div class="mp-bar">
+    <div class="mp-f"><label for="mpAl">Alimentador</label><select id="mpAl"></select></div>
+    <div class="mp-f"><label for="mpTipo">Tipo</label><select id="mpTipo"></select></div>
+    <div class="mp-f"><label for="mpClasse">Programa / enquadramento</label><select id="mpClasse"></select></div>
+    <div class="mp-f"><label for="mpStatus">Status</label><select id="mpStatus"></select></div>
+    <div class="mp-f"${me.perfil==='empreiteira'?' style="display:none"':''}><label for="mpEmp">Empreiteira</label><select id="mpEmp"></select></div>
+    <div class="mp-f"><label for="mpFiscal">Fiscal</label><select id="mpFiscal"></select></div>
+    <div class="mp-f"><label for="mpCor">Colorir por</label><select id="mpCor">
+      <option value="status">Status</option><option value="classe">Programa / enquadramento</option>${me.perfil==='empreiteira'?'':'<option value="empreiteira">Empreiteira</option>'}<option value="fiscal">Fiscal</option></select></div>
+    <div class="mp-f" style="min-width:190px"><label for="mpBusca">Buscar obra ou equipamento</label><input type="text" id="mpBusca" placeholder="nº da obra ou do equipamento"></div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin:-4px 0 10px">Mostra as obras em campo: Em Execução, Atrasada, Paralisada, Paral. Expirada, Problema Executivo e Aguardando Fiscalização${me.perfil==='empreiteira'?' — somente obras da sua empresa':''}.</div>
+  <div class="mp-kpis">
+    <div class="mp-kpi"><div class="k">Obras em campo no mapa</div><div class="v" id="mpK1">—</div></div>
+    <div class="mp-kpi"><div class="k">Sem localização</div><div class="v" id="mpK2">—</div></div>
+    <div class="mp-kpi"><div class="k">R1 · R2 · ODI</div><div class="v" id="mpK3">—</div></div>
+    <div class="mp-kpi"><div class="k">Aguardando fiscalização</div><div class="v" id="mpK5">—</div></div>
+    <div class="mp-kpi"><div class="k">Redes carregadas</div><div class="v" id="mpK4">—</div></div>
+  </div>
+  <div class="mp-main">
+    <div class="mp-mapbox"><div id="mapaLeaflet"></div>
+      <div class="mp-base"><button id="mpbR" class="on" onclick="mapaBase('r')">Ruas</button><button id="mpbS" onclick="mapaBase('s')">Satélite</button><button id="mpbN" onclick="mapaBase('n')">Sem fundo</button></div>
+      <div class="mp-leg" id="mpLeg"></div>
+    </div>
+    <div class="mp-side">
+      <div class="mp-sh"><span>Obras filtradas</span><span id="mpCnt"></span></div>
+      <div class="mp-list" id="mpList"></div>
+      <details class="mp-sem" id="mpSemBox"><summary id="mpSemTit">Sem localização</summary><div id="mpSem" style="margin-top:6px;max-height:160px;overflow:auto"></div></details>
+    </div>
+  </div>`;
+}
+
+window.renderMapa = async function(){
+  const pg=document.getElementById('pgMapa'); if(!pg) return;
+  if(typeof L==='undefined'){ pg.innerHTML='<div class="empty"><div class="ico">🗺️</div><p>Biblioteca de mapas não carregou. Verifique a conexão e recarregue a página.</p></div>'; return; }
+  if(!_mapa.map){
+    pg.innerHTML=_mapaHTML();
+    _mapa.map=L.map('mapaLeaflet',{preferCanvas:true}).setView([-27.8,-50.3],9);
+    _mapa.bases={ r:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Mapa © Esri'}),
+                  s:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagens © Esri'}) };
+    _mapa.base=_mapa.bases.r.addTo(_mapa.map);
+    _mapa.net=L.layerGroup().addTo(_mapa.map); _mapa.pts=L.layerGroup().addTo(_mapa.map);
+    const bind=(id,key,ev='change')=>document.getElementById(id).addEventListener(ev,e=>{ _mapa.f[key]=e.target.type==='checkbox'?e.target.checked:e.target.value; if(key==='al'){_mapa.selR=null;_mapaDesenharRede(true);} _mapaRender(); });
+    bind('mpAl','al'); bind('mpTipo','tipo'); bind('mpClasse','classe'); bind('mpStatus','status'); bind('mpEmp','emp'); bind('mpFiscal','fiscal'); bind('mpCor','cor'); bind('mpBusca','busca','input');
+  }
+  setTimeout(()=>_mapa.map.invalidateSize(),50);
+  document.getElementById('mpK4').textContent='…';
+  try{ await _mapaCarregarRedes(); }catch(e){ console.error('[Mapa]',e); toast('Erro ao carregar as redes do mapa.','err'); }
+  _mapaDesenharRede(true); _mapaRender(); _mapaAdmLista();
+};
+window.mapaAtualizarObras = function(){ if(_mapa.map) _mapaRender(); };
+window.mapaRecarregar = async function(){ await _mapaCarregarRedes(true); _mapaDesenharRede(true); _mapaRender(); _mapaAdmLista(); toast('Redes recarregadas.'); };
+window.mapaBase = function(k){
+  if(_mapa.base) _mapa.map.removeLayer(_mapa.base);
+  _mapa.base = k==='n' ? null : _mapa.bases[k].addTo(_mapa.map); _mapa.baseK=k;
+  Object.entries(_mapa.linhas).forEach(([key,l])=>{ const [a,kk]=key.split('|'); l.setStyle(_mapaEstiloLinha(a,kk)); });
+  if(_mapa.selR) _mapaRealcarRamal(..._mapa.selR);
+  ['R','S','N'].forEach(x=>document.getElementById('mpb'+x).classList.toggle('on',x.toLowerCase()===k));
+};
+
+function _mapaEstiloLinha(al,k){
+  const R=_mapa.redes[al]?.ram?.[k];
+  const fundo=_mapa.baseK||'r', claro=document.body.classList.contains('light-theme');
+  if(k==='Tronco') return {color: fundo==='s' ? '#ffffff' : fundo==='r' ? '#1f2937' : (claro?'#1f2937':'#e5e7eb'), weight:3.2, opacity:.95};
+  return {color: fundo==='s' ? '#cbd5e1' : '#6b8f8a', weight:Math.max(1.2,2.4-(R?.n||1)*.2), opacity: fundo==='s' ? .85 : .8};
+}
+function _mapaDesenharRede(fit){
+  if(!_mapa.net) return;
+  _mapa.net.clearLayers(); _mapa.linhas={};
+  const als=Object.keys(_mapa.geo).filter(a=>!_mapa.f.al||a===_mapa.f.al);
+  als.forEach(al=>{
+    const G=_mapa.geo[al], R=_mapa.redes[al]; if(!R) return;
+    Object.keys(G).sort((a,b)=>(a==='Tronco')-(b==='Tronco')).forEach(k=>{
+      const l=L.polyline(G[k],_mapaEstiloLinha(al,k)).addTo(_mapa.net);
+      _mapa.linhas[al+'|'+k]=l;
+      const r=R.ram[k]||{c:['Tronco'],tj:0};
+      l.bindTooltip(()=>`${_mEsc(al)} › ${_mEsc(r.c.slice(1).join(' › ')||'Tronco')} · ${r.tj} trafos`,{sticky:true});
+      l.on('click',()=>_mapaRealcarRamal(al,k));
+    });
+    (R.devs||[]).forEach(([t,n,la,lo])=>{
+      if(t==='DISJUNTOR') L.circleMarker([la,lo],{radius:7,color:'#7c6af7',weight:3,fillColor:'#fff',fillOpacity:1}).bindTooltip('Saída '+_mEsc(al)).addTo(_mapa.net);
+      else if(t==='RELIGADOR') L.circleMarker([la,lo],{radius:4,color:'#fff',weight:1.5,fillColor:'#475569',fillOpacity:1}).bindTooltip('Religador '+_mEsc(n)).addTo(_mapa.net);
+      else if(t==='REGULADOR') L.circleMarker([la,lo],{radius:4,color:'#fff',weight:1.5,fillColor:'#475569',fillOpacity:1}).bindTooltip('Regulador '+_mEsc(n)).addTo(_mapa.net);
+    });
+  });
+  if(_mapa.selR) _mapaRealcarRamal(..._mapa.selR);
+  if(fit){ const ls=Object.values(_mapa.linhas); if(ls.length){ const b=L.featureGroup(ls).getBounds(); if(b.isValid()) _mapa.map.fitBounds(b.pad(.03)); } }
+}
+function _mapaRealcarRamal(al,k){
+  _mapa.selR=[al,k];
+  Object.entries(_mapa.linhas).forEach(([key,l])=>{ const [a,kk]=key.split('|'); l.setStyle(_mapaEstiloLinha(a,kk)); });
+  if(k==='Tronco') return;
+  Object.entries(_mapa.linhas).forEach(([key,l])=>{ const [a,kk]=key.split('|'); const r=_mapa.redes[a]?.ram?.[kk];
+    if(a===al && r && r.c.includes(k)){ l.setStyle({color:'#ff6b35',weight:3.4,opacity:1}); l.bringToFront(); } });
+}
+function _mapaOpts(id,vals,todos){
+  const el=document.getElementById(id); if(!el) return; const cur=el.value;
+  el.innerHTML=`<option value="">${todos}</option>`+[...new Set(vals.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),'pt-BR')).map(v=>`<option value="${_mEsc(v)}">${_mEsc(v)}</option>`).join('');
+  if([...el.options].some(o=>o.value===cur)) el.value=cur;
+}
+function _mapaRender(){
+  if(!_mapa.pts) return;
+  const ativos=_mObras().map(o=>({o, st:statusOf(o)})).filter(x=>MAPA_STATUS.includes(x.st))
+    .map(x=>({...x, classe:_mClasse(x.o), loc:_mapaLocalizar(x.o.equipamentoRef)}));
+  _mapaOpts('mpAl',[...new Set([...Object.keys(_mapa.redes),...ativos.map(x=>x.loc.al)])],'Todos');
+  _mapaOpts('mpTipo',ativos.map(x=>x.o.tipo),'Todos'); _mapaOpts('mpClasse',ativos.map(x=>x.classe),'Todos');
+  _mapaOpts('mpStatus',ativos.map(x=>x.st),'Todos'); _mapaOpts('mpEmp',ativos.map(x=>x.o.empreiteira),'Todas'); _mapaOpts('mpFiscal',ativos.map(x=>x.o.fiscal),'Todos');
+  const f=_mapa.f, b=f.busca.trim().toLowerCase();
+  const sel=ativos.filter(x=>(!f.tipo||x.o.tipo===f.tipo)&&(!f.classe||x.classe===f.classe)&&(!f.status||x.st===f.status)&&(!f.emp||x.o.empreiteira===f.emp)&&(!f.fiscal||x.o.fiscal===f.fiscal)
+    &&(!b||String(x.o.numero||'').toLowerCase().includes(b)||String(x.o.equipamentoRef||'').includes(b)));
+  const noMapa=sel.filter(x=>!x.loc.erro&&(!f.al||x.loc.al===f.al)), semLoc=sel.filter(x=>x.loc.erro);
+  const vals=[...new Set(noMapa.map(x=>f.cor==='status'?x.st:f.cor==='classe'?x.classe:(x.o[f.cor]||'—')))].sort();
+  const cmap={}; vals.forEach((v,i)=>cmap[v]=f.cor==='status'?(MAPA_COR_EXTRA[v]||STATUS_DEF[v]?.cor||'#888'):MAPA_PAL[i%MAPA_PAL.length]);
+  const corDe=x=>cmap[f.cor==='status'?x.st:f.cor==='classe'?x.classe:(x.o[f.cor]||'—')];
+  _mapa.pts.clearLayers(); _mapa.marks={};
+  noMapa.forEach(x=>{
+    const t=['R1','R2','ODI'].includes(x.o.tipo)?x.o.tipo:'R1';
+    const m=L.marker([x.loc.lat,x.loc.lon],{icon:L.divIcon({className:'',html:`<i class="mk ${t}" style="background:${corDe(x)}"></i>`,iconSize:[16,16],iconAnchor:[8,8]})});
+    m.bindPopup(()=>_mapaPopup(x),{maxWidth:320});
+    m.on('click',()=>{ if(x.loc.ramal) _mapaRealcarRamal(x.loc.al,x.loc.ramal); });
+    m.addTo(_mapa.pts); _mapa.marks[x.o.id]=m;
+  });
+  const cnt=t=>noMapa.filter(x=>x.o.tipo===t).length;
+  document.getElementById('mpK1').textContent=noMapa.length;
+  document.getElementById('mpK2').textContent=semLoc.length;
+  document.getElementById('mpK3').textContent=`${cnt('R1')} · ${cnt('R2')} · ${cnt('ODI')}`;
+  document.getElementById('mpK4').textContent=Object.keys(_mapa.redes).length;
+  document.getElementById('mpK5').textContent=noMapa.filter(x=>x.st==='Aguard. Fiscalização'||x.st==='Ag. Fiscalização/Kaffa').length;
+  document.getElementById('mpCnt').textContent=noMapa.length;
+  const ttl={status:'Status',classe:'Programa / enquadramento',empreiteira:'Empreiteira',fiscal:'Fiscal'}[f.cor];
+  document.getElementById('mpLeg').innerHTML=`<div style="font-weight:700;color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:1px">${ttl}</div>`+
+    vals.map(v=>`<div><i class="mk R1" style="background:${cmap[v]};width:9px;height:9px"></i>${_mEsc(v)}</div>`).join('')+
+    `<div style="color:var(--muted);margin-top:4px">● R1 &nbsp;■ R2 &nbsp;◆ ODI</div>`;
+  const list=document.getElementById('mpList');
+  list.innerHTML=noMapa.length?noMapa.sort((a,b)=>String(a.o.numero).localeCompare(String(b.o.numero))).map(x=>{
+    const t=['R1','R2','ODI'].includes(x.o.tipo)?x.o.tipo:'R1';
+    return `<div class="mp-it" data-id="${_mEsc(x.o.id)}"><i class="mk ${t}" style="background:${corDe(x)};margin-top:3px"></i><div style="min-width:0">
+      <div><b>${_mEsc(x.o.numero||'s/ nº')}</b> · ${_mEsc(x.o.tipo||'')} · ${_mEsc(x.classe)}</div>
+      <div class="m">${_mEsc(x.loc.al||'?')} › ${_mEsc(x.loc.ramal||'—')} › ${_mEsc(x.o.equipamentoRef)}</div>
+      <div style="margin-top:3px">${statusHtml(x.o)}</div></div></div>`;}).join('')
+    :`<div style="padding:18px;font-size:11px;color:var(--muted)">${Object.keys(_mapa.redes).length?'Nenhuma obra em campo com localização para os filtros escolhidos.':'Nenhuma rede carregada ainda. O gerente envia os KMZ em ⚙️ Redes (KMZ).'}</div>`;
+  list.querySelectorAll('.mp-it').forEach(el=>el.onclick=()=>{ const x=noMapa.find(y=>y.o.id===el.dataset.id); if(!x) return;
+    _mapa.map.flyTo([x.loc.lat,x.loc.lon],15,{duration:.7}); setTimeout(()=>_mapa.marks[x.o.id]?.openPopup(),750); if(x.loc.ramal) _mapaRealcarRamal(x.loc.al,x.loc.ramal); });
+  document.getElementById('mpSemTit').textContent=`Sem localização (${semLoc.length})`;
+  document.getElementById('mpSem').innerHTML=semLoc.map(x=>`<div style="padding:3px 0;cursor:pointer" onclick="openObraModal('${_mEsc(x.o.id)}')"><b>${_mEsc(x.o.numero||'s/ nº')}</b> — ${_mEsc(x.loc.erro)}</div>`).join('')||'Todas as obras filtradas estão no mapa.';
+}
+function _mapaPopup(x){
+  const o=x.o, l=x.loc, R=l.ramal?_mapa.redes[l.al]?.ram?.[l.ramal]:null;
+  const cam=R?R.c.slice(1).join(' › '):'';
+  const eqTxt=(l.t?MAPA_TIPO_NOME[l.t]+' ':'')+o.equipamentoRef;
+  return `<div class="mapa-pop"><b class="t">Obra ${_mEsc(o.numero||'s/ nº')}</b> · ${_mEsc(o.tipo||'')}<br>
+    <div class="path">${_mEsc(l.al||'?')}${cam?' › '+_mEsc(cam):l.ramal==='Tronco'?' › Tronco':''} › ${_mEsc(eqTxt)}</div>
+    ${statusHtml(o)}
+    <table style="margin-top:6px;font-size:11px;border-collapse:collapse">
+      <tr><td style="color:#888;padding-right:8px">Classificação</td><td>${_mEsc(x.classe)}</td></tr>
+      <tr><td style="color:#888;padding-right:8px">Empreiteira</td><td>${_mEsc(o.empreiteira||'—')}</td></tr>
+      <tr><td style="color:#888;padding-right:8px">Fiscal</td><td>${_mEsc(o.fiscal||'—')}</td></tr>
+      <tr><td style="color:#888;padding-right:8px">Cidade</td><td>${_mEsc(o.cidade||'—')}</td></tr>
+      ${o.descricao?`<tr><td style="color:#888;padding-right:8px">Descrição</td><td>${_mEsc(o.descricao)}</td></tr>`:''}
+      ${R?`<tr><td style="color:#888;padding-right:8px">Ramal</td><td>${R.tj} trafos · ${R.kj.toLocaleString('pt-BR')} km a jusante</td></tr>`:''}
+    </table>
+    ${l.ambiguo?`<div style="margin-top:5px;font-size:10px;color:#d97706">⚠️ Nº existe em mais de um equipamento: ${_mEsc(l.ambiguo)}. Mostrando o primeiro.</div>`:''}
+    ${l.base?`<div style="margin-top:5px;font-size:10px;color:#888">Posição da Base Equipamentos (rede deste alimentador ainda não carregada).</div>`:''}
+    <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="openObraModal('${_mEsc(o.id)}')">Abrir obra</button></div>`;
+}
+
+// ── Administração das redes (gerente) ─────────────────────────────────
+window.mapaToggleAdm=function(){ const el=document.getElementById('mapaAdm'); if(el){ el.style.display=el.style.display==='block'?'none':'block'; _mapaAdmLista(); } };
+function _mapaAdmLista(){
+  const el=document.getElementById('mapaAdmList'); if(!el) return;
+  const rs=Object.entries(_mapa.redes).sort((a,b)=>a[0].localeCompare(b[0]));
+  el.innerHTML=rs.length?`<table><tr><th>Alimentador</th><th>Rede</th><th>Trafos</th><th>Ramais</th><th>Atualizado</th><th></th></tr>`+
+    rs.map(([al,r])=>{ const s=r.stats||{}; const dt=r.atualizadoEm?.toDate?r.atualizadoEm.toDate().toLocaleDateString('pt-BR'):'—';
+      return `<tr><td><b>${_mEsc(al)}</b></td><td>${(s.km||0).toLocaleString('pt-BR')} km</td><td>${s.tds||0}</td><td>${s.ramais||0} (${s.principais||0} principais)</td><td>${dt} ${_mEsc(r.por)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="mapaExcluirRede('${_mEsc(al)}')">🗑️</button></td></tr>`; }).join('')+'</table>'
+    :'<div style="font-size:11px;color:var(--muted)">Nenhuma rede enviada ainda.</div>';
+}
+window.mapaExcluirRede=async function(al){
+  const btns=document.querySelectorAll('#mapaAdmList .btn-danger');
+  const b=[...btns].find(x=>x.getAttribute('onclick').includes(`'${al}'`));
+  if(b && !b.dataset.conf){ b.dataset.conf='1'; b.textContent='Confirmar exclusão'; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.conf; b.textContent='🗑️'; } },4000); return; }
+  try{ await deleteDoc(doc(db,'redes',al)); await deleteDoc(doc(db,'redes_geo',al)); toast(`Rede ${al} excluída.`); await window.mapaRecarregar(); }
+  catch(e){ console.error(e); toast('Erro ao excluir rede: '+e.message,'err'); }
+};
+window.mapaUploadKMZ=function(){
+  if(me.perfil!=='gerente') return;
+  if(typeof JSZip==='undefined'){ toast('Biblioteca de leitura de KMZ não carregou.','err'); return; }
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.kmz,.kml'; inp.multiple=true;
+  inp.onchange=async e=>{
+    const files=[...e.target.files]; if(!files.length) return;
+    const btn=document.getElementById('btnMapaKmz'); if(btn){ btn.disabled=true; }
+    let ok=0;
+    for(const file of files){
+      try{
+        if(btn) btn.textContent=`Processando ${file.name}…`;
+        let kml;
+        if(file.name.toLowerCase().endsWith('.kml')) kml=await file.text();
+        else { const z=await JSZip.loadAsync(file); const n=Object.keys(z.files).find(x=>x.toLowerCase().endsWith('.kml')); if(!n) throw new Error('KMZ sem arquivo KML'); kml=await z.file(n).async('string'); }
+        const m=file.name.toUpperCase().match(/[A-Z]{3}\d{2}/) || (kml.match(/<Document>\s*<name>([^<]+)<\/name>/)||[])[1]?.toUpperCase().match(/[A-Z]{3}\d{2}/);
+        const al=m?m[0]:file.name.replace(/\.[^.]+$/,'').toUpperCase().replace(/[^A-Z0-9_-]/g,'');
+        await new Promise(r=>setTimeout(r,20));
+        const K=redeLerKML(kml); const r=redeProcessar(K);
+        const meta=JSON.stringify({ram:r.ram,equip:r.equip,devs:r.devs}), geo=JSON.stringify(redeCodificarGeo(r.seg));
+        if(meta.length>900000||geo.length>900000) throw new Error(`rede ${al} grande demais para o armazenamento (${Math.round(Math.max(meta.length,geo.length)/1024)} KB)`);
+        await setDoc(doc(db,'redes',al),{alimentador:al,meta,stats:r.stats,atualizadoEm:serverTimestamp(),por:me.nome||me.email,arquivo:file.name});
+        await setDoc(doc(db,'redes_geo',al),{alimentador:al,geo,atualizadoEm:serverTimestamp()});
+        ok++; toast(`Rede ${al}: ${r.stats.km.toLocaleString('pt-BR')} km, ${r.stats.tds} trafos, ${r.stats.ramais} ramais.`);
+      }catch(err){ console.error('[Mapa KMZ]',err); toast(`${file.name}: ${err.message}`,'err'); }
+    }
+    if(btn){ btn.disabled=false; btn.textContent='⬆️ Enviar KMZ'; }
+    if(ok) await window.mapaRecarregar();
+  };
+  inp.click();
 };
