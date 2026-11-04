@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
-console.log('%c[SPPC] app.js v2617 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
+console.log('%c[SPPC] app.js v2619 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -11917,7 +11917,7 @@ window.mapaUploadKMZ=function(){
   inp.click();
 };
 
-// ══ PLANEJAMENTO — núcleo de análise (v2617) ══
+// ══ PLANEJAMENTO — núcleo de análise (v2619) ══
 // ══ PLANEJAMENTO — núcleo de análise (sem dependências; roda no navegador e no node) ══
 const PLAN_AMP = { // ampacidade de referência (A) — valores aproximados, ajustar conforme padrão CELESC
   '6 CU':120,'6 CAA':105,'4 CA':135,'4 CAA':140,'3 CAA':160,'2 CA':180,'2 CAA':180,'1/0 CA':240,'1/0 CAA':230,
@@ -11977,8 +11977,14 @@ function planBuild(K, eqRows, carg, opt={}){
   const feeders=[];const fI=new Map();
   // chaves abertas (NA): seccionadora/religador sem UC e sem filhos na planilha — a busca não atravessa
   const EQ0=new Map();for(const r of eqRows)EQ0.set(String(r.nr),r);const filhos0=new Set(eqRows.map(r=>String(r.ant)));
-  const naOld=new Set();if(opt.bloquearNA!==false)for(const p of K.pts){if(p.tipo!=='ChaveSeccionadora'&&p.tipo!=='ChaveSubterranea'&&p.tipo!=='Religador')continue;
-    const e=EQ0.get(p.nr);if(e&&(+e.uc||0)===0&&!filhos0.has(p.nr)){
+  // Lista oficial de chaves NA (opcional): quando informada, ela define quais chaves são NA
+  const LNA=opt.listaNA&&opt.listaNA.length?new Map(opt.listaNA.map(r=>[String(r.nr),r])):null;
+  const ehNA=(p,e,temFilhos)=>LNA?LNA.has(String(p.nr)):((p.tipo==='ChaveSeccionadora'||p.tipo==='ChaveSubterranea'||p.tipo==='Religador')&&e&&(+e.uc||0)===0&&!temFilhos);
+  if(LNA){const inferidas=K.pts.filter(p=>(p.tipo==='ChaveSeccionadora'||p.tipo==='ChaveSubterranea'||p.tipo==='Religador')&&(()=>{const e=EQ0.get(p.nr);return e&&(+e.uc||0)===0&&!filhos0.has(p.nr);})()).map(p=>p.nr);
+    const noKmz=new Set(K.pts.map(p=>p.nr));const naoAchadas=[...LNA.keys()].filter(n=>!noKmz.has(n));
+    log(`Lista de NA: ${LNA.size} chaves (${naoAchadas.length} não encontradas no KMZ) · inferidas pela planilha e fora da lista: ${inferidas.filter(n=>!LNA.has(n)).length} (tratadas como fechadas)`);}
+  const naOld=new Set();if(opt.bloquearNA!==false)for(const p of K.pts){if(!LNA&&p.tipo!=='ChaveSeccionadora'&&p.tipo!=='ChaveSubterranea'&&p.tipo!=='Religador')continue;
+    const e=EQ0.get(p.nr);if(ehNA(p,e,filhos0.has(p.nr))){
       const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined)naOld.add(o);}}
   // UC (planilha) de dispositivos por vértice — usada para localizar o ponto aberto de laços sem NA
   const ucDevOld=new Map();for(const p of K.pts){if(!/Chave|Religador/.test(p.tipo))continue;const e=EQ0.get(p.nr);if(!e||e.sg==='FT'||e.sg==='FP')continue;
@@ -12057,9 +12063,9 @@ function planBuild(K, eqRows, carg, opt={}){
   const tdUnder=(c,lim=400)=>{const out=[];const st=[c];while(st.length&&out.length<lim){const x=st.pop();for(const ti of(tdV.get(x)||[]))out.push(td[ti].nr);for(const y of ch[x])st.push(y);}return out;};
   let ambig=0;
   for(const p of K.pts){if(!DEVT.has(p.tipo))continue;const e=EQ.get(p.nr);const sg=e?.sg||'';
-    if(p.tipo==='ChaveFusivel'&&(sg==='FT'||sg==='FP'||(!sg&&tdNr.has(p.nr))))continue; // fusível de trafo
+    if(p.tipo==='ChaveFusivel'&&!(LNA&&LNA.has(p.nr))&&(sg==='FT'||sg==='FP'||(!sg&&tdNr.has(p.nr))))continue; // fusível de trafo
     const v=vAt(p.x,p.y,p.alim);if(v<0)continue;
-    const na=(p.tipo==='ChaveSeccionadora'||p.tipo==='ChaveSubterranea'||p.tipo==='Religador')&&e&&(+e.uc||0)===0&&!(filhosEq.get(p.nr)||[]).length;
+    const na=!!ehNA(p,e,(filhosEq.get(p.nr)||[]).length>0);
     const d={v,nr:p.nr,tipo:p.tipo,sg:sg||({ChaveFusivel:'FR',ChaveSeccionadora:'CD',Religador:'RE',ChaveSubterranea:'CD'}[p.tipo]),uc:e?+e.uc||0:null,na,prot:[]};
     if(!na){const cs=ch[v];
       if(cs.length===1)d.prot=[cs[0]];
@@ -12083,8 +12089,8 @@ function planBuild(K, eqRows, carg, opt={}){
   const nearHead=(x,y)=>feeders.some(f=>_pkm(x,y,f.x,f.y)<0.3);
   const naByOld=new Map();for(const d of dev)if(d.na){const o=nodeOld[d.v];naByOld.set(o,d);}
   // NA não alcançadas na árvore (fora dos rótulos) também
-  for(const p of K.pts){if(p.tipo!=='ChaveSeccionadora'&&p.tipo!=='ChaveSubterranea'&&p.tipo!=='Religador')continue;const e=EQ.get(p.nr);
-    if(!(e&&(+e.uc||0)===0&&!(filhosEq.get(p.nr)||[]).length))continue;const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined&&!naByOld.has(o))naByOld.set(o,{v:(nodesOfOld.get(o)||[-1])[0],nr:p.nr,tipo:p.tipo,sg:e.sg,uc:0,na:true,prot:[]});}
+  for(const p of K.pts){if(!DEVT.has(p.tipo))continue;const e=EQ.get(p.nr);
+    if(!ehNA(p,e,(filhosEq.get(p.nr)||[]).length>0))continue;const o=kid.get(Math.round(p.x*1e6)+','+Math.round(p.y*1e6));if(o!==undefined&&!naByOld.has(o))naByOld.set(o,{v:(nodesOfOld.get(o)||[-1])[0],nr:p.nr,tipo:p.tipo,sg:e?.sg||'CD',uc:0,na:true,prot:[]});}
   const inter=[],incons=[];const usedNA=new Set();
   const front=new Map();
   for(let v=0;v<NV;v++){const s=new Set();for(const e of adjAll[v])s.add(EAl[e]);if(s.size>1){const names=[...s].map(a=>alims[a]).filter(a=>a&&a!=='?');if(new Set(names).size>1)front.set(v,[...new Set(names)]);}}
@@ -12118,6 +12124,11 @@ function planBuild(K, eqRows, carg, opt={}){
     const b=perto(x,y,fi,gapKm);
     if(b){usedNA.add(d.nr);const outro=feeders[V.f[b.i]].nome;inter.push({nr:d.nr,x,y,al:[feeders[fi].nome,outro],dNA:0,gapM:Math.round(b.d*1000),lados:[{al:feeders[fi].nome,v:d.v},{al:outro,v:b.i}]});}
     else{const sug=perto(x,y,fi,2);naPonta.push({tipo:'Chave NA na ponta da rede (sem continuidade)',x,y,al:[feeders[fi].nome],nr:d.nr,sug:sug?`${feeders[V.f[sug.i]].nome} a ${Math.round(sug.d*1000)} m`:''});}}
+  if(LNA){const fIdx2=fI;for(const d of dev){if(!d.na||usedNA.has(d.nr))continue;const r=LNA.get(d.nr);if(!r||!r.als||!r.als.length)continue;const fi=V.f[d.v];const proprio=feeders[fi].nome;
+      const outro=r.als.find(a=>a!==proprio&&fIdx2.has(a));if(!outro)continue;const fb=fIdx2.get(outro);let best=-1,bd=1e9;
+      for(let i=0;i<N;i++){if(V.f[i]!==fb)continue;const dd=_pkm(V.x[d.v],V.y[d.v],V.x[i],V.y[i]);if(dd<bd){bd=dd;best=i;}}
+      usedNA.add(d.nr);const k=naPonta.findIndex(z=>z.nr===d.nr);if(k>=0)naPonta.splice(k,1);
+      inter.push({nr:d.nr,x:V.x[d.v],y:V.y[d.v],al:[proprio,outro],dNA:0,gapM:Math.round(bd*1000),lista:true,lados:[{al:proprio,v:d.v},{al:outro,v:best}]});}}
   log(`NA na ponta da rede: ${inter.filter(i=>i.gapM!=null).length} ligadas por proximidade (≤ ${opt.gapM??50} m), ${naPonta.length} sem continuidade`);
   // ── árvore operativa da planilha: agregados por equipamento ──
   const tdInfo=new Map(td.map(t=>[t.nr,t]));const naInter=new Set(inter.filter(i=>i.al.length>1).map(i=>i.nr));
@@ -12139,7 +12150,7 @@ function planBuild(K, eqRows, carg, opt={}){
 }
 
 // ── 3. Análise (roda no cliente a cada mudança de parâmetro) ───────────────
-const PLAN_PARAM_PADRAO={ucUrb:500,ucRur:300,kmRur:5,kmUrb:2,ucBloco:150,derivTD:5,derivKm:2,derivProtM:50,kv:23,fc:0.7,utilMax:1.0,transfChave:1,cargaCaboMin:0.3,carregMax:100,ucPorKva:1.5,cabosPequenos:['6 CU','6 CAA','4 CA','2 CA','2 CAA','3 CAA','4.8 mm2-HS-ACO','4.8 mm2-HS-ACO-ZIN']};
+const PLAN_PARAM_PADRAO={ucUrb:500,ucRur:300,kmRur:5,kmUrb:2,ucBloco:150,derivTD:5,derivKm:2,derivProtM:50,kv:23,fc:0.7,utilMax:1.0,transfChave:1,cargaCaboMin:0.3,carregMax:100,ucPorKva:1.5,cabosPequenos:['4.8 mm2-HS-ACO','4.8 mm2-HS-ACO-ZIN','6 CU','4 CA']};
 function _plCorrente(kva,fases,kv){return fases===1?kva*Math.sqrt(3)/kv:fases===2?kva/kv:kva/(Math.sqrt(3)*kv);}
 function planPrep(B){ // estruturas derivadas (uma vez por carga)
   const N=B.N,V=B.V;const ch=Array.from({length:N},()=>[]);for(let i=0;i<N;i++)if(V.par[i]>=0)ch[V.par[i]].push(i);
@@ -12287,12 +12298,15 @@ function planOportunidadesNoTrecho(B,R,nr){const loc=planLocalizarEquip(B,nr);if
   if(mono>0.005)itens.push({key:'MONO|'+brot,tipo:'Monofásico urbano',titulo:'Rede monofásica em área urbana',det:`${r1(mono)} km neste trecho`,pos:[V.y[loc.ref],V.x[loc.ref]]});
   for(const [cb,km] of Object.entries(cab))if(km>0.005)itens.push({key:`CABO|${cb}|${brot}`,tipo:'Cabo fora de padrão',titulo:`Substituir cabo ${cb}`,det:`${Math.round(km*100)/100} km de ${cb} neste trecho`,pos:[V.y[loc.ref],V.x[loc.ref]]});
   for(const it of R.interligacoes){if(it.externo)continue;const no=((R._interTodas||B.inter).find(i=>i.nr===it.nr)?.lados||[]).some(l=>l.v>=0&&nset.has(l.v));if(!no)continue;
-    const crit=it.dirs.some(d=>(d.util||0)>=70||d.naEmRamal);if(crit)itens.push({key:it.key,tipo:'Interligação',titulo:`Reforçar interligação NA ${it.nr} (${it.al})`,det:it.dirs.map(d=>`${d.de}→${d.para} ${d.util??'—'}% em ${d.critico||'—'}${d.naEmRamal?' · NA em ramal':''}`).join(' | '),pos:it.pos});}
+    const crit=it.dirs.some(d=>(d.util||0)>(P.utilMax||1)*100);if(crit)itens.push({key:it.key,tipo:'Interligação',titulo:`Reforçar interligação NA ${it.nr} (${it.al})`,det:it.dirs.map(d=>`${d.de}→${d.para} ${d.util??'—'}% em ${d.critico||'—'}${d.naEmRamal?' · NA em ramal':''}`).join(' | '),pos:it.pos});}
   for(const c of R.cargaCabos)if(c.nodes.some(n=>nset.has(n)))itens.push({key:c.key,tipo:'Carregamento de cabo',titulo:`Cabo ${c.cabo} com ${c.util}% de utilização`,det:`${c.km} km · ${c.I} A de ${c.amp} A${c.conf==='Baixa'?' · baixa confiança':''}`,pos:c.pos});
   const tdSet=new Set(B.td.filter(t=>nset.has(t.v)).map(t=>t.nr));
   for(const t of R.trafosCarregados)if(tdSet.has(t.nr))itens.push({key:t.key,tipo:'Trafo carregado',titulo:`Trafo ${t.nr} com ${t.carreg}% de carregamento`,det:`${t.kva} kVA · ${t.uc} UCs`,pos:t.pos});
   for(const t of R.trafosMuitasUC)if(tdSet.has(t.nr))itens.push({key:t.key,tipo:'Trafo com muitas UCs',titulo:`Trafo ${t.nr} com ${t.ucKva} UCs/kVA`,det:`${t.kva} kVA · ${t.uc} UCs · ${t.carreg??'—'}%`,pos:t.pos});
   return{loc:{...loc,trecho:rot,al:B.feeders[V.f[loc.ref]]?.nome},itens};}
+// trecho (blocos entre chaves) de um equipamento — usado para cruzar PVNT x obras
+function planTrechoEquip(B,R,nr){const loc=planLocalizarEquip(B,nr);if(!loc)return null;const V=B.V,blk=R._blk;const bs=new Set(loc.nos.map(n=>blk[n]));
+  return{bs,rot:[...bs].map(b=>R._blocos[b].rot).join(' + '),al:B.feeders[V.f[loc.ref]]?.nome||'',pos:[V.y[loc.ref],V.x[loc.ref]],tipo:loc.tipo};}
 // ── 7. Publicação da rede para a aba Mapa (todos os alimentadores) ──
 function planPublicarRedes(B){const V=B.V,N=B.N;const X=B._p||planPrep(B);const out={};
   const key=new Array(N);const chain=new Map([['Tronco',['Tronco']]]);
@@ -12386,6 +12400,7 @@ const PL_ANALISES=[
   ['ucs','Trafos com muitas UCs','Item 9 — muitas UCs para a potência, mesmo sem sobrecarga'],
   ['incons','Inconsistências','Pontos onde o alimentador do trecho muda sem chave (revisar cadastro)'],
   ['calor','Mapa de calor','Atuações não programadas: trecho que cada equipamento protege até o próximo equipamento'],
+  ['pvnt','Obras PVNT previstas','Obras PVNT a executar (lista enviada): onde estão, obras em andamento e oportunidades no mesmo trecho'],
   ['oport','Oportunidades x obras','Melhorias apontadas no mesmo trecho de obras em andamento — vincular como nova R2 ou descartar']].filter(a=>a[0]!=='calor'); // calor: stand-by
 const PL_PARAM_LBL=[['ucUrb','Limite UCs ramal urbano'],['ucRur','Limite UCs ramal rural'],['kmRur','Extensão máx. rural sem seccionar (km)'],['kmUrb','Extensão máx. urbana sem seccionar (km)'],
   ['ucBloco','UCs máx. sem seccionar'],['derivTD','Derivação: mín. trafos'],['derivKm','Derivação: mín. km'],['derivProtM','Chave até (m) do início da derivação'],
@@ -12447,8 +12462,15 @@ function _plHTML(){return `
     <label>1. Rede MT (KMZ da ARLAG)<input type="file" id="plFKmz" accept=".kmz,.kml"></label>
     <label>2. Qtd. UC por equipamento (Excel)<input type="file" id="plFUc" accept=".xlsx,.xls"></label>
     <label>3. Carregamento dos trafos (CSV)<input type="file" id="plFCg" accept=".csv,.txt"></label>
+    <label>4. Lista de chaves NA (opcional, Excel ou CSV)<input type="file" id="plFNa" accept=".xlsx,.xls,.csv,.txt"></label>
   </div>
+  <div style="font-size:10px;color:var(--muted);margin-bottom:6px">Lista de NA: uma linha por chave, com o nº da chave e, se possível, os dois alimentadores que ela interliga (ex.: <code>1067 · LUC03 · AGI02</code>). Quando enviada, ela define quais chaves são NA e cria a interligação mesmo onde a rede não está desenhada. <span id="plNaInfo"></span></div>
   <button class="btn btn-primary btn-sm" id="plBtnProc" onclick="plProcessar()">⚡ Processar e salvar</button>
+  <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:10px">
+    <div style="font-size:11px;color:var(--muted)">Obras PVNT a executar (Excel ou CSV com a <b>nota PS</b> e o <b>equipamento de referência</b>; descrição e município são opcionais). Servem de lembrete no planejamento: aparecem no mapa e no cadastro de obras do mesmo trecho. Pode ser atualizado a qualquer momento, sem reprocessar a rede. <span id="plPvntInfo"></span></div>
+    <div class="pl-files"><label>Obras PVNT (Excel/CSV)<input type="file" id="plFPvnt" accept=".xlsx,.xls,.csv,.txt"></label></div>
+    <button class="btn btn-primary btn-sm" id="plBtnPvnt" onclick="plSalvarPvnt()">📌 Salvar lista PVNT</button>
+  </div>
   <div style="border-top:1px solid var(--border);margin-top:12px;padding-top:10px;display:none" id="plAtuBox">
     <div style="font-size:11px;color:var(--muted)">Atuações (relatório SIMO "Atuações por Equipamento", em PDF). Pode ser atualizado separadamente, sem reprocessar a rede. Desligamentos programados (causas "PROG.") ficam fora da contagem.</div>
     <div class="pl-files"><label>4. Atuações (PDF do SIMO)<input type="file" id="plFAtu" accept=".pdf"></label></div>
@@ -12501,7 +12523,7 @@ async function _plGarantirBase(){ // carrega base + análise sem depender da tel
   _pl._carregando=(async()=>{const m=await getDoc(doc(db,'plan_meta','atual'));if(!m.exists())return false;_pl.meta=m.data();const partes=[];
     for(let i=0;i<_pl.meta.partes;i++){const d=await getDoc(doc(db,'plan_base','p'+i));partes.push(d.data().dados);}
     const z=await JSZip.loadAsync(partes.join(''),{base64:true});_pl.B=planDesserializar(await z.file('b.json').async('string'));planPrep(_pl.B);
-    if(!_pl.P)_pl.P=_plParams();await _plCarregarInterManuais();_pl.R=planAnalyze(_pl.B,_pl.P);await _plCarregarOps();return true;})();
+    if(!_pl.P)_pl.P=_plParams();await _plCarregarInterManuais();await _plCarregarPvnt();_pl.R=planAnalyze(_pl.B,_pl.P);await _plCarregarOps();return true;})();
   try{return await _pl._carregando;}finally{_pl._carregando=null;}}
 async function _plCarregarInterManuais(){try{const m=await getDoc(doc(db,'plan_meta','interManuais'));_pl.interManuais=m.exists()?(m.data().lista||[]):[];}catch(e){_pl.interManuais=[];}
   if(_pl.P)_pl.P.interManuais=_pl.interManuais;}
@@ -12518,6 +12540,8 @@ async function _plCarregar(){
   const ok=await _plGarantirBase();
   if(!ok){_pl.carregado=true;_pl.B=null;document.getElementById('plMeta').textContent='Nenhuma base processada ainda.';document.getElementById('plBases').style.display='block';return;}
   _pl.carregado=true;
+  _plPvntInfo();
+  try{const m=await getDoc(doc(db,'plan_meta','listaNA'));const el=document.getElementById('plNaInfo');if(el)el.innerHTML=m.exists()?`<b>Lista atual: ${m.data().lista.length} chaves (${_plEsc(m.data().arquivo||'')})</b>.`:'Nenhuma lista enviada ainda: NA deduzidas pela planilha de UCs.';}catch(e){}
   const dt=_pl.meta.atualizadoEm?.toDate?_pl.meta.atualizadoEm.toDate().toLocaleString('pt-BR'):'—';
   document.getElementById('plMeta').textContent=`Base de ${dt} · ${_pl.meta.por||''} · ${_plNum(_pl.B.stats.km)} km · ${_plNum(_pl.B.stats.trafos)} trafos`;
   const sel=document.getElementById('plAl');sel.innerHTML='<option value="">Todos os alimentadores</option>'+_pl.B.feeders.map(f=>f.nome).sort().map(n=>`<option>${_plEsc(n)}</option>`).join('');
@@ -12564,7 +12588,7 @@ window.plParamsPadrao=()=>{_pl.P={...PLAN_PARAM_PADRAO};try{localStorage.removeI
 // ── KPIs ──
 function _plKpis(){const R=_pl.R;if(!R)return;const r=R.resumo;if(!_pl.oportResumo)try{_plOportLinhas();}catch(e){}
   const v={ramais:r.ramaisSemManobra+(r.alimSemInter?` + ${r.alimSemInter} alim.`:''),secc:r.seccionamento,deriv:r.derivacoes,mono:_plNum(r.monoUrbanoKm,1)+' km',cabos:_plNum(r.cabosPequenosKm,0)+' km',
-    inter:r.interligacoes+(r.interAlerta?` (${r.interAlerta}⚠️)`:''),cargacabo:r.cargaCabos,oport:_pl.oportResumo||'—',calor:_pl.H?_plNum(_pl.H.total)+' atuações':'—',carreg:r.trafosCarregados,ucs:r.trafosMuitasUC,incons:r.inconsistencias};
+    inter:r.interligacoes+(r.interAlerta?` (${r.interAlerta}⚠️)`:''),cargacabo:r.cargaCabos,oport:_pl.oportResumo||'—',pvnt:_pl.pvnt?(_pl.pvnt.length+(_pl.pvntSemLoc?` (${_pl.pvntSemLoc} s/ local)`:'')):'—',calor:_pl.H?_plNum(_pl.H.total)+' atuações':'—',carreg:r.trafosCarregados,ucs:r.trafosMuitasUC,incons:r.inconsistencias};
   document.getElementById('plKpis').innerHTML=PL_ANALISES.map(([k,t])=>`<button class="pl-kpi ${_pl.an===k?'on':''}" onclick="plAnalise('${k}')"><div class="k">${t}</div><div class="v">${v[k]}</div></button>`).join('');}
 window.plAnalise=k=>{_pl.an=k;_pl.sel=null;_plMostrar(true);_plKpis();};
 
@@ -12591,7 +12615,8 @@ const PL_COLS={
   carreg:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['carreg','Carreg. (%)'],['uc','UCs'],['queda','Queda (%)']],
   ucs:[['al','Alim.'],['nr','Trafo'],['kva','kVA'],['uc','UCs'],['ucKva','UCs/kVA'],['carreg','Carreg. (%)']],
   incons:[['tipo','Tipo'],['al','Alimentadores'],['nr','Equip.'],['sugAl','Alimentador mais próximo'],['reg','Interligação registrada'],['pos','Coordenadas']],
-  oport:[['obraNum','Obra'],['obraTipo','Tipo'],['obraStatus','Status da obra'],['al','Alim.'],['trecho','Trecho'],['tipo','Oportunidade'],['titulo','Descrição'],['det','Detalhe'],['situacao','Situação'],['r2','R2 vinculada']]};
+  pvnt:[['nota','Nota PS'],['equip','Equip. ref.'],['al','Alim.'],['trecho','Trecho'],['desc','Descrição'],['mun','Município'],['obrasExec','Obras em execução no trecho'],['nOport','Oportunidades no trecho'],['sppc','No SPPC']],
+  oport:[['obraNum','Obra'],['obraTipo','Tipo'],['obraStatus','Status da obra'],['al','Alim.'],['trecho','Trecho'],['tipo','Oportunidade'],['titulo','Descrição'],['det','Detalhe'],['situacao','Situação'],['r2','R2 vinculada'],['pvnt','PVNT no trecho']]};
 for(const k of ['ramais','secc','deriv','inter','cargacabo','carreg','ucs'])PL_COLS[k].push(['situacao','Situação']);
 function _plLinhas(){const rows=_plLinhas0();for(const r of rows)if(r.key&&r.situacao===undefined)r.situacao=_plStatusOp(r.key).txt;return rows;}
 function _plLinhas0(){const R=_pl.R;if(!R)return[];const f=r=>!_pl.al||String(r.al||'').split(' / ').includes(_pl.al)||(Array.isArray(r.al)&&r.al.includes(_pl.al));
@@ -12606,7 +12631,8 @@ function _plLinhas0(){const R=_pl.R;if(!R)return[];const f=r=>!_pl.al||String(r.
     case 'calor':return _pl.H?_plCalorLista().filter(f):[];
     case 'carreg':return R.trafosCarregados.filter(f);
     case 'ucs':return R.trafosMuitasUC.filter(f);
-    case 'incons':return _pl.B.incons.map(i=>{const m=(_pl.interManuais||[]).find(x=>String(x.nr)===String(i.nr));return{tipo:i.tipo,nr:i.nr||'',al:i.al.join(' / '),sugAl:i.sug||'',reg:m?`↔ ${m.al}`:'',pos:`${i.y.toFixed(5)}, ${i.x.toFixed(5)}`,_x:i.x,_y:i.y};}).filter(f);
+    case 'incons':return _pl.B.incons.slice().sort((a,b)=>(b.tipo.startsWith('Chave NA')-a.tipo.startsWith('Chave NA'))||(b.tipo.startsWith('Chave')-a.tipo.startsWith('Chave'))).map(i=>{const m=(_pl.interManuais||[]).find(x=>String(x.nr)===String(i.nr));return{tipo:i.tipo,nr:i.nr||'',al:i.al.join(' / '),sugAl:i.sug||'',reg:m?`↔ ${m.al}`:'',pos:`${i.y.toFixed(5)}, ${i.x.toFixed(5)}`,_x:i.x,_y:i.y};}).filter(f);
+    case 'pvnt':return _plPvntLinhas().filter(f);
     case 'oport':return _plOportLinhas().filter(f);}return[];}
 function _plMostrar(fit){if(!_pl.map)return;const tab=document.getElementById('plTab');
   const [,tit,desc]=PL_ANALISES.find(a=>a[0]===_pl.an);document.getElementById('plTit').textContent=tit;document.getElementById('plDesc').textContent=desc;
@@ -12635,7 +12661,12 @@ function _plMostrar(fit){if(!_pl.map)return;const tab=document.getElementById('p
     if(_pl.an==='carreg')leg.push(['#f97316',`${_pl.P.carregMax}–120%`],['#ef4444','120–150%'],['#7f1d1d','≥ 150%']);else leg.push(['#3b82f6',`> ${_pl.P.ucPorKva} UCs por kVA`]);}
   if(_pl.an==='oport'){const COR={Planejada:'#ef4444','Em execução':'#3b82f6',Concluída:'#22c55e',Descartada:'#64748b',Vinculada:'#f59e0b'};
     for(const r of rows)if(r.pos)_plMarker(r.pos,COR[r.situacaoBase]||'#ef4444',5,`${r.obraNum} · ${r.tipo}`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);
+    const ob=(typeof obras!=='undefined'?obras:[]).filter(o=>PL_OBRA_EXEC.has(statusOf(o))).sort((a,b)=>String(a.numero||'').localeCompare(String(b.numero||'')));
+    _pl._avBar=`<div style="display:flex;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted)">R2 avulsa a partir de obra em execução: <select id="plAvObra" style="max-width:220px"><option value="">— obra —</option>${ob.map(o=>`<option value="${_plEsc(o.id)}">${_plEsc(o.numero||'s/ nº')} · ${_plEsc(statusOf(o))}${o.equipamentoRef?'':' · sem equip.'}</option>`).join('')}</select><button class="btn btn-secondary btn-sm" onclick="plAbrirObraAvulsa()">Abrir obra</button></div>`;
     leg.push(['#ef4444','Planejada (aguardando decisão)'],['#3b82f6','Em execução (R2 vinculada)'],['#22c55e','Concluída'],['#64748b','Descartada']);}
+  if(_pl.an==='pvnt'){if(!_pl.pvnt){tab.innerHTML='<div style="padding:16px;font-size:11px;color:var(--muted)">Nenhuma lista PVNT enviada. Use ⚙️ Atualizar bases → Obras PVNT a executar.</div>';document.getElementById('plLeg').innerHTML='';return;}
+    for(const r of rows)if(r.pos)_plMarker(r.pos,r.sppc?'#22c55e':r.obrasExec?'#3b82f6':'#06b6d4',6,`PVNT ${r.nota} · equip. ${r.equip}`).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);
+    leg.push(['#06b6d4','PVNT a executar'],['#3b82f6','Com obra em execução no mesmo trecho'],['#22c55e','Já cadastrada no SPPC']);}
   if(_pl.an==='incons'){for(const r of rows)_plMarker([r._y,r._x],'#f43f5e',4,r.al).on('click',()=>_plSelecionar(r)).addTo(_pl.lay.an);leg.push(['#f43f5e','Troca de alimentador sem chave']);}
   document.getElementById('plLeg').innerHTML=leg.map(([c,t])=>`<div><i style="background:${c}"></i>${_plEsc(t)}</div>`).join('');
   // tabela
@@ -12643,6 +12674,7 @@ function _plMostrar(fit){if(!_pl.map)return;const tab=document.getElementById('p
     rows.slice(0,MAX).map((r,i)=>`<tr data-i="${i}">${cols.map(([k])=>`<td>${typeof r[k]==='number'?_plNum(r[k],k==='km'||k==='ucKva'||k==='carreg'?1:0):_plEsc(r[k]??'—')}</td>`).join('')}</tr>`).join('')+'</tbody></table>'+
     (rows.length>MAX?`<div style="padding:8px;font-size:10px;color:var(--muted)">Mostrando ${MAX} de ${rows.length}. Exporte para ver todos.</div>`:'')
     :'<div style="padding:16px;font-size:11px;color:var(--muted)">Nenhum item com os parâmetros atuais.</div>';
+  if(_pl.an==='oport'&&_pl._avBar)tab.insertAdjacentHTML('afterbegin',_pl._avBar);
   tab.querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>_plSelecionar(rows[+tr.dataset.i]));
   tab.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;_pl.ord=_pl.ord===k?'-'+k:k;const d=_pl.ord.startsWith('-')?-1:1;
     const kk=_pl.ord.replace('-','');rows.sort((a,b)=>{const x=a[kk],y=b[kk];return(typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''),'pt-BR'))*d;});_pl.rowsOrd=rows;
@@ -12692,6 +12724,14 @@ function _plSelecionar(r){_pl.lay.hl.clearLayers();const B=_pl.B,V=B.V;let pop='
     pop=`<b>${_plEsc(r.tipo)} ${_plEsc(r.nr)}</b> · ${_plEsc(r.al)}<br><b>${r.q}</b> atuações não programadas${r.uc!=null?` · ${_plNum(r.uc)} UCs a jusante`:''}${r.km!=null?`<br>Trecho protegido: ${_plNum(r.km,1)} km (${_plNum(r.porKm,1)} atuações/km)`:''}<br><span style="font-size:10px">${_plEsc(r.causas)}</span>${r.obs?`<br><span style="color:#d97706;font-size:10px">${_plEsc(r.obs)}</span>`:''}`;}
   if(_pl.an==='oport'){pop=`<b>${_plEsc(r.tipo)}</b> · ${_plEsc(r.al)} · trecho ${_plEsc(r.trecho)}<br>${_plEsc(r.titulo)}<br><span style="font-size:10px">${_plEsc(r.det)}</span><br>Obra ${_plEsc(r.obraNum)} (${_plEsc(r.obraStatus)}) · <b>${_plEsc(r.situacao)}</b>`+
       (r.obraId?`<br><button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="openObraModal('${_plEsc(r.obraId)}')">Abrir obra ${_plEsc(r.obraNum)}</button>`:'');foco=r.pos?L.latLng(r.pos).toBounds(800):null;}
+  if(_pl.an==='pvnt'){if(r._bs){const nodes=[];const blk=_pl.R._blk;for(let i=0;i<B.N;i++)if(r._bs.has(blk[i]))nodes.push(i);const seg=_plSeg(nodes);
+      if(seg.length){L.polyline(seg,{color:'#06b6d4',weight:5,opacity:.8}).addTo(_pl.lay.hl);foco=L.polyline(seg).getBounds();}}
+    if(!foco&&r.pos)foco=L.latLng(r.pos).toBounds(800);
+    pop=`<b>PVNT · nota ${_plEsc(r.nota)}</b><br>Equip. ref. ${_plEsc(r.equip)}${r.al?` · ${_plEsc(r.al)} · trecho ${_plEsc(r.trecho)}`:''}${r.desc?`<br>${_plEsc(r.desc)}`:''}${r.mun?`<br>${_plEsc(r.mun)}`:''}`+
+      (r.sppc?`<br><b style="color:#16a34a">Já cadastrada no SPPC: obra ${_plEsc(r.sppc)}</b>`:'')+
+      (r._obras.length?`<br>Obras em execução no mesmo trecho: ${r._obras.map(o=>`<a href="#" onclick="openObraModal('${_plEsc(o.id)}');return false">${_plEsc(o.numero||'s/ nº')}</a>`).join(', ')}`:'')+
+      (r._itens.length?`<br>Oportunidades no trecho: ${r._itens.map(i=>_plEsc(i.tipo)).join(', ')}`:'')+
+      (r.extras?`<div style="font-size:10px;color:#888;margin-top:4px">${_plEsc(r.extras)}</div>`:'');}
   if(_pl.an==='incons'&&r.tipo.startsWith('Chave NA na ponta')){const m=(_pl.interManuais||[]).find(x=>String(x.nr)===String(r.nr));
     pop=`<b>Chave NA ${_plEsc(r.nr)}</b> · ${_plEsc(r.al)}<br>A rede termina nesta chave e o outro lado não está desenhado no cadastro.${r.sugAl?`<br>Alimentador mais próximo: ${_plEsc(r.sugAl)}`:'<br>Nenhum outro alimentador a menos de 2 km.'}`+
       (m?`<br><b>Registrada como interligação com ${_plEsc(m.al)}</b> (${_plEsc(m.por||'')}, ${_plEsc(m.em||'')})<br><button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="plRemoverInter('${_plEsc(r.nr)}')">Remover registro</button>`
@@ -12717,6 +12757,14 @@ async function _plLerUC(file){const wb=XLSX.read(await file.arrayBuffer(),{type:
   const iN=ci('NR_EQUIPAMENTO'),iA=ci('NR_EQPTO_ANTERIOR'),iS=ci('SG_EQUIPAMENTO'),iU=ci('QT_CONSUMIDOR'),iF=ci('NR_ALIMENTADOR');
   if(iN<0||iA<0||iS<0||iU<0)throw new Error('Planilha de UCs sem as colunas NR_EQUIPAMENTO, NR_EQPTO_ANTERIOR, SG_EQUIPAMENTO e QT_CONSUMIDOR_CELESC.');
   const out=[];for(let r=1;r<rows.length;r++){const x=rows[r];const nr=parseInt(x[iN]);if(!nr)continue;const u=x[iU];out.push({nr,ant:parseInt(x[iA])||0,sg:String(x[iS]||''),uc:u===''||u==null?null:+u,alimNum:parseInt(x[iF])||0});}return out;}
+async function _plLerListaNA(file){let rows;
+  if(/\.(csv|txt)$/i.test(file.name)){const t=new TextDecoder('iso-8859-1').decode(await file.arrayBuffer());rows=t.split(/\r?\n/).map(l=>l.split(/[;,\t]/));}
+  else{const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1});}
+  const normAl=v=>{const m=String(v||'').toUpperCase().replace(/\s+/g,'').match(/^([A-Z]{3})-?(\d{1,2})$/);return m?m[1]+m[2].padStart(2,'0'):null;};
+  const out=new Map();for(const r of rows){if(!r||!r.length)continue;let nr=null;const als=[];
+    for(const c of r){const s=String(c??'').trim();if(!s)continue;const a=normAl(s);if(a){als.push(a);continue;}if(!nr&&/^\d{2,7}(\.0)?$/.test(s))nr=String(parseInt(s));}
+    if(nr){const o=out.get(nr)||{nr,als:[]};for(const a of als)if(!o.als.includes(a))o.als.push(a);out.set(nr,o);}}
+  if(!out.size)throw new Error('Nenhuma chave reconhecida na lista de NA. Use uma coluna com o nº da chave.');return [...out.values()];}
 async function _plLerCarreg(file){const txt=new TextDecoder('iso-8859-1').decode(await file.arrayBuffer());const lin=txt.split(/\r?\n/);
   const h=lin.findIndex(l=>/^C[oó]digo do alimentador;/i.test(l));if(h<0)throw new Error('CSV de carregamento sem a linha de cabeçalho "Código do alimentador;…".');
   const f=s=>{s=(s||'').trim();if(!s)return null;const v=parseFloat(s.replace(/\./g,'').replace(',','.'));return isNaN(v)?null:v;};const out=[];
@@ -12725,15 +12773,20 @@ async function _plLerCarreg(file){const txt=new TextDecoder('iso-8859-1').decode
 window.plProcessar=async function(){
   if(me.perfil!=='gerente')return;const fk=document.getElementById('plFKmz').files[0],fu=document.getElementById('plFUc').files[0],fc=document.getElementById('plFCg').files[0];
   if(!fk||!fu||!fc){toast('Selecione os três arquivos: KMZ, planilha de UCs e CSV de carregamento.','warn');return;}
+  const fna=document.getElementById('plFNa')?.files[0];
   const btn=document.getElementById('plBtnProc');btn.disabled=true;document.getElementById('plLog').textContent='';const pausa=()=>new Promise(r=>setTimeout(r,30));
   try{
     _plLog('Lendo planilha de UCs…');await pausa();const eq=await _plLerUC(fu);_plLog(`  ${eq.length} equipamentos`);
     _plLog('Lendo CSV de carregamento…');await pausa();const cg=await _plLerCarreg(fc);_plLog(`  ${cg.length} trafos com carregamento`);
+    let listaNA=null;
+    if(fna){_plLog('Lendo lista de chaves NA…');listaNA=await _plLerListaNA(fna);_plLog(`  ${listaNA.length} chaves NA (${listaNA.filter(r=>r.als.length).length} com alimentador informado)`);
+      await setDoc(doc(db,'plan_meta','listaNA'),{lista:listaNA,arquivo:fna.name,atualizadoEm:serverTimestamp(),por:me.nome||me.email});}
+    else{try{const m=await getDoc(doc(db,'plan_meta','listaNA'));if(m.exists()){listaNA=m.data().lista;_plLog(`Usando lista de NA já salva (${listaNA.length} chaves, ${m.data().arquivo||''})`);}}catch(e){}}
     _plLog('Descompactando KMZ…');await pausa();let kml;
     if(fk.name.toLowerCase().endsWith('.kml'))kml=await fk.text();else{const z=await JSZip.loadAsync(fk);const n=Object.keys(z.files).find(x=>x.toLowerCase().endsWith('.kml'));if(!n)throw new Error('KMZ sem arquivo KML');kml=await z.file(n).async('string');}
     _plLog(`  KML com ${Math.round(kml.length/1e6)} MB. Lendo elementos…`);await pausa();
     const K=planParseKML(kml);kml=null;_plLog(`  ${K.trechos.length} trechos, ${K.pts.length} equipamentos`);await pausa();
-    _plLog('Montando topologia…');await pausa();const B=planBuild(K,eq,cg,{log:_plLog});
+    _plLog('Montando topologia…');await pausa();const B=planBuild(K,eq,cg,{log:_plLog,listaNA});
     _plLog('Compactando e salvando…');await pausa();
     const z=new JSZip();z.file('b.json',planSerializar(B));const b64=await z.generateAsync({type:'base64',compression:'DEFLATE',compressionOptions:{level:6}});
     const T=900000;const partes=Math.ceil(b64.length/T);
@@ -12773,7 +12826,62 @@ window.plProcessarAtuacoes=async function(){
 };
 
 // ══ OPORTUNIDADES: status, aviso no cadastro de obras e R2 vinculada (gerente) ══
-const PL_FIM_OBRA=s=>['Encerrada','Cancelada'].includes(s);
+const PL_OBRA_EXEC=new Set(['Em Execução','Atrasada','Obra Paralisada','Paral. Expirada','Prob. Executivo – Celesc']);
+const PL_FIM_OBRA=s=>!PL_OBRA_EXEC.has(s);
+// ── PVNT: lista de obras a executar (lembrete) ──
+async function _plCarregarPvnt(){try{const m=await getDoc(doc(db,'plan_meta','pvnt'));_pl.pvnt=m.exists()?(m.data().lista||[]):null;_pl.pvntMeta=m.exists()?m.data():null;}catch(e){_pl.pvnt=null;}_pl._pvntCache=null;}
+function _plPvntInfo(){const el=document.getElementById('plPvntInfo');if(el)el.innerHTML=_pl.pvnt?`<b>Lista atual: ${_pl.pvnt.length} obras (${_plEsc(_pl.pvntMeta?.arquivo||'')})</b>.`:'Nenhuma lista enviada ainda.';}
+async function _plLerPvnt(file){let rows;
+  if(/\.(csv|txt)$/i.test(file.name)){const t=new TextDecoder('iso-8859-1').decode(await file.arrayBuffer());rows=t.split(/\r?\n/).map(l=>l.split(/;|\t/));}
+  else{const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false});}
+  const nrm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+  let h=-1,cN=-1,cE=-1,cD=-1,cM=-1;
+  for(let i=0;i<Math.min(rows.length,30)&&h<0;i++){const r=(rows[i]||[]).map(nrm);
+    const e=r.findIndex(x=>/EQUIP|EQPTO|EQUIPAMENTO|^EQ\b|REFER/.test(x));const n=r.findIndex((x,j)=>j!==e&&/NOTA|^PS\b|N[º°O]?\s*PS|PVNT/.test(x));
+    if(e>=0&&n>=0){h=i;cE=e;cN=n;cD=r.findIndex(x=>/DESCR|OBRA|SERVI|OBJETO|LOCAL|ENDERE/.test(x));if(cD===cN||cD===cE)cD=-1;cM=r.findIndex(x=>/MUNIC|CIDADE/.test(x));}}
+  if(h<0){h=-1;cN=0;cE=1;} // sem cabeçalho: 1ª coluna nota, 2ª equipamento
+  const cab=h>=0?(rows[h]||[]).map(x=>String(x??'').trim()):[];
+  const out=[];const vist=new Set();
+  for(let i=h+1;i<rows.length;i++){const r=rows[i];if(!r)continue;const nota=String(r[cN]??'').trim();const eq=String(r[cE]??'').trim().replace(/\.0$/,'');if(!nota||!eq)continue;
+    const k=nota+'|'+eq;if(vist.has(k))continue;vist.add(k);
+    const extras=cab.map((c,j)=>[c,r[j]]).filter(([c,v],j)=>c&&v!=null&&String(v).trim()!==''&&![cN,cE,cD,cM].includes(j)).slice(0,6).map(([c,v])=>`${c}: ${String(v).trim()}`.slice(0,80)).join(' · ');
+    out.push({nota,equip:eq,desc:cD>=0?String(r[cD]??'').trim().slice(0,160):'',mun:cM>=0?String(r[cM]??'').trim():'',extras});}
+  if(!out.length)throw new Error('Nenhuma obra reconhecida. A planilha precisa de uma coluna com a nota PS e outra com o equipamento de referência.');
+  return out;}
+window.plSalvarPvnt=async function(){if(me.perfil!=='gerente')return;const f=document.getElementById('plFPvnt')?.files[0];if(!f){toast('Selecione a planilha PVNT.','warn');return;}
+  const btn=document.getElementById('plBtnPvnt');btn.disabled=true;
+  try{const lista=await _plLerPvnt(f);await setDoc(doc(db,'plan_meta','pvnt'),{lista,arquivo:f.name,atualizadoEm:serverTimestamp(),por:me.nome||me.email});
+    _pl.pvnt=lista;_pl.pvntMeta={arquivo:f.name};_pl._pvntCache=null;_plPvntInfo();
+    try{await _plGarantirBase();}catch(e){}
+    let semLoc=0;if(_pl.B)for(const p of lista)if(!planLocalizarEquip(_pl.B,p.equip))semLoc++;
+    toast(`Lista PVNT salva: ${lista.length} obras${semLoc?` (${semLoc} com equipamento não localizado na rede)`:''}.`);
+    if(_pl.B){_pl.an='pvnt';_plMostrar(true);_plKpis();}}
+  catch(e){toast('Erro na lista PVNT: '+e.message,'err');}finally{btn.disabled=false;}};
+function _plObraTrechos(){const m=new Map();if(!_pl.B||!_pl.R)return m;
+  for(const o of (typeof obras!=='undefined'?obras:[])){if(!o.equipamentoRef||!PL_OBRA_EXEC.has(statusOf(o)))continue;const t=planTrechoEquip(_pl.B,_pl.R,o.equipamentoRef);if(t)m.set(o.id,{o,t});}return m;}
+const _plCruza=(a,b)=>{for(const x of a)if(b.has(x))return true;return false;};
+function _plPvntLinhas(){if(!_pl.pvnt||!_pl.B||!_pl.R)return[];if(_pl._pvntCache&&_pl._pvntCache.R===_pl.R&&_pl._pvntCache.n===obras.length)return _pl._pvntCache.rows;
+  const ot=_plObraTrechos();const dig=s=>String(s||'').replace(/\D/g,'');let semLoc=0;
+  const rows=_pl.pvnt.map(p=>{const t=planTrechoEquip(_pl.B,_pl.R,p.equip);if(!t)semLoc++;
+    const _obras=t?[...ot.values()].filter(x=>_plCruza(x.t.bs,t.bs)).map(x=>x.o):[];
+    const _itens=t?planOportunidadesNoTrecho(_pl.B,_pl.R,p.equip).itens:[];
+    const ob=(typeof obras!=='undefined'?obras:[]).find(o=>!o.cancelado&&((dig(o.numero)&&dig(o.numero)===dig(p.nota))||(o.programa==='PVNT'&&String(o.equipamentoRef||'').trim()===String(p.equip))));
+    return{...p,al:t?.al||'',trecho:t?t.rot:'equip. não localizado',pos:t?.pos||null,_bs:t?.bs||null,_obras,_itens,obrasExec:_obras.map(o=>o.numero||'s/ nº').join(', '),nOport:_itens.length,sppc:ob?(ob.numero||'s/ nº'):''};});
+  _pl.pvntSemLoc=semLoc;_pl._pvntCache={R:_pl.R,n:obras.length,rows};return rows;}
+function _plPvntNoTrecho(bs){if(!bs||!_pl.pvnt)return[];return _plPvntLinhas().filter(p=>p._bs&&_plCruza(p._bs,bs));}
+// ── R2 avulsa: melhoria não apontada pelas análises, a partir de uma obra em execução ──
+const PL_TIPOS_AVULSA=['Seccionamento','Chave de manobra / interligação','Derivação sem chave','Recondutoramento (cabo)','Monofásico → trifásico','Troca / remanejamento de trafo','Poda / faixa','Outra melhoria'];
+window._plAvulsaForm=function(obraId){const el=document.getElementById('plAvulsa');if(!el)return;if(el.innerHTML){el.innerHTML='';return;}
+  el.innerHTML=`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;padding:6px;border:1px dashed var(--border);border-radius:6px">
+    <select id="plAvTipo" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">${PL_TIPOS_AVULSA.map(t=>`<option>${t}</option>`).join('')}</select>
+    <input type="text" id="plAvDesc" placeholder="O que será feito (ex.: instalar chave na rua X)" style="flex:1;min-width:180px;font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+    <button type="button" class="btn btn-primary btn-sm" onclick="_plGerarR2Avulsa('${_plEsc(obraId)}')">Abrir R2</button></div>`;
+  document.getElementById('plAvDesc')?.focus();};
+window._plGerarR2Avulsa=function(obraId){const tipo=document.getElementById('plAvTipo')?.value||'Outra melhoria';const desc=(document.getElementById('plAvDesc')?.value||'').trim();
+  if(!desc){toast('Descreva a melhoria.','warn');return;}
+  const loc=_pl._avisoAtual?.loc||{al:'',trecho:''};const pos=_pl._avisoAtual?.pos||null;
+  const it={key:`AVULSA|${obraId}|${Date.now()}`,tipo,titulo:desc,det:'Aberta manualmente (não apontada pelas análises)',pos,avulsa:true};
+  _plGerarR2(obraId,[it],loc);};
 function _plIdOp(key){return key.replace(/[\/\s]+/g,'_').slice(0,700);}
 function _plStatusOp(key){const d=_pl.ops&&_pl.ops.get(key);if(!d)return{base:'Planejada',txt:'Planejada'};
   if(d.decisao==='descartada')return{base:'Descartada',txt:'Descartada'+(d.motivo?` (${d.motivo})`:''),d};
@@ -12791,7 +12899,9 @@ function _plOportLinhas(){const out=[];if(!_pl.R)return out;const vistos=new Set
       out.push({...it,obraId:o.id,obraNum:o.numero||'s/ nº',obraTipo:o.tipo||'',obraStatus:st,al:r.loc.al,trecho:r.loc.trecho,situacao:s.txt,situacaoBase:s.base,r2:s.d?.obraMelhoriaNum||''});}}
   // decisões já tomadas cuja obra cliente não está mais ativa
   if(_pl.ops)for(const d of _pl.ops.values()){if(vistos.has(d.key+'|'+d.obraClienteId))continue;const s=_plStatusOp(d.key);
-    out.push({key:d.key,tipo:d.tipo,titulo:d.titulo,det:d.det,pos:d.pos,obraId:d.obraClienteId,obraNum:d.obraClienteNum||'',obraTipo:'',obraStatus:'(encerrada)',al:d.al||'',trecho:d.trecho||'',situacao:s.txt,situacaoBase:s.base,r2:d.obraMelhoriaNum||''});}
+    const oc=(typeof obras!=='undefined'?obras:[]).find(x=>x.id===d.obraClienteId);
+    out.push({key:d.key,tipo:d.tipo+(String(d.key).startsWith('AVULSA|')?' (avulsa)':''),titulo:d.titulo,det:d.det,pos:d.pos,obraId:d.obraClienteId,obraNum:d.obraClienteNum||'',obraTipo:oc?.tipo||'',obraStatus:oc?statusOf(oc):'(encerrada)',al:d.al||'',trecho:d.trecho||'',situacao:s.txt,situacaoBase:s.base,r2:d.obraMelhoriaNum||''});}
+  if(_pl.pvnt){const ot=_plObraTrechos();for(const r of out){const x=ot.get(r.obraId);if(x)r.pvnt=_plPvntNoTrecho(x.t.bs).map(p=>p.nota).join(', ');}}
   const ordem={Planejada:0,Vinculada:1,'Em execução':2,Concluída:3,Descartada:4};out.sort((a,b)=>(ordem[a.situacaoBase]-ordem[b.situacaoBase])||String(a.obraNum).localeCompare(String(b.obraNum)));
   const n=k=>out.filter(r=>r.situacaoBase===k).length;_pl.oportResumo=`${n('Planejada')} a decidir · ${n('Em execução')} em execução`;return out;}
 
@@ -12803,29 +12913,34 @@ async function _plAvisoObra(obraId){
   const pendBanner=_plPend&&!obraId?`<div style="background:rgba(124,106,247,.12);border:1px solid #7c6af7;border-radius:8px;padding:8px 10px;margin:6px 0;font-size:11px">🔗 Nova R2 de melhoria vinculada à obra <b>${_plEsc(_plPend.cliente.numero)}</b> (${_plPend.itens.length} oportunidade${_plPend.itens.length>1?'s':''}). Preencha o nº da obra e os demais dados e salve. <a href="#" onclick="_plCancelarPend();return false" style="color:#7c6af7">Cancelar vínculo</a></div>`:'';
   box.innerHTML=pendBanner;if(_plPend&&!obraId)return;
   const obra=obraId?obras.find(o=>o.id===obraId):null;const nr=(document.getElementById('oEquipRef')?.value||'').trim()||obra?.equipamentoRef;
+  if(obra&&!PL_OBRA_EXEC.has(statusOf(obra))){box.innerHTML='';return;} // só obras em execução geram oportunidades
   if(!nr)return;box.innerHTML='<div style="font-size:10px;color:var(--muted);margin:4px 0">Verificando oportunidades de melhoria no trecho…</div>';
   let ok=false;try{ok=await _plGarantirBase();}catch(e){console.warn(e);}
   if(!ok){box.innerHTML='';return;}
-  const r=planOportunidadesNoTrecho(_pl.B,_pl.R,nr);
-  if(!r.loc){box.innerHTML=`<div style="font-size:10px;color:var(--muted);margin:4px 0">Equipamento ${_plEsc(nr)} não localizado na base de planejamento.</div>`;return;}
-  if(!r.itens.length){box.innerHTML=`<div style="font-size:10px;color:var(--muted);margin:4px 0">✓ Nenhuma oportunidade de melhoria apontada no trecho ${_plEsc(r.loc.trecho)} (${_plEsc(r.loc.al)}).</div>`;return;}
+  const r=planOportunidadesNoTrecho(_pl.B,_pl.R,nr);const tr=r.loc?planTrechoEquip(_pl.B,_pl.R,nr):null;
+  const pv=tr?_plPvntNoTrecho(tr.bs).filter(p=>!obra||p.sppc!==obra.numero):[];
+  const pvHtml=pv.length?`<div style="background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.45);border-radius:8px;padding:6px 10px;margin:6px 0;font-size:11px">📌 <b>PVNT prevista neste trecho:</b> ${pv.map(p=>`nota ${_plEsc(p.nota)} (equip. ${_plEsc(p.equip)}${p.desc?' · '+_plEsc(p.desc.slice(0,60)):''}${p.sppc?' · já no SPPC: '+_plEsc(p.sppc):''})`).join('; ')}</div>`:'';
+  const salvo=!!obra;const exec=salvo&&PL_OBRA_EXEC.has(statusOf(obra))&&!obra.obraClienteVinculada;
+  const avBtn=exec?`<button type="button" class="btn btn-secondary btn-sm" onclick="_plAvulsaForm('${_plEsc(obra.id)}')" title="Melhoria que não foi apontada pelas análises">➕ Abrir R2 avulsa</button>`:'';
+  _pl._avisoAtual={itens:r.itens,loc:r.loc||{al:'',trecho:''},pos:tr?.pos||null};
+  if(!r.loc||!r.itens.length){box.innerHTML=pvHtml+`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--muted);margin:4px 0">${!r.loc?`Equipamento ${_plEsc(nr)} não localizado na base de planejamento.`:`✓ Nenhuma oportunidade de melhoria apontada no trecho ${_plEsc(r.loc.trecho)} (${_plEsc(r.loc.al)}).`} ${avBtn}</div><div id="plAvulsa"></div>`;return;}
   const linhas=r.itens.map((it,i)=>{const s=_plStatusOp(it.key);const livre=s.base==='Planejada';
     return `<label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-top:1px solid var(--border);font-size:11px;cursor:${livre?'pointer':'default'}">
       <input type="checkbox" class="plOpChk" data-i="${i}" ${livre?'checked':'disabled'} style="margin-top:2px">
       <span style="flex:1"><b>${_plEsc(it.tipo)}</b> — ${_plEsc(it.titulo)}<br><span style="color:var(--muted);font-size:10px">${_plEsc(it.det)}</span></span>
       <span style="font-size:10px;white-space:nowrap;color:${livre?'#ef4444':s.base==='Descartada'?'var(--muted)':'#3b82f6'}">${_plEsc(s.txt)}</span></label>`;}).join('');
-  const salvo=!!obra;
-  box.innerHTML=`<details open style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.45);border-radius:8px;padding:8px 10px;margin:6px 0 10px">
+  box.innerHTML=pvHtml+`<details open style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.45);border-radius:8px;padding:8px 10px;margin:6px 0 10px">
     <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#d97706">⚠️ ${r.itens.length} oportunidade${r.itens.length>1?'s':''} de melhoria no trecho ${_plEsc(r.loc.trecho)} · ${_plEsc(r.loc.al)}</summary>
     <div style="margin-top:6px">${linhas}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
       ${salvo?`<button type="button" class="btn btn-primary btn-sm" onclick="_plGerarR2('${_plEsc(obra.id)}')">➕ Gerar R2 de melhoria com as selecionadas</button>
       <input type="text" id="plOpMotivo" placeholder="Motivo do descarte" style="flex:1;min-width:140px;font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
-      <button type="button" class="btn btn-secondary btn-sm" onclick="_plDescartar('${_plEsc(obra.id)}')">Descartar selecionadas</button>`
+      <button type="button" class="btn btn-secondary btn-sm" onclick="_plDescartar('${_plEsc(obra.id)}')">Descartar selecionadas</button>${avBtn}`
       :`<span style="font-size:10px;color:var(--muted)">Salve a obra para poder gerar a R2 vinculada ou descartar.</span>`}
-    </div></details>`;
-  _pl._avisoAtual={itens:r.itens,loc:r.loc};}
+    </div><div id="plAvulsa"></div></details>`;}
 function _plSelecionadas(){const it=_pl._avisoAtual?.itens||[];return [...document.querySelectorAll('#plAvisoObra .plOpChk:checked')].map(c=>it[+c.dataset.i]).filter(Boolean);}
+window.plAbrirObraAvulsa=()=>{const id=document.getElementById('plAvObra')?.value;if(!id){toast('Escolha a obra em execução.','warn');return;}
+  openObraModal(id);setTimeout(()=>{const t=setInterval(()=>{if(document.getElementById('plAvulsa')){clearInterval(t);_plAvulsaForm(id);document.getElementById('plAvisoObra')?.scrollIntoView({block:'nearest'});}},150);setTimeout(()=>clearInterval(t),8000);},50);};
 window._plCancelarPend=()=>{_plPend=null;const b=document.getElementById('plAvisoObra');if(b)b.innerHTML='';toast('Vínculo cancelado.','warn');};
 window._plDescartar=async function(obraId){const sel=_plSelecionadas();if(!sel.length){toast('Selecione ao menos uma oportunidade.','warn');return;}
   const motivo=(document.getElementById('plOpMotivo')?.value||'').trim();if(!motivo){toast('Informe o motivo do descarte.','warn');return;}
@@ -12833,15 +12948,15 @@ window._plDescartar=async function(obraId){const sel=_plSelecionadas();if(!sel.l
   try{for(const it of sel){const reg={key:it.key,tipo:it.tipo,titulo:it.titulo,det:it.det,pos:it.pos||null,al:loc.al,trecho:loc.trecho,decisao:'descartada',motivo,obraClienteId:obraId,obraClienteNum:o?.numero||'',em:serverTimestamp(),por:me.nome||me.email};
       await setDoc(doc(db,'oportunidades',_plIdOp(it.key)),reg);_pl.ops.set(it.key,reg);}
     _pl.oportResumo=null;toast(`${sel.length} oportunidade(s) descartada(s).`);_plAvisoObra(obraId);}catch(e){toast('Erro ao descartar: '+e.message,'err');}};
-window._plGerarR2=function(obraId){const sel=_plSelecionadas();if(!sel.length){toast('Selecione ao menos uma oportunidade.','warn');return;}
+window._plGerarR2=function(obraId,itens,loc){const sel=Array.isArray(itens)?itens:_plSelecionadas();if(!sel.length){toast('Selecione ao menos uma oportunidade.','warn');return;}
   const c=obras.find(x=>x.id===obraId);if(!c)return;
-  _plPend={itens:sel,loc:_pl._avisoAtual.loc,cliente:{id:c.id,numero:c.numero||'',cidade:c.cidade||'',empreiteira:c.empreiteira||'',fiscal:c.fiscal||'',equipamentoRef:c.equipamentoRef||''}};
+  _plPend={itens:sel,loc:loc||_pl._avisoAtual?.loc||{al:'',trecho:''},cliente:{id:c.id,numero:c.numero||'',cidade:c.cidade||'',empreiteira:c.empreiteira||'',fiscal:c.fiscal||'',equipamentoRef:c.equipamentoRef||''}};
   _plOpenOrig(); // nova obra
   const set=(id,v)=>{const el=document.getElementById(id);if(el&&v!=null&&v!==''){el.value=v;el.dispatchEvent(new Event('change',{bubbles:true}));}};
   set('oTipo','R2');try{toggleEnquadramento();}catch(e){}set('oPrograma','Melhoria');set('oCidade',c.cidade);set('oEmp',c.empreiteira);set('oEquipRef',c.equipamentoRef);
   const fs=document.getElementById('oFiscalSelect');if(fs&&c.fiscal){if([...fs.options].some(o=>o.value===c.fiscal))set('oFiscalSelect',c.fiscal);else{set('oFiscalSelect','outro');try{toggleFiscalOutro();}catch(e){}set('oFiscalNome',c.fiscal);}}
   set('oAbertura',new Date().toISOString().slice(0,10));
-  const tipos=[...new Set(sel.map(s=>s.tipo))].join(', ');set('oDescricao',`Melhoria vinc. obra ${c.numero}: ${tipos}`.slice(0,80));
+  const tipos=sel.length===1&&sel[0].avulsa?`${sel[0].tipo} - ${sel[0].titulo}`:[...new Set(sel.map(s=>s.tipo))].join(', ');set('oDescricao',`Melhoria vinc. obra ${c.numero}: ${tipos}`.slice(0,80));
   _plAvisoObra(null);};
 async function _plConcluirVinculo(pend,numero){
   const s=await getDocs(query(collection(db,'obras'),where('numero','==',numero)));const cand=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>o.id!==pend.cliente.id&&o.tipo==='R2');
