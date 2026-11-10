@@ -58,11 +58,11 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && perfil() == 'gerente';
     }
+    // Gerenciamento de Pedidos (Etapa 3): adm_odi passa a poder atualizar (análise documental)
     match /pedidos/{id} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
-      // Etapa 2: estagiario pode atualizar (checklist documental). adm_odi entra na próxima etapa (análise documental).
-      allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente' || perfil() == 'estagiario');
+      allow update: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente' || perfil() == 'estagiario' || perfil() == 'adm_odi');
       allow delete: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
     }
     // v2612: Mapa da Rede — redes processadas a partir do KMZ (gerente envia, todos leem)
