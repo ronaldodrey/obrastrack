@@ -937,9 +937,10 @@
 
 <!-- MODAL PEDIDO -->
 <div class="overlay" id="ovPedido">
- <div class="modal">
+ <div class="modal" style="max-width:900px;width:96vw">
   <h2 id="pedidoModalTit">Novo Pedido</h2>
   <input type="hidden" id="pedidoId">
+  <div id="pdSituacao"></div>
   <div class="modal-section">
     <div class="modal-section-title">📋 Identificação do Pedido</div>
     <div class="fg-grid">
@@ -1077,11 +1078,51 @@
     <button type="button" class="btn btn-primary btn-sm" id="btnSalvarChecklist" style="margin-top:10px" onclick="salvarAcompanhamentoChecklist()">Salvar Acompanhamento</button>
   </div>
 
+  <details class="modal-section pd-own-perm" id="pdSecAnaliseRural" style="display:none">
+    <summary class="modal-section-title" style="cursor:pointer">📑 Análise Documental Detalhada — Ligação nova Rural (Adm_ODI / Estagiário)</summary>
+    <div id="pdAnaliseRuralBody" style="margin-top:8px"></div>
+  </details>
+  <details class="modal-section pd-own-perm" id="pdSecAnaliseProjeto" style="display:none">
+    <summary class="modal-section-title" style="cursor:pointer">📐 Análise de Projeto (Gerente)</summary>
+    <div id="pdAnaliseProjetoBody" style="margin-top:8px"></div>
+  </details>
+  <details class="modal-section pd-own-perm" id="pdSecEnquadramento" style="display:none">
+    <summary class="modal-section-title" style="cursor:pointer">🎯 Enquadramento (Gerente) — encerra a contagem do prazo</summary>
+    <div id="pdEnquadramentoBody" style="margin-top:8px"></div>
+  </details>
+  <details class="modal-section pd-own-perm" id="pdSecReanalise" style="display:none">
+    <summary class="modal-section-title" style="cursor:pointer">🔄 Reanálise documental</summary>
+    <div id="pdReanaliseBody" style="margin-top:8px"></div>
+  </details>
+  <details class="modal-section pd-own-perm" id="pdSecTimeline" style="display:none">
+    <summary class="modal-section-title" style="cursor:pointer">🕒 Linha do tempo</summary>
+    <div id="pdTimelineBody" style="margin-top:8px"></div>
+  </details>
+
   <div class="modal-footer">
     <button class="btn btn-danger" id="btnExcluirPedido" style="display:none;margin-right:auto" onclick="deletePedido()">🗑️ Excluir Pedido</button>
     <button class="btn btn-secondary" onclick="closePedidoModal()">Fechar</button>
     <button class="btn btn-primary" id="btnSalvarPedido" onclick="savePedido()">Salvar</button>
   </div>
+ </div>
+</div>
+
+<!-- MODAL PARÂMETROS DE PEDIDOS -->
+<div class="overlay" id="ovPedidoParams">
+ <div class="modal modal-sm">
+  <h2>Parâmetros de Pedidos</h2>
+  <div class="fg-grid">
+    <div class="fg"><label>Prazo de referência do projetista (dias)</label><input type="number" id="prmPrazoProjetista" min="1"></div>
+    <div class="fg"><label>Prazo de cada reanálise (dias)</label><input type="number" id="prmPrazoReanalise" min="1"></div>
+  </div>
+  <button type="button" class="btn btn-primary btn-sm" onclick="pdSalvarPrazos()">Salvar prazos</button>
+  <div class="modal-section-title" style="margin-top:16px">Justificativas de 2º ponto (pré-definidas)</div>
+  <div id="prmJustLista" style="margin:8px 0"></div>
+  <div style="display:flex;gap:8px">
+    <input type="text" id="prmNovaJust" placeholder="Nova justificativa" style="flex:1">
+    <button type="button" class="btn btn-secondary btn-sm" onclick="pdAddJust()">+ Adicionar</button>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="pdFecharParams()">Fechar</button></div>
  </div>
 </div>
 
