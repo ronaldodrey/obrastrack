@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════
 //  SPPC_ARLAG — app.js
-console.log('%c[SPPC] app.js v2619 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
+console.log('%c[SPPC] app.js v2620 carregado', 'color:#7c6af7;font-weight:bold;font-size:14px');
 // ══════════════════════════════════════════════════════
 import { initializeApp }   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail }
@@ -291,6 +291,7 @@ async function iniciarApp(){
 
   await loadEmpreiteiras();
   popularSelectEmpreiteiras();
+  syncDiretorioFiscais(); // gerente publica nome→e-mail dos fiscais (usado nos avisos de kaffa/conclusão)
 
   // pgAbertura: somente gerente | pgAnalise: gerente, fiscais e empreiteira
   const isAdmOdi         = me.perfil==='adm_odi';
@@ -2092,6 +2093,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'proc_cancelamento')   baseList = baseList.filter(o=>o.processoCancelamento&&!o.cancelado);
   else if(_filtroRapidoAtivo === 'prob_executivo')      baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.impedimento&&!o.conclusao);
   else if(_filtroRapidoAtivo === 'ag_armazenar')        baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
+  else if(_filtroRapidoAtivo === 'via_fechamento')      baseList = baseList.filter(o=>o.viaFechamento&&!o.cancelado);
   let list = aplicarFiltros(baseList);
   // Fix #6: apply column sort
   if(_sortCol){
@@ -2174,7 +2176,7 @@ function renderObras(){
           onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obra(s) selecionada(s)'; })()">
       </td>
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
-      <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong>${chatBadge}</td>
+      <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong>${chatBadge}${o.viaFechamento?`<span title="Via deixada para fechamento em ${fmtTxt(o.viaFechamentoEm)}${o.viaFechamentoPor?' por '+o.viaFechamentoPor:''}" style="margin-left:4px;cursor:help">📁</span>`:''}</td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
       <td style="font-size:10px;color:var(--muted)">${o.enquadramento||'—'}</td>
       <td style="font-size:10px">${o.programa?`<span style="background:${{'PODI':'#7c6af7','Mono-Tri':'#F59E0B','Regulatório':'#22C55E','Melhoria':'#3B82F6'}[o.programa]||'#6b7280'};color:#fff;padding:1px 7px;border-radius:8px;font-size:9px">${o.programa}</span>`:'—'}</td>
@@ -3257,7 +3259,9 @@ function renderListaCadastrosEnviados(){
   const obraId=document.getElementById('obraId')?.value;
   const obra=obras.find(o=>o.id===obraId);
   // Compatibilidade retroativa: obras sem array mas com campo escalar legado
-  const existing=obra?.cadastrosEnviados||
+  // ODI: o fiscal registra o envio pelo painel de ações (campo dataCadastro) e o array fica vazio —
+  // por isso o fallback vale também para array vazio (antes o Genesis não via a data).
+  const existing=(obra?.cadastrosEnviados&&obra.cadastrosEnviados.length)?obra.cadastrosEnviados:
     (obra?.dataCadastro?[{id:'legado-env-1',data:obra.dataCadastro,tipo:obra.tipoCadastro||'final',legado:true}]:[]);
   const all=[...existing,..._cadEnvPendentes];
 
@@ -3790,7 +3794,17 @@ window.saveObra=async function(){
     // adm_odi: armazenamento ODI — apenas ao editar obras existentes (nova obra usa patch completo)
     if(me.perfil==='adm_odi' && isEdit){
       const finalCheckEl=document.getElementById('oArmazenado');
-      patch={ armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
+      // Identificação da obra ODI (fiscal, empreiteira, datas, prazo…) — adm_odi pode corrigir depois de aberta
+      const _identODI={};
+      if(obraAntiga?.tipo==='ODI'){
+        ['numero','tipo','cidade','empreiteira','fiscal','dataAbertura','prazoExecucao','dataLimite','usc','ulv',
+         'descricao','enquadramento','programa','equipamentoRef','descricaoODI','descricaoLivreODI'].forEach(k=>{
+          if(patch[k]!==undefined) _identODI[k]=patch[k];
+        });
+        if(!_identODI.numero) delete _identODI.numero;
+        if(!_identODI.tipo) delete _identODI.tipo;
+      }
+      patch={ ..._identODI, armazenado:finalCheckEl&&!finalCheckEl.disabled?gChk('oArmazenado'):obraAntiga?.armazenado||false,
         contratosAssinado:gChk('oContratosAssinado'),
         projetosAsBuilt:gChk('oProjetosAsBuilt'),
         caixaArmazenada:g('oCaixaArmazenada'),
@@ -3837,7 +3851,7 @@ window.saveObra=async function(){
       // Email: kaffa registrado pela empreiteira → avisa fiscal
       // Nota: _kaffasPendentes já foi limpado na linha acima (empreiteira path).
       // Compara tamanhos antigo vs. novo para detectar se houve adição.
-      if(me.perfil==='empreiteira' && patch.kaffaEntries){
+      if((me.perfil==='empreiteira'||me.perfil==='gerente'||me.perfil==='adm_odi') && patch.kaffaEntries){
         // Apenas os kaffas realmente novos (proteção contra slice(-0) que retorna array completo)
         const qtdAntigos = (obraAntiga?.kaffaEntries||[]).length;
         const qtdNovos   = patch.kaffaEntries.length - qtdAntigos;
@@ -3907,10 +3921,10 @@ async function renderUsers(){
           <div class="ut-email">${u.email||'—'}</div>
           <div class="ut-role"><span class="role-badge ${rc}">${u.perfil}</span></div>
           <div class="ut-vinc">${u.vinculo||'—'}</div>
-          <div class="ut-acts">
+          <div class="ut-acts">${(me.perfil==='adm_odi'&&u.perfil!=='empreiteira')?'<span style="font-size:10px;color:var(--muted)">somente Gerente</span>':`
             <button class="btn btn-secondary btn-sm" onclick="openUserModal('${u.uid}')" title="Editar">✏️</button>
             <button class="btn btn-secondary btn-sm" onclick="resetSenhaUsuario('${u.email||''}')" title="Enviar redefinição de senha" style="font-size:10px">🔑</button>
-            ${u.uid!==me.uid?`<button class="btn btn-danger btn-sm" onclick="delUser('${u.uid}')">🗑️</button>`:''}
+            ${u.uid!==me.uid?`<button class="btn btn-danger btn-sm" onclick="delUser('${u.uid}')">🗑️</button>`:''}`}
           </div>
         </div>`;
       }).join('')
@@ -3942,6 +3956,12 @@ window.openUserModal=async function(uid){
     }
     note.style.display='block';
   } else { note.style.display='none'; }
+  // Adm_ODI: somente usuários de empreiteira
+  const _selPerfil=document.getElementById('uPerfil');
+  if(me.perfil==='adm_odi'){
+    if(!isEdit){ _selPerfil.value='empreiteira'; onPerfilChange(); }
+    _selPerfil.disabled=true;
+  } else { _selPerfil.disabled=false; }
   document.getElementById('ovUser').classList.add('open');
 };
 window.closeUserModal=function(){ document.getElementById('ovUser').classList.remove('open'); };
@@ -3965,6 +3985,8 @@ window.saveUser=async function(){
     const vinculo=perfil==='empreiteira'?document.getElementById('uVincEmp').value
       :(perfil==='fiscal'||perfil==='fiscal_adm')?document.getElementById('uVincFis').value.trim():'';
     if(!nome||!email||!perfil){ toast('Preencha todos os campos.','err'); return; }
+    if(me.perfil==='adm_odi' && perfil!=='empreiteira'){ toast('O perfil Adm_ODI só pode criar/editar usuários de empreiteira.','err'); return; }
+    if(perfil==='empreiteira' && !vinculo){ toast('Selecione a empreiteira vinculada.','err'); return; }
 
     if(isEdit){
       // Atualiza Firestore (nome, perfil, vínculo)
@@ -3996,7 +4018,7 @@ window.saveUser=async function(){
       await setDoc(doc(db,'usuarios',cred.user.uid),{nome,email,perfil,vinculo,criadoEm:serverTimestamp()});
       toast(`✓ Usuário ${nome} criado! Login: ${email}`);
     }
-    closeUserModal(); await renderUsers();
+    closeUserModal(); await renderUsers(); syncDiretorioFiscais();
   }catch(e){
     const msgs={
       'auth/email-already-in-use':'E-mail já cadastrado no sistema.',
@@ -4037,7 +4059,7 @@ window.recriarContaUsuario=async function(uid, novoEmail, novaSenha, nome, perfi
 window.delUser=async function(uid){
   if(uid===me.uid){ toast('Não pode remover a si mesmo.','err'); return; }
   if(!confirm('Remover este usuário?')) return;
-  await deleteDoc(doc(db,'usuarios',uid)); toast('Usuário removido.','warn'); await renderUsers();
+  await deleteDoc(doc(db,'usuarios',uid)); toast('Usuário removido.','warn'); await renderUsers(); syncDiretorioFiscais();
 };
 
 // ── EMAILS ────────────────────────────────────────────
@@ -4103,9 +4125,42 @@ async function enviarEmail(assunto, mensagem, toEmail, ccEmail){
   }
 }
 
+// ── Diretório de e-mails dos fiscais ────────────────────────────────
+// Empreiteira/fiscal não conseguem ler a coleção "usuarios" (regra do Firestore), então a lista
+// "users" ficava vazia e o fiscal nunca era encontrado. O Gerente publica um diretório
+// (config/diretorioFiscais: nome do fiscal → e-mail) que qualquer usuário logado consegue ler.
+let _dirFiscais=null;
+async function syncDiretorioFiscais(){
+  if(!me || me.perfil!=='gerente') return;
+  try{
+    await loadUsers();
+    const lista=users.filter(u=>(u.perfil==='fiscal'||u.perfil==='fiscal_adm')&&u.vinculo&&u.email)
+      .map(u=>({nome:u.vinculo,email:u.email}));
+    await setDoc(doc(db,'config','diretorioFiscais'),{lista,atualizadoEm:serverTimestamp()});
+    _dirFiscais=lista;
+  }catch(e){ console.warn('[SPPC Email] syncDiretorioFiscais:',e.message); }
+}
+async function emailDoFiscal(nome){
+  if(!nome) return null;
+  const alvo=pdNorm(nome);
+  let u=users.find(x=>(x.perfil==='fiscal'||x.perfil==='fiscal_adm')&&x.email&&pdNorm(x.vinculo)===alvo);
+  if(u) return u.email;
+  try{
+    const s=await getDoc(doc(db,'config','diretorioFiscais'));
+    _dirFiscais=s.exists()?(s.data().lista||[]):[];
+  }catch(e){ console.warn('[SPPC Email] diretório de fiscais:',e.message); _dirFiscais=_dirFiscais||[]; }
+  const d=_dirFiscais.find(x=>pdNorm(x.nome)===alvo);
+  return d?d.email:null;
+}
+function _quemInformou(obra){
+  if(me?.perfil==='empreiteira') return `A empreiteira ${obra.empreiteira}`;
+  return `${me?.nome||'Usuário'} (${me?.perfil||''})`;
+}
+
 async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
   if(!obra.fiscal){ console.warn('[Email Kaffa] Obra sem fiscal.'); return; }
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  const _emF=await emailDoFiscal(obra.fiscal);
+  const fiscal = _emF?{email:_emF}:null;
   if(!fiscal?.email){
     console.warn('[Email Kaffa] Fiscal não encontrado ou sem email. fiscal vinculo=',obra.fiscal,'users=',users.map(u=>u.vinculo+'('+u.perfil+')'));
     // Tenta fallback: email do gerente como destinatário
@@ -4127,7 +4182,7 @@ async function enviarEmailKaffa(obra, tipoKaffa, dataKaffa){
     `SPPC ARLAG – ${tipoLabel} registrado | Obra ${obra.numero} – ${obra.cidade}`,
     `Olá, Fiscal!
 
-A empreiteira ${obra.empreiteira} registrou o seguinte:
+${_quemInformou(obra)} registrou o seguinte:
 
 • Tipo: ${tipoLabel}
 • Data: ${fmtTxt(dataKaffa)}
@@ -4142,9 +4197,18 @@ Aguarda medição correspondente.`,
 
 async function enviarEmailConclusao(obra){
   if(!obra.fiscal) return;
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  const _emF=await emailDoFiscal(obra.fiscal);
+  const fiscal = _emF?{email:_emF}:null;
   if(!fiscal?.email){
     console.warn('[Email Conclusão] Fiscal não encontrado ou sem email. vinculo=',obra.fiscal);
+    const gerEmail = EMAILJS_CONFIG?.emailGerente;
+    if(gerEmail){
+      await enviarEmail(
+        `SPPC ARLAG – Conclusão sem fiscal | Obra ${obra.numero}`,
+        `Atenção: conclusão registrada na obra ${obra.numero} (${obra.cidade}) em ${fmtTxt(obra.conclusao)}, mas o fiscal ${obra.fiscal||'—'} não foi localizado no diretório de e-mails. Confira o "Nome do Fiscal" no cadastro de usuários (deve ser igual ao da obra).`,
+        gerEmail, ''
+      );
+    }
     return;
   }
   // E-mail imediato — sem verificação de duplicata (disparado por mudança de estado)
@@ -4152,7 +4216,7 @@ async function enviarEmailConclusao(obra){
     `SPPC ARLAG – Obra concluída | ${obra.numero} – ${obra.cidade}`,
     `Olá, Fiscal!
 
-A empreiteira ${obra.empreiteira} informou conclusão da obra.
+${_quemInformou(obra)} informou a conclusão da obra${obra.tipo==='ODI'?' (ODI)':''}.
 
 • Obra: ${obra.numero}
 • Cidade: ${obra.cidade}
@@ -4175,8 +4239,10 @@ async function enviarEmailPendencia(obra){
   if(await jaEnviou(chave)) return;
   const tipos = (obra.tiposPendencia||[obra.tipoPendencia]).filter(Boolean).join(', ');
   // CC: fiscal que registrou a pendência + gerente
-  const fiscalPend = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
-  const ccEmails = [fiscalPend?.email, EMAILJS_CONFIG.emailGerente].filter(Boolean).join(',');
+  // (usa o diretório de fiscais — a lista "users" fica vazia para o perfil fiscal — e o e-mail de quem está logado)
+  const _emFiscObra = await emailDoFiscal(obra.fiscal);
+  const _emQuemRegistrou = (me?.perfil==='fiscal'||me?.perfil==='fiscal_adm') ? (me.email||'') : '';
+  const ccEmails = [...new Set([_emQuemRegistrou, _emFiscObra, EMAILJS_CONFIG.emailGerente].filter(Boolean))].join(',');
   await enviarEmail(
     `SPPC ARLAG – Pendência registrada | Obra ${obra.numero} – ${obra.cidade}`,
     `Atenção, Empreiteira!
@@ -4195,7 +4261,8 @@ Acesse o sistema SPPC ARLAG para regularizar.`,
 }
 
 async function enviarEmailRegularizacao(obra){
-  const fiscal = users.find(u=>u.vinculo===obra.fiscal&&(u.perfil==='fiscal'||u.perfil==='fiscal_adm'));
+  const _emFR = await emailDoFiscal(obra.fiscal);
+  const fiscal = _emFR?{email:_emFR}:null;
   if(!fiscal?.email){ console.warn('[Email Regularização] Fiscal não encontrado ou sem email.'); return; }
   const chave = `regularizacao_${obra.id}`;
   if(await jaEnviou(chave)) return;
@@ -4463,7 +4530,7 @@ window.filtroRapido=function(tipo){
   const btnLimpar=document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display=tipo?'inline-flex':'none';
   const resumo=document.getElementById('filtrosResumo');
-  const labels={'sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','ag_armazenar':'Ag. Armazenar','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
+  const labels={'via_fechamento':'Via deixada para fechamento','sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','ag_armazenar':'Ag. Armazenar','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
   if(resumo) resumo.textContent=tipo?'Filtro rápido: '+(labels[tipo]||tipo):'';
   renderObras();
 };
@@ -4528,7 +4595,34 @@ window.abrirBulk = function(modo){
   document.getElementById('bulkBar').style.display = 'block';
   document.getElementById('bulkData').value = '';
   document.getElementById('bulkCount').textContent = '0 obras selecionadas';
+  // Colar lista de obras: disponível nas Medidas em Lote (70 / 230 / 280)
+  const _bc=document.getElementById('btnBulkColar'); if(_bc) _bc.style.display=(modo==='medidas')?'inline-flex':'none';
+  const _bw=document.getElementById('bulkColarWrap'); if(_bw) _bw.style.display='none';
+  const _bt=document.getElementById('bulkColarTxt'); if(_bt) _bt.value='';
+  const _bi=document.getElementById('bulkColarInfo'); if(_bi) _bi.innerHTML='';
   window.renderObras();
+};
+// ── Medidas em lote: obras coladas em coluna ──────────────────────────
+function bulkColadas(){
+  const w=document.getElementById('bulkColarWrap'); const t=document.getElementById('bulkColarTxt');
+  if(!w||!t||w.style.display==='none'||window._bulkMode!=='medidas') return {ids:[],naoAchadas:[],total:0};
+  const nums=[...new Set((t.value||'').split(/[^0-9A-Za-z]+/).map(x=>x.trim()).filter(Boolean))];
+  const vis=visibleObras(); const ids=[], naoAchadas=[];
+  nums.forEach(n=>{ const o=vis.find(x=>String(x.numero||'').trim()===n); if(o) ids.push(o.id); else naoAchadas.push(n); });
+  return {ids,naoAchadas,total:nums.length};
+}
+window.bulkToggleColar=function(){
+  const w=document.getElementById('bulkColarWrap'); if(!w) return;
+  w.style.display=w.style.display==='none'?'block':'none';
+  if(w.style.display==='block') document.getElementById('bulkColarTxt')?.focus();
+  bulkColarPreview();
+};
+window.bulkColarPreview=function(){
+  const el=document.getElementById('bulkColarInfo'); if(!el) return;
+  const r=bulkColadas();
+  if(!r.total){ el.innerHTML=''; return; }
+  el.innerHTML=`<div style="color:#22C55E;font-weight:700">✅ ${r.ids.length} obra(s) localizada(s)</div>`+
+    (r.naoAchadas.length?`<div style="color:#EF4444;font-weight:700;margin-top:4px">❌ ${r.naoAchadas.length} não encontrada(s) no sistema:</div><div style="color:#EF4444;font-family:monospace">${r.naoAchadas.join(', ')}</div>`:'');
 };
 
 function fecharBulk(){
@@ -4546,8 +4640,10 @@ function bulkSelecionadas(){ return [...document.querySelectorAll('.chk-obra:che
 window.confirmarBulk = async function(){
   const modo = window._bulkMode;
   if(!modo){ toast('Nenhum modo de lote ativo.','err'); return; }
-  const ids = bulkSelecionadas();
-  if(!ids.length){ toast('Selecione pelo menos uma obra.','err'); return; }
+  const _col = bulkColadas();
+  const ids = [...new Set([...bulkSelecionadas(), ..._col.ids])];
+  if(!ids.length){ toast(_col.total?'Nenhuma das obras coladas foi encontrada no sistema.':'Selecione (ou cole) pelo menos uma obra.','err'); return; }
+  if(_col.naoAchadas.length && !confirm(`${_col.naoAchadas.length} obra(s) colada(s) não foram encontradas e serão ignoradas:\n${_col.naoAchadas.join(', ')}\n\nAplicar nas ${ids.length} obra(s) localizadas?`)) return;
   const data = document.getElementById('bulkData').value;
   if(!data){ toast('Informe a data.','err'); return; }
   if(data > hojeStr()){ toast('Data não pode ser futura.','err'); return; }
@@ -6460,6 +6556,7 @@ window.exportXLSXFiltrado=function(){
   else if(_filtroRapidoAtivo==='sem_medida230') base=base.filter(o=>o.conclusao&&!o.medida230);
   else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
   else if(_filtroRapidoAtivo==='ag_armazenar')        base=base.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
+  else if(_filtroRapidoAtivo==='via_fechamento')      base=base.filter(o=>o.viaFechamento&&!o.cancelado);
   else if(_filtroRapidoAtivo==='encerradas')          base=base.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo==='proc_cancelamento')   base=base.filter(o=>o.processoCancelamento&&!o.cancelado);
   gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
@@ -10492,6 +10589,18 @@ function renderAcoesODI(obra){
     ));
   }
 
+  // ── 7b. Pendências Documentais — leitura para o Fiscal (repassar à empreiteira) ──
+  if(isFisc && !isAdm){
+    const pendF = obra.pendenciasDocODI||[];
+    if(pendF.length){
+      sections.push(card('📄 Pendências Documentais (informadas pelo Adm_ODI)',
+        `<div style="font-size:9px;color:#EF4444;font-weight:700;margin-bottom:4px">⚠️ ${pendF.length} pendência(s) ativa(s) — repassar à empreiteira se necessário</div>
+         ${pendF.map(p=>`<div style="font-size:11px;padding:2px 0">• ${p==='Outros'&&obra.pendenciaDocOutros?('Outros: '+String(obra.pendenciaDocOutros).replace(/</g,'&lt;')):p}</div>`).join('')}`));
+    } else if(obra.nfEnviadaFlag){
+      sections.push(card('📄 Pendências Documentais','<div style="font-size:9px;color:#22C55E">✅ Sem pendências documentais registradas</div>'));
+    }
+  }
+
   // ── 8. Encaminhamento Devolução Financeira (Adm / Gerente) ──────────
   // Deve ser anterior às medidas 70/230
   const podeDevFin = isAdm && obra.nfLancadaData
@@ -10681,6 +10790,9 @@ window.odiSalvarCampo = async function(obraId, campo, valor){
     if(campo==='armazenado' && valor===true) patch.armazenamentoData = hojeStr();
     await updateDoc(doc(db,'obras',obraId), patch);
     const o = obras.find(x=>x.id===obraId);
+    if(campo==='conclusao' && o && me.perfil!=='fiscal' && me.perfil!=='fiscal_adm'){
+      try{ await enviarEmailConclusao({...o,conclusao:valor}); }catch(e){ console.warn('[Email Conclusão ODI]',e); }
+    }
     if(o){
       o[campo] = valor;
       if(patch.armazenamentoData) o.armazenamentoData = patch.armazenamentoData;
@@ -11086,6 +11198,9 @@ const GERENTES_MUNICIPIOS = {
 const PEDIDOS_PARAMS_PADRAO = {
   prazoProjetistaDias: 15,   // referência: quanto o projetista deveria levar para devolver o projeto
   prazoReanaliseDias: 5,     // prazo para concluir uma reanálise documental
+  prazoAnalistaDias: 15,     // prazo (dias corridos da abertura) para o Analista definir: projeto / liberar sem obra / etc.
+  fatorEstrada: 1.3,         // correção da distância em linha reta (Lages → equipamento) para estimar o percurso por estrada
+  matriculaValidadeDias: 365,// matrícula atualizada há mais que isso gera aviso
   justificativasPrimeiroPonto: [
     'Possui outra unidade consumidora nº X em nome de Y dentro da matrícula',
     'O ponto de solicitação do projeto ficou fora da matrícula apresentada',
@@ -11212,6 +11327,56 @@ function prazoInfo(p){
   return {tipo: pausado?'pausado':(dias<0?'vencido':'ativo'), limite, base, dias, pausado, diasPausados:diasPausadosPedido(p), prazoBase:cfg.prazoDias};
 }
 
+// ── Prazo do Analista (15 dias corridos da abertura; Medida 34 pausa) ──
+function analistaDecidiu(p){ return !!p.acaoAnalista && (p.acaoAnalista!=='Enviado para Projeto' || !!p.dataEncaminhamentoProjetista); }
+function dataDecisaoAnalista(p){ return p.acaoAnalista==='Enviado para Projeto' ? (p.dataEncaminhamentoProjetista||p.dataAcaoAnalista||null) : (p.dataAcaoAnalista||null); }
+function diasPausadosAte(p,ate){
+  let dias=0; const h=pdHojeStr();
+  periodosMedida34(p).forEach(per=>{ let f=per.fim||h; if(ate && f>ate) f=ate; const d=diff(per.inicio,f); if(d>0) dias+=d; });
+  return dias;
+}
+function prazoAnalistaInfo(p){
+  if(!p.dataAberturaPedido) return {tipo:'sem'};
+  const base=pedidosParams.prazoAnalistaDias||15;
+  if(analistaDecidiu(p)){
+    const d=dataDecisaoAnalista(p); if(!d) return {tipo:'decidido',base};
+    const usados=Math.max(0,(diff(p.dataAberturaPedido,d)||0)-diasPausadosAte(p,d));
+    return {tipo:'decidido', data:d, usados, dentro:usados<=base, base};
+  }
+  const paus=diasPausadosPedido(p);
+  const limite=pdAddDias(p.dataAberturaPedido, base+paus);
+  const dias=diff(pdHojeStr(),limite);
+  return {tipo: medida34Ativa(p)?'pausado':(dias<0?'vencido':'ativo'), limite, dias, base, diasPausados:paus};
+}
+
+// ── Pré-análise do Estagiário · pagamento do projeto · distância ──────
+function preAnaliseFeita(p){ return !!(p.preAnalise && p.preAnalise.concluidaEm); }
+function preAnalisePendente(p){ return p.acaoAnalista==='Enviado para Projeto' && !!p.dataRetornoProjetista && !p.reprojetoPendente && !preAnaliseFeita(p); }
+// Lista do que falta pagar/verificar: [{tipo:'projeto'}|{tipo:'reprojeto',n,verificar?}]
+function pagamentosPendentes(p){
+  const out=[];
+  if(p.acaoAnalista!=='Enviado para Projeto' || !p.validacaoGerenteOk) return out;
+  if(!(p.pagamentoProjeto && p.pagamentoProjeto.pagoEm)) out.push({tipo:'projeto'});
+  (p.reprojetos||[]).forEach((r,i)=>{
+    if(!r.pagar) out.push({tipo:'reprojeto',n:i+1,verificar:true});
+    else if(r.pagar==='sim' && !r.pagoEm) out.push({tipo:'reprojeto',n:i+1});
+  });
+  return out;
+}
+const PD_BASE_LAGES=[-27.77826362507065,-50.305400999999996];
+function pdHaversineKm(la1,lo1,la2,lo2){
+  const R=6371,t=Math.PI/180,dLa=(la2-la1)*t,dLo=(lo2-lo1)*t;
+  const h=Math.sin(dLa/2)**2+Math.cos(la1*t)*Math.cos(la2*t)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+// Distância estimada por estrada (ida), Lages → equipamento de referência. null se sem coordenada.
+function pdDistEstimadaKm(p){
+  const la=parseFloat(p.equipLat), lo=parseFloat(p.equipLon);
+  if(isNaN(la)||isNaN(lo)) return null;
+  return pdHaversineKm(PD_BASE_LAGES[0],PD_BASE_LAGES[1],la,lo)*(pedidosParams.fatorEstrada||1.3);
+}
+function pdNumKm(v){ const n=parseFloat(String(v==null?'':v).replace(',','.')); return isNaN(n)?null:n; }
+
 // ── Reanálise / órgãos / campo ───────────────────────
 function reanaliseAberta(p){ return (p.reanalises||[]).find(r=>!r.concluidaEm)||null; }
 function reanalisePrazo(r){ return r? pdAddDias(r.abertaEm, r.prazoDias!=null?r.prazoDias:pedidosParams.prazoReanaliseDias):null; }
@@ -11229,12 +11394,16 @@ function acoesPendentes(p){
   const out=[];
   const add=(resps,texto,extra)=>out.push(Object.assign({resps,texto},extra||{}));
   const acao=p.acaoAnalista;
-  if(!acao){ add(['Analista'],'Definir a ação do pedido (enviar a projeto, liberar sem obra, cancelar ou abrir obra)'); return out; }
+  const pa=prazoAnalistaInfo(p);
+  const paTxt=pa.tipo==='vencido'?' — prazo do analista VENCIDO há '+Math.abs(pa.dias)+' d (era até '+fmtTxt(pa.limite)+')'
+    :pa.tipo==='ativo'?' — até '+fmtTxt(pa.limite)+' (faltam '+pa.dias+' d dos '+pa.base+')'
+    :pa.tipo==='pausado'?' — prazo do analista pausado (Medida 34)':'';
+  if(!acao){ add(['Analista'],'Definir a ação do pedido (enviar a projeto, liberar sem obra, cancelar ou abrir obra)'+paTxt,{atraso:pa.tipo==='vencido'}); return out; }
   if(acao==='Liberado sem Obra'||acao==='Cancelado') return out;
   if(acao==='Abertura de Obra (Loteamento)'||acao==='Abertura de Obra (Iluminação Pública)'){
     add(['Adm_ODI'],'Tratar como obra ODI ('+(acao.indexOf('Loteamento')>=0?'Loteamento':'Iluminação Pública')+')'); return out;
   }
-  if(!p.dataEncaminhamentoProjetista){ add(['Analista'],'Definir o projetista e encaminhar o pedido para projeto'); return out; }
+  if(!p.dataEncaminhamentoProjetista){ add(['Analista'],'Definir o projetista e encaminhar o pedido para projeto'+paTxt,{atraso:pa.tipo==='vencido'}); return out; }
   const rural=pedidoEhRural(p);
   const g=gerenteDoMunicipio(p.municipio);
   const checklistOk=checklistConcluidoOuDispensado(p);
@@ -11249,7 +11418,7 @@ function acoesPendentes(p){
     if(!checklistOk) add(['Estagiário','Analista'],'Conferir o checklist documental');
     if(rural && !p.analiseDocumentalConcluida) add(['Adm_ODI','Estagiário'],'Análise documental detalhada (matrícula, passagem, ambiental, desenho)');
     if(terceirosNecessarios(p) && !p.terceirosConferido) add(['Adm_ODI','Estagiário'],'Conferir a autorização de passagem de terceiros');
-    if(p.dataRetornoProjetista && !p.validacaoGerenteOk && !p.reprojetoPendente) add(['Gerente'],'Análise do projeto entregue',{gerente:g});
+    if(p.dataRetornoProjetista && !p.validacaoGerenteOk && !p.reprojetoPendente) add(['Gerente'],'Análise do projeto entregue'+(preAnaliseFeita(p)?'':' (pré-análise do Estagiário ainda não feita — não bloqueia)'),{gerente:g});
     if(p.validacaoGerenteOk && checklistOk && analiseDocumentalOk(p)) add(['Gerente'],'Realizar o enquadramento'+(rural&&p.classificacaoPonto?' ('+p.classificacaoPonto+')':''),{gerente:g});
   }
   orgaosPendentes(p).forEach(o=>{
@@ -11257,6 +11426,12 @@ function acoesPendentes(p){
     add(['Gerente'], e.cienteEm?('Aguardar a liberação do '+o):('Dar ciência e encaminhar ao '+o), {gerente:g, orgao:o});
   });
   if(campoPendente(p)) add(['Gerente'],'Providenciar a verificação em campo',{gerente:g, campo:true});
+  if(preAnalisePendente(p)) add(['Estagiário'],'Pré-análise do projeto (materiais orçados e km de rede projetada/retirada)',{preAnalise:true});
+  pagamentosPendentes(p).forEach(x=>{
+    if(x.tipo==='projeto') add(['Analista'],'Pagar o projeto'+(p.projetista?' — '+p.projetista:'')+(preAnaliseFeita(p)?'':' (falta a pré-análise com os km de rede)'),{pagamento:true});
+    else if(x.verificar) add(['Analista'],'Verificar se o reprojeto #'+x.n+' gera novo pagamento',{pagamento:true});
+    else add(['Analista'],'Pagar o reprojeto #'+x.n+(p.projetista?' — '+p.projetista:''),{pagamento:true});
+  });
   const r=reanaliseAberta(p);
   if(r) add(rural?['Adm_ODI','Estagiário']:['Estagiário'],'Reanálise documental #'+r.n+' — até '+fmtTxt(reanalisePrazo(r)),{reanalise:true});
   return out;
@@ -11264,11 +11439,13 @@ function acoesPendentes(p){
 function acaoRespLabel(a){ return a.resps.map(r=>r==='Gerente'&&a.gerente?'Gerente ('+a.gerente+')':r).join(' / '); }
 
 // ── Feedback automático da análise documental (Ligação nova Rural) ────
+function arTercVazio(){ return {nome:'',matriculaPreenchida:'',matricula:'',localidade:'',nomeVisivel:''}; }
+function arTercPreenchidas(t){ return ((t&&t.autorizacoes)||[]).filter(x=>x && Object.values(x).some(v=>String(v==null?'':v).trim())); }
 function arVazio(){
   return {
-    matricula:{donos:[''],georreferenciada:'',docGeo:'',artAssinada:'',artPaga:'',areaHa:'',ccir:'',ccirNumero:'',numero:'',localidade:'',confrontantes:['']},
+    matricula:{donos:[''],dataAtualizacao:'',georreferenciada:'',docGeo:'',artAssinada:'',artPaga:'',areaHa:'',ccir:'',ccirNumero:'',numero:'',localidade:'',confrontantes:['']},
     solicitante:{possui:'',matriculaPreenchida:'',localidadePreenchida:'',nomeLegivel:'',assinantes:['']},
-    terceiros:{nomes:[''],matriculaPreenchida:'',matricula:'',matriculaDiferente:'',localidade:'',localidadeBate:'',nomeVisivel:'',condizConfrontantes:''},
+    terceiros:{autorizacoes:[arTercVazio()]},
     ambiental:{alvaraCita:'',alvaraMatricula:'',alvaraLocalidade:'',appCita:'',appMatricula:'',appLocalidade:''},
     desenho:{primeiroPonto:'',justificativa:'',outroTexto:'',complemento:''},
   };
@@ -11281,13 +11458,22 @@ function arMesclar(salvo){
       if(Array.isArray(base[sec][k]) && base[sec][k].length===0) base[sec][k]=[''];
     });
   });
+  // Terceiros: várias autorizações (migra o formato antigo, que tinha uma lista de nomes e respostas únicas)
+  const t=s.terceiros||{};
+  let auts=Array.isArray(t.autorizacoes)?t.autorizacoes.filter(x=>x&&typeof x==='object').map(x=>Object.assign(arTercVazio(),x)):[];
+  if(!auts.length && Array.isArray(t.nomes)){
+    auts=t.nomes.filter(n=>String(n||'').trim()).map(n=>Object.assign(arTercVazio(),{nome:n,matriculaPreenchida:t.matriculaPreenchida||'',matricula:t.matricula||'',localidade:t.localidade||'',nomeVisivel:t.nomeVisivel||''}));
+  }
+  if(!auts.length) auts=[arTercVazio()];
+  base.terceiros={autorizacoes:auts};
   return base;
 }
 function arLimpar(d){
   const c=pdClone(d);
-  [['matricula','donos'],['matricula','confrontantes'],['solicitante','assinantes'],['terceiros','nomes']].forEach(([a,b])=>{
+  [['matricula','donos'],['matricula','confrontantes'],['solicitante','assinantes']].forEach(([a,b])=>{
     c[a][b]=(c[a][b]||[]).map(x=>String(x).trim()).filter(Boolean);
   });
+  c.terceiros={autorizacoes:arTercPreenchidas(c.terceiros)};
   return c;
 }
 function arJustificativaTexto(d){
@@ -11300,12 +11486,17 @@ function arGerarFeedback(p,a){
   const out=[]; const E=t=>out.push({n:'erro',t}), W=t=>out.push({n:'aviso',t});
   const L=l=>(l||[]).map(x=>String(x).trim()).filter(Boolean);
   const m=a.matricula, s=a.solicitante, t=a.terceiros, am=a.ambiental, d=a.desenho;
-  const donos=L(m.donos), confr=L(m.confrontantes), assin=L(s.assinantes), nomesT=L(t.nomes);
+  const donos=L(m.donos), confr=L(m.confrontantes), assin=L(s.assinantes);
 
   // Matrícula
   if(!pdNumMat(m.numero)) W('Nº da matrícula não informado.');
   if(!donos.length) W('Proprietário(s) da matrícula não informado(s).');
   if(!String(m.localidade||'').trim()) W('Localidade da matrícula não informada.');
+  if(!m.dataAtualizacao) W('Data da última atualização (emissão) da matrícula não informada.');
+  else {
+    const idade=diff(m.dataAtualizacao,pdHojeStr());
+    if(idade!=null && idade>(pedidosParams.matriculaValidadeDias||365)) W('Matrícula atualizada pela última vez em '+fmtTxt(m.dataAtualizacao)+' (há mais de 1 ano) — avaliar a necessidade de documento atualizado.');
+  }
   if(m.georreferenciada==='') W('Não informado se a matrícula é georreferenciada.');
   if(m.georreferenciada==='nao'){
     if(m.docGeo==='') W('Matrícula não georreferenciada: não conferido se há documento de georreferenciamento e ART anexos.');
@@ -11340,19 +11531,31 @@ function arGerarFeedback(p,a){
     }
   }
 
-  // Autorização de terceiros (só quando o Gerente define que é necessária)
+  // Autorização de terceiros (só quando o Gerente define que é necessária) — podem ser várias
   if(terceirosNecessarios(p)){
-    if(!nomesT.length) W('Autorização de terceiros: nomes de quem autorizou não informados.');
-    if(t.matriculaPreenchida==='nao') E('Autorização de terceiros sem nº de matrícula.');
-    if(t.matriculaDiferente==='nao') W('Autorização de terceiros com a mesma matrícula do solicitante (deveria ser a do terceiro).');
-    if(t.localidadeBate==='nao') W('Localidade da autorização de terceiros diferente da localidade da autorização do solicitante.');
-    if(t.nomeVisivel==='nao') E('Nome na autorização de terceiros não está legível.');
-    if(t.condizConfrontantes==='nao') E('As autorizações de terceiros não condizem com os confrontantes da matrícula.');
-    if(t.matriculaPreenchida===''||t.matriculaDiferente===''||t.localidadeBate===''||t.nomeVisivel===''||t.condizConfrontantes==='') W('Autorização de terceiros: itens ainda não conferidos.');
-    if(nomesT.length && confr.length && t.condizConfrontantes!=='sim'){
-      const sem=confr.filter(c=>!nomesT.some(n=>pdMatchNome(n,c)));
-      if(sem.length) W('Confrontantes sem autorização de terceiros correspondente: '+sem.join(', ')+' (conferir).');
+    const auts=arTercPreenchidas(t);
+    if(!auts.length) W('Autorização de passagem de terceiros: nenhuma autorização registrada ainda.');
+    const locMat=String(m.localidade||'').trim();
+    auts.forEach((x,ix)=>{
+      const nome=String(x.nome||'').trim();
+      const rot='Autorização de terceiros '+(ix+1)+(nome?' ('+nome+')':'');
+      if(!nome) W(rot+': nome de quem autorizou não informado.');
+      else if(confr.length && !confr.some(c=>pdMatchNome(c,nome))) W(rot+': o nome não corresponde a nenhum dos confrontantes da matrícula — levar em consideração (conferir grafia ou se o imóvel é de outro confrontante).');
+      if(x.nomeVisivel==='nao') E(rot+': nome não está legível.');
+      if(x.matriculaPreenchida==='nao') E(rot+': sem nº de matrícula.');
+      else if(x.matriculaPreenchida==='sim'){
+        if(!pdNumMat(x.matricula)) W(rot+': informado que tem matrícula, mas o nº não foi registrado.');
+        else if(pdNumMat(m.numero) && pdNumMat(x.matricula)===pdNumMat(m.numero)) W(rot+': mesma matrícula do solicitante ('+m.numero+') — deveria ser a matrícula do terceiro.');
+      }
+      const loc=String(x.localidade||'').trim();
+      if(loc && locMat && pdNorm(loc)!==pdNorm(locMat) && !pdNorm(loc).includes(pdNorm(locMat)) && !pdNorm(locMat).includes(pdNorm(loc))) W(rot+': localidade ('+loc+') diferente da localidade da matrícula do solicitante ('+locMat+').');
+      if(x.nomeVisivel===''||x.matriculaPreenchida==='') W(rot+': itens ainda não conferidos (legibilidade do nome ou matrícula).');
+    });
+    if(auts.length && confr.length){
+      const sem=confr.filter(c=>!auts.some(x=>pdMatchNome(x.nome,c)));
+      if(sem.length) W('Confrontantes da matrícula sem autorização de terceiros correspondente: '+sem.join(', ')+' (verificar se a rede passa por eles).');
     }
+    if(!confr.length && auts.length) W('Não foi possível comparar as autorizações de terceiros com os confrontantes: confrontantes da matrícula não informados.');
   }
 
   // Ambiental / construtivo
@@ -11375,6 +11578,13 @@ function arGerarFeedback(p,a){
 
   // Checklist
   checklistPendentes(p).forEach(i=>E('Documento não entregue: '+i.documento+'.'));
+
+  // Órgãos competentes (definidos pelo Gerente na análise de projeto)
+  const ol=p.orgaosLiberacao||{};
+  Object.keys(ol).forEach(o=>{
+    if(!ol[o].liberadoEm) E('A execução depende de liberação do órgão competente '+o+' — ainda não liberado'+(ol[o].cienteEm?' (encaminhado em '+fmtTxt(ol[o].cienteEm)+')':'')+'.');
+  });
+  if(campoPendente(p)) W('Verificação em campo solicitada pelo Gerente — ainda não realizada.');
 
   if(!out.length) out.push({n:'ok',t:'Nenhuma inconsistência identificada nas informações preenchidas.'});
   return out;
@@ -11486,6 +11696,8 @@ function pdAlertasHtml(p){
   if(orgaosPendentes(p).length) a.push('<span style="color:#8B5CF6;font-weight:700">🏛️ Órgão: '+orgaosPendentes(p).join(', ')+'</span>');
   if(campoPendente(p)) a.push('<span style="color:#06B6D4;font-weight:700">📍 Verif. em campo</span>');
   if(p.reprojetoPendente) a.push('<span style="color:#F97316;font-weight:700">♻️ Reprojeto</span>');
+  if(prazoAnalistaInfo(p).tipo==='vencido') a.push('<span style="color:#EF4444;font-weight:700">⏰ Analista fora do prazo</span>');
+  if(p.acaoAnalista==='Enviado para Projeto' && !p.dataEnquadramento && p.equipamentoRef && pdObrasMesmaChave(p.equipamentoRef).length) a.push('<span style="color:#F59E0B;font-weight:700">🔗 Obra em andamento na mesma chave</span>');
   return a.length?'<div style="font-size:10px;margin-top:3px;display:flex;flex-wrap:wrap;gap:6px">'+a.join('')+'</div>':'';
 }
 
@@ -11506,6 +11718,9 @@ function pdPassaVista(it,v){
   if(v==='campo') return campoPendente(p);
   if(v==='m34') return medida34Ativa(p);
   if(v==='pendDoc') return checklistTemPendencia(p);
+  if(v==='analista15') return prazoAnalistaInfo(p).tipo==='vencido';
+  if(v==='preAnalise') return preAnalisePendente(p);
+  if(v==='pagar') return pagamentosPendentes(p).length>0;
   if(v==='filaDoc') return pedidoEhRural(p) && p.acaoAnalista==='Enviado para Projeto' && !!p.dataEncaminhamentoProjetista && !p.analiseDocumentalConcluida;
   return true;
 }
@@ -11518,7 +11733,7 @@ function pdPassaFiltros(it){
   if(f.projetista && (p.projetista||'')!==f.projetista) return false;
   if(f.busca){
     const q=pdNorm(f.busca);
-    const alvo=pdNorm([p.nota,p.municipio,p.tipoSolicitacao,p.projetista,p.analiseRural?.matricula?.numero,(p.analiseRural?.matricula?.donos||[]).join(' ')].join(' '));
+    const alvo=pdNorm([p.nota,p.municipio,p.tipoSolicitacao,p.projetista,p.equipamentoRef,p.analiseRural?.matricula?.numero,(p.analiseRural?.matricula?.donos||[]).join(' ')].join(' '));
     if(!alvo.includes(q)) return false;
   }
   if(f.prazo){
@@ -11545,10 +11760,10 @@ function pdOrdena(items){
   });
 }
 
-window.pdSetVista=function(v){ _pdF.vista=v; pdRenderLista(); };
+window.pdSetVista=function(v){ _pdF.vista=v; if(_pdAba!=='todos') _pdAba='todos'; pdRenderLista(); };
 window.pdSetFiltro=function(k,v){ _pdF[k]=v; pdRenderLista(); };
 window.pdLimparFiltros=function(){
-  _pdF={busca:'',status:'',tipo:'',municipio:'',gerente:'',projetista:'',prazo:'',vista:'ativos'};
+  _pdF={busca:'',status:'',tipo:'',municipio:'',gerente:'',projetista:'',prazo:'',vista:_pdAba==='fila'?'minha':'ativos'};
   const cont=document.getElementById('pgPedidosContent'); if(cont) cont.dataset.uid=''; renderPedidos();
 };
 
@@ -11565,8 +11780,12 @@ function pdMontaEsqueleto(cont){
         ${podeCriar?'<button class="btn btn-primary btn-sm" onclick="openPedidoModal()">+ Novo Pedido</button>':''}
       </div>
     </div>
+    <div id="pdAbas" style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-top:8px"></div>
+    <div id="pdAbaPagar" style="display:none"></div>
+    <div id="pdAbaDash" style="display:none"></div>
+    <div id="pdAbaLista">
     <div id="pdCards" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0"></div>
-    <div id="pdFiltros" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+    <div id="pdFiltros" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0">
       <input type="text" id="pdFBusca" placeholder="🔍 Nota, município, projetista, matrícula, proprietário…" oninput="pdSetFiltro('busca',this.value)" style="font-size:11px;padding:5px 10px;min-width:260px">
       ${sel('pdFStatus','status',PEDIDO_STATUS_LISTA,'Todos os status')}
       ${sel('pdFTipo','tipo',Object.keys(TIPOS_SOLICITACAO),'Todas as solicitações')}
@@ -11592,6 +11811,7 @@ function pdMontaEsqueleto(cont){
         </tr></thead>
         <tbody id="pdListaBody"></tbody>
       </table>
+    </div>
     </div>`;
   cont.dataset.uid=String(me.uid||me.email||'x');
 }
@@ -11608,6 +11828,10 @@ window.renderPedidos=renderPedidos;
 function pdRenderLista(){
   const body=document.getElementById('pdListaBody'); if(!body) return;
   const todos=pedidos.map(p=>({p, status:computeStatusPedido(p), acoes:acoesPendentes(p), prazo:prazoInfo(p)}));
+  if(_pdAba==='fila') _pdF.vista='minha';
+  pdRenderAbas(todos);
+  if(_pdAba==='pagar'){ pdRenderPagar(); return; }
+  if(_pdAba==='dash'){ pdRenderDash(); return; }
   // cartões (contadores clicáveis)
   const cnt=v=>todos.filter(it=>pdPassaVista(it,v)).length;
   const card=(v,t,cor)=>{ const n=cnt(v), at=_pdF.vista===v;
@@ -11621,6 +11845,7 @@ function pdRenderLista(){
     card('vencidos','Vencidos','#EF4444')+card('vence7','Vencem ≤ 7 d','#F97316')+
     card('filaDoc','Fila análise doc.','#3B82F6')+card('reanalise','Fila reanálise','#3B82F6')+
     card('orgaos','Órgãos compet.','#8B5CF6')+card('campo','Verif. campo','#06B6D4')+
+    card('analista15','Analista > '+(pedidosParams.prazoAnalistaDias||15)+' d','#EF4444')+card('preAnalise','Pré-análise','#3B82F6')+card('pagar','Projeto a pagar','#F59E0B')+
     card('m34','Medida 34','#F59E0B')+card('pendDoc','Pend. documental','#EF4444')+card('todos','Todos','#888');
   let lista=todos.filter(it=>pdPassaVista(it,_pdF.vista)&&pdPassaFiltros(it));
   lista=pdOrdena(lista);
@@ -11653,14 +11878,22 @@ function pdRenderSituacao(p){
     prazoTxt=`<b style="font-size:14px">Data limite: ${fmtTxt(i.limite)}</b> <span style="color:${cor};font-weight:700">· ${pdPrazoTexto(i)}</span><div style="font-size:10px;color:var(--muted)">${det}${i.tipo==='enquadrado'?' · contador encerrado no enquadramento':''}</div>`;
   }
   const chips=acoes.length?acoes.map(a=>`<div style="margin-top:3px"><span style="font-weight:800;color:${a.atraso?'#EF4444':'var(--accent)'}">${pdEsc(acaoRespLabel(a))}</span> → ${pdEsc(a.texto)}</div>`).join(''):'<div style="margin-top:3px;color:var(--muted)">Nenhuma ação pendente.</div>';
+  const pa=prazoAnalistaInfo(p);
+  let paHtml='';
+  if(pa.tipo==='ativo'||pa.tipo==='vencido'||pa.tipo==='pausado'){
+    paHtml=`<div style="margin-top:6px;font-size:11px"><b>Prazo do Analista (${pa.base} d):</b> até ${fmtTxt(pa.limite)} · <span style="font-weight:700;color:${pa.tipo==='vencido'?'#EF4444':(pa.tipo==='pausado'?'#F59E0B':(pa.dias<=3?'#F97316':'#22C55E'))}">${pa.tipo==='vencido'?'vencido há '+Math.abs(pa.dias)+' d':(pa.tipo==='pausado'?'pausado (Medida 34)':'faltam '+pa.dias+' d')}</span></div>`;
+  } else if(pa.tipo==='decidido' && pa.usados!=null){
+    paHtml=`<div style="margin-top:6px;font-size:10px;color:var(--muted)">Analista definiu a ação em ${pa.usados} d (${pa.dentro?'dentro':'<span style="color:#EF4444;font-weight:700">fora</span>'} do prazo de ${pa.base} d)</div>`;
+  }
+  const chaveHtml=(p.acaoAnalista==='Enviado para Projeto' && !p.dataEnquadramento && p.equipamentoRef)?pdEquipAvisoHtml(p.equipamentoRef,p.id):'';
   el.style.display='block';
-  el.innerHTML=`
+  el.innerHTML=pdEtapasHtml(p)+`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div><div style="font-size:9px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">Etapa atual</div>
         <div style="font-weight:800;font-size:13px">${pdEsc(st)}</div>${pdAlertasHtml(p)}
         <div style="font-size:10px;color:var(--muted);margin-top:4px">${pdEsc(p.tipoPedido||'')} · ${pdEsc(p.tipoSolicitacao||'')} · ${pdEsc(p.municipio||'')}${g?' · Gerente: '+pdEsc(g):''}</div></div>
-      <div><div style="font-size:9px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">Prazo para gerar o orçamento</div>${prazoTxt}</div>
-    </div>
+      <div><div style="font-size:9px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">Prazo para gerar o orçamento</div>${prazoTxt}${paHtml}</div>
+    </div>${chaveHtml?'<div style="margin-top:10px">'+chaveHtml+'</div>':''}
     <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:12px">
       <div style="font-size:9px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);font-weight:700">Quem precisa agir agora</div>${chips}</div>`;
 }
@@ -11678,6 +11911,8 @@ window.onAcaoAnalistaChange=function(){
   const a=document.getElementById('pdAcaoAnalista').value;
   document.getElementById('fgProjetista').style.display=a==='Enviado para Projeto'?'flex':'none';
   document.getElementById('fgDataEncaminhamento').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgEquipRef').style.display=a==='Enviado para Projeto'?'flex':'none';
+  pdEquipAvisoRender();
   document.getElementById('fgMotivoCancelamento').style.display=a==='Cancelado'?'flex':'none';
 };
 
@@ -11771,7 +12006,13 @@ window.toggleChecklistConcluido=async function(){
   const checklistConcluido=!p.checklistConcluido;
   try{
     const pend=checklistPendentes({...p,checklistConcluido}).map(i=>i.documento);
-    const np=await pdSave(id,{checklistConcluido}, checklistConcluido?'Checklist documental concluído':'Checklist documental reaberto', checklistConcluido&&pend.length?'Pendente(s): '+pend.join(', '):'');
+    const extraCk={};
+    if(checklistConcluido){
+      if(!p.checklistConcluidoEm) extraCk.checklistConcluidoEm=pdHojeStr();
+      // fotografia do que faltava na 1ª conclusão (indicador "documentos que mais faltam por cidade")
+      if(!Array.isArray(p.pendenciasIniciais)) extraCk.pendenciasIniciais=pend;
+    }
+    const np=await pdSave(id,{checklistConcluido,...extraCk}, checklistConcluido?'Checklist documental concluído':'Checklist documental reaberto', checklistConcluido&&pend.length?'Pendente(s): '+pend.join(', '):'');
     toast(checklistConcluido?(pend.length?'Checklist concluído com pendência documental.':'Checklist concluído!'):'Checklist reaberto.', checklistConcluido&&pend.length?'warn':'ok');
     refreshChecklistSection(np); pdRefreshLeve(np); pdArRefreshFeedback();
   }catch(e){ console.error(e); toast('Erro ao atualizar checklist.','err'); }
@@ -11791,6 +12032,7 @@ window.salvarAcompanhamentoChecklist=async function(){
       checklistFeedback: document.getElementById('pdChecklistFeedback').value.trim(),
     };
     const ev=[];
+    if(dataRetornoProjetista && !p.primeiroRetornoProjetista) changes.primeiroRetornoProjetista=dataRetornoProjetista;
     if(dataRetornoProjetista!==(p.dataRetornoProjetista||null)) ev.push(dataRetornoProjetista?'Projetista devolveu o projeto em '+fmtTxt(dataRetornoProjetista):'Data de retorno do projetista removida');
     if(dataRetornoProjetista && p.reprojetoPendente){
       changes.reprojetoPendente=false; changes.validacaoGerenteOk=false;
@@ -11801,7 +12043,7 @@ window.salvarAcompanhamentoChecklist=async function(){
     toast('Acompanhamento salvo!');
     refreshChecklistSection(np);
     _apDraft=apMesclar(np.analiseProjeto); _apDirty=false;
-    pdRenderAnaliseProjeto(); pdRefreshLeve(np);
+    pdRenderAnaliseProjeto(); pdRenderPreAnalise(); pdRefreshLeve(np);
   }catch(e){ console.error(e); toast('Erro ao salvar.','err'); }
   finally{ const b=document.getElementById('btnSalvarChecklist'); if(b){ b.disabled=false; b.textContent='Salvar Acompanhamento'; } }
 };
@@ -11852,6 +12094,9 @@ window.removeDocFromTemplate=async function(idx){
 window.pdAbrirParams=function(){
   document.getElementById('prmPrazoProjetista').value=pedidosParams.prazoProjetistaDias;
   document.getElementById('prmPrazoReanalise').value=pedidosParams.prazoReanaliseDias;
+  document.getElementById('prmPrazoAnalista').value=pedidosParams.prazoAnalistaDias;
+  document.getElementById('prmFatorEstrada').value=pedidosParams.fatorEstrada;
+  document.getElementById('prmMatriculaDias').value=pedidosParams.matriculaValidadeDias;
   pdRenderParamsJust();
   document.getElementById('ovPedidoParams').classList.add('open');
 };
@@ -11865,9 +12110,11 @@ function pdRenderParamsJust(){
 }
 window.pdSalvarPrazos=async function(){
   const a=parseInt(document.getElementById('prmPrazoProjetista').value,10), b=parseInt(document.getElementById('prmPrazoReanalise').value,10);
-  if(!(a>0)||!(b>0)){ toast('Informe prazos em dias (números maiores que zero).','err'); return; }
-  pedidosParams.prazoProjetistaDias=a; pedidosParams.prazoReanaliseDias=b;
-  try{ await setDoc(doc(db,'config','pedidosParametros'),{prazoProjetistaDias:a,prazoReanaliseDias:b},{merge:true}); toast('Prazos salvos!'); pdRenderLista(); }
+  const c=parseInt(document.getElementById('prmPrazoAnalista').value,10), f=parseFloat(String(document.getElementById('prmFatorEstrada').value).replace(',','.')), md=parseInt(document.getElementById('prmMatriculaDias').value,10);
+  if(!(a>0)||!(b>0)||!(c>0)||!(md>0)){ toast('Informe prazos em dias (números maiores que zero).','err'); return; }
+  if(!(f>=1)){ toast('O fator de estrada deve ser 1 ou maior (ex.: 1,3).','err'); return; }
+  Object.assign(pedidosParams,{prazoProjetistaDias:a,prazoReanaliseDias:b,prazoAnalistaDias:c,fatorEstrada:f,matriculaValidadeDias:md});
+  try{ await setDoc(doc(db,'config','pedidosParametros'),{prazoProjetistaDias:a,prazoReanaliseDias:b,prazoAnalistaDias:c,fatorEstrada:f,matriculaValidadeDias:md},{merge:true}); toast('Parâmetros salvos!'); pdRenderLista(); }
   catch(e){ console.error(e); toast('Erro ao salvar prazos.','err'); }
 };
 window.pdAddJust=async function(){
@@ -11910,6 +12157,8 @@ window.pdArSet=function(path,val,rerender){
 };
 window.pdArSetList=function(path,i,val){ const l=pdGetPath(_arDraft,path); l[i]=val; _arDirty=true; pdArRefreshFeedback(); };
 window.pdArListAdd=function(path){ const l=pdGetPath(_arDraft,path); l.push(''); _arDirty=true; pdRenderAnaliseRural(); };
+window.pdArTercAdd=function(){ _arDraft.terceiros.autorizacoes.push(arTercVazio()); _arDirty=true; pdRenderAnaliseRural(); };
+window.pdArTercDel=function(i){ const l=_arDraft.terceiros.autorizacoes; l.splice(i,1); if(!l.length) l.push(arTercVazio()); _arDirty=true; pdRenderAnaliseRural(); };
 window.pdArListDel=function(path,i){ const l=pdGetPath(_arDraft,path); l.splice(i,1); if(!l.length) l.push(''); _arDirty=true; pdRenderAnaliseRural(); };
 
 function pdRenderAnaliseRural(){
@@ -11922,16 +12171,23 @@ function pdRenderAnaliseRural(){
   const defT=p.analiseProjeto?.terceiros;
   let blocoTerc;
   if(defT==='sim'){
-    blocoTerc=`<div class="fg-grid">
-      ${arFieldH('Em nome de quem está a autorização de passagem? (quem autorizou)',arListH('terceiros.nomes',t.nomes,'Nome',ro),true)}
-      ${arFieldH('A autorização está com nº de matrícula?',arSelH('terceiros.matriculaPreenchida',t.matriculaPreenchida,AR_YN,ro))}
-      ${arFieldH('Nº da matrícula da autorização',arInpH('terceiros.matricula',t.matricula,'Nº',ro))}
-      ${arFieldH('A matrícula é diferente da matrícula do solicitante?',arSelH('terceiros.matriculaDiferente',t.matriculaDiferente,AR_YN,ro))}
-      ${arFieldH('Localidade da autorização de passagem',arInpH('terceiros.localidade',t.localidade,'Localidade',ro))}
-      ${arFieldH('A localidade bate com a da autorização do solicitante?',arSelH('terceiros.localidadeBate',t.localidadeBate,AR_YN,ro))}
-      ${arFieldH('O nome na autorização de passagem é visível?',arSelH('terceiros.nomeVisivel',t.nomeVisivel,AR_YN,ro))}
-      ${arFieldH('As autorizações condizem com os confrontantes da matrícula?',arSelH('terceiros.condizConfrontantes',t.condizConfrontantes,AR_YN,ro))}
-    </div>
+    const confrL=(m.confrontantes||[]).map(x=>String(x).trim()).filter(Boolean);
+    blocoTerc=`<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Registre <b>uma autorização por pessoa</b> (podem ser várias). O sistema compara cada nome com os confrontantes da matrícula e avisa quando não bate.</div>`
+      +(t.autorizacoes||[]).map((x,ix)=>{
+        const nome=String(x.nome||'').trim();
+        const bate=nome&&confrL.length?confrL.some(c=>pdMatchNome(c,nome)):null;
+        const selo=bate===null?'':(bate?'<span style="color:#22C55E;font-size:10px;font-weight:700">✅ nome confere com um confrontante</span>':'<span style="color:#F59E0B;font-size:10px;font-weight:700">⚠️ nome não bate com nenhum confrontante</span>');
+        return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;flex-wrap:wrap"><b style="font-size:11px">Autorização de terceiros ${ix+1}</b>${selo}${ro?'':`<button type="button" class="btn btn-danger btn-sm" onclick="pdArTercDel(${ix})">🗑️</button>`}</div>
+          <div class="fg-grid">
+            ${arFieldH('Nome de quem autorizou',`<input type="text" value="${pdEsc(x.nome)}" ${ro?'disabled':''} placeholder="Nome" onchange="pdArSet('terceiros.autorizacoes.${ix}.nome',this.value,true)" style="width:100%">`)}
+            ${arFieldH('O nome está legível / assinado?',arSelH('terceiros.autorizacoes.'+ix+'.nomeVisivel',x.nomeVisivel,AR_YN,ro))}
+            ${arFieldH('Está com nº de matrícula?',arSelH('terceiros.autorizacoes.'+ix+'.matriculaPreenchida',x.matriculaPreenchida,AR_YN,ro))}
+            ${x.matriculaPreenchida==='sim'?arFieldH('Nº da matrícula do terceiro',arInpH('terceiros.autorizacoes.'+ix+'.matricula',x.matricula,'Nº',ro)):'<div></div>'}
+            ${arFieldH('Localidade da autorização',arInpH('terceiros.autorizacoes.'+ix+'.localidade',x.localidade,'Localidade',ro))}
+          </div></div>`; }).join('')
+      +(ro?'':`<button type="button" class="btn btn-secondary btn-sm" onclick="pdArTercAdd()">+ Adicionar autorização de terceiros</button>`)
+      +`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
       <span>${p.terceirosConferido?'<span style="color:#22C55E;font-weight:700">✅ Terceiros conferidos'+(p.terceirosConferidoEm?' em '+fmtTxt(p.terceirosConferidoEm):'')+'</span>':'<span style="color:#F59E0B">⏳ Conferência de terceiros pendente</span>'}</span>
       ${ro?'':`<button type="button" class="btn btn-secondary btn-sm" onclick="pdArSalvar('${p.terceirosConferido?'terc_reabrir':'terc_concluir'}')">${p.terceirosConferido?'Reabrir conferência de terceiros':'Concluir conferência de terceiros'}</button>`}
@@ -11954,6 +12210,7 @@ function pdRenderAnaliseRural(){
       ${arFieldH('Dono(s) da matrícula (registre todos)',arListH('matricula.donos',m.donos,'Dono',ro),true)}
       ${arFieldH('Nº da matrícula apresentada',arInpH('matricula.numero',m.numero,'Ex: 12.345',ro))}
       ${arFieldH('Localidade da matrícula',arInpH('matricula.localidade',m.localidade,'Localidade',ro))}
+      ${arFieldH('Data da última atualização (emissão) da matrícula'+((m.dataAtualizacao&&diff(m.dataAtualizacao,pdHojeStr())>(pedidosParams.matriculaValidadeDias||365))?' <span style="color:#F59E0B;font-weight:700">· há mais de 1 ano</span>':''),`<input type="date" value="${pdEsc(m.dataAtualizacao)}" ${ro?'disabled':''} max="${pdHojeStr()}" onchange="pdArSet('matricula.dataAtualizacao',this.value,true)" style="width:100%">`)}
       ${arFieldH('A matrícula é georreferenciada?',arSelH('matricula.georreferenciada',m.georreferenciada,AR_YN,ro))}
       ${m.georreferenciada==='nao'?arFieldH('Possui documento anexo com georreferenciamento e ART?',arSelH('matricula.docGeo',m.docGeo,AR_YN,ro)):''}
       ${m.georreferenciada==='nao'&&m.docGeo==='sim'?arFieldH('A ART está assinada pelo responsável e pelo cliente?',arSelH('matricula.artAssinada',m.artAssinada,AR_YN,ro))+arFieldH('A ART está paga?',arSelH('matricula.artPaga',m.artPaga,AR_YN,ro)):''}
@@ -12120,7 +12377,15 @@ function pdRenderAnaliseProjeto(){
       const v=p.verificacaoCampo;
       html+=`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;flex-wrap:wrap"><b style="min-width:60px">📍 Campo</b>
         <span>${v.realizadaEm?'<span style="color:#22C55E;font-weight:700">✅ Verificação realizada em '+fmtTxt(v.realizadaEm)+(v.realizadaPor?' por '+pdEsc(v.realizadaPor):'')+'</span>':'<span style="color:#F59E0B">⏳ aguardando verificação em campo</span>'}</span>
-        ${ed?`<span style="margin-left:auto">${v.realizadaEm?'':`<button type="button" class="btn btn-primary btn-sm" onclick="pdCampoRealizada()">Verificação realizada</button>`}</span>`:''}</div>`;
+        </div>`;
+      if(v.realizadaEm){
+        html+=`<div style="font-size:12px;margin:2px 0 6px 68px;padding:6px 8px;border-left:3px solid #22C55E;background:rgba(34,197,94,.06);white-space:pre-wrap"><b>Feedback do campo:</b> ${v.feedback?pdEsc(v.feedback):'<span style="color:var(--muted)">não registrado</span>'}</div>`;
+        if(ed) html+=`<div style="margin-left:68px"><button type="button" class="btn btn-secondary btn-sm" onclick="pdCampoDesfazer()">Desfazer / corrigir</button></div>`;
+      } else if(ed){
+        html+=`<div style="margin:4px 0 0 68px"><label style="font-size:10px;color:var(--muted)">Feedback da verificação em campo (o que foi constatado) *</label>
+          <textarea id="pdCampoFeedback" rows="2" style="width:100%;resize:vertical" placeholder="Ex.: confirmado que existe UC próxima ao limite da matrícula; ponto solicitado está dentro do terreno…"></textarea>
+          <button type="button" class="btn btn-primary btn-sm" style="margin-top:4px" onclick="pdCampoRealizada()">Confirmar verificação realizada</button></div>`;
+      }
     }
     html+='</div>';
   }
@@ -12136,15 +12401,25 @@ window.pdOrgaoAcao=async function(org,acao){
   if(acao==='desfazer'){ e.liberadoEm=null; e.liberadoPor=null; }
   try{
     const np=await pdSave(p.id,{orgaosLiberacao:ol}, org+': '+(acao==='ciente'?'ciente registrado':acao==='liberado'?'liberação obtida':'liberação desfeita'));
-    pdRenderAnaliseProjeto(); pdRefreshLeve(np);
+    pdRenderAnaliseProjeto(); pdArRefreshFeedback(); pdRefreshLeve(np);
     if(acao==='liberado'&&medida34Ativa(np)) toast('Liberação registrada. Lembre-se de retirar a Medida 34 para o prazo voltar a correr.','warn');
   }catch(err){ console.error(err); toast('Erro ao registrar.','err'); }
 };
 window.pdCampoRealizada=async function(){
   const p=_pdAtual(); if(!p||!pdEhGerente()) return;
+  const fb=(document.getElementById('pdCampoFeedback')?.value||'').trim();
+  if(!fb){ toast('Descreva o que foi verificado em campo (feedback) antes de confirmar.','err'); return; }
   try{
-    const np=await pdSave(p.id,{verificacaoCampo:{...(p.verificacaoCampo||{}),necessaria:true,realizadaEm:pdHojeStr(),realizadaPor:me.nome}}, 'Verificação em campo realizada');
-    pdRenderAnaliseProjeto(); pdRefreshLeve(np);
+    const np=await pdSave(p.id,{verificacaoCampo:{...(p.verificacaoCampo||{}),necessaria:true,realizadaEm:pdHojeStr(),realizadaPor:me.nome,feedback:fb}}, 'Verificação em campo realizada', fb);
+    pdRenderAnaliseProjeto(); pdArRefreshFeedback(); pdRefreshLeve(np);
+  }catch(err){ console.error(err); toast('Erro ao registrar.','err'); }
+};
+window.pdCampoDesfazer=async function(){
+  const p=_pdAtual(); if(!p||!pdEhGerente()) return;
+  if(!confirm('Desfazer a confirmação da verificação em campo? O feedback registrado será apagado.')) return;
+  try{
+    const np=await pdSave(p.id,{verificacaoCampo:{necessaria:true,realizadaEm:null,realizadaPor:null,feedback:''}}, 'Verificação em campo desfeita');
+    pdRenderAnaliseProjeto(); pdArRefreshFeedback(); pdRefreshLeve(np);
   }catch(err){ console.error(err); toast('Erro ao registrar.','err'); }
 };
 
@@ -12178,7 +12453,7 @@ window.pdApConcluir=async function(modo){
       const ol={}; const antigo=p.orgaosLiberacao||{};
       if(d.orgaosNecessario==='sim') d.orgaos.forEach(o=>{ ol[o]=antigo[o]||{cienteEm:null,liberadoEm:null}; });
       Object.keys(antigo).forEach(o=>{ if(!ol[o]&&antigo[o].liberadoEm) ol[o]=antigo[o]; });
-      const vc=d.verificacaoCampo==='sim'?{necessaria:true,realizadaEm:p.verificacaoCampo?.realizadaEm||null,realizadaPor:p.verificacaoCampo?.realizadaPor||null}:{necessaria:false};
+      const vc=d.verificacaoCampo==='sim'?{necessaria:true,realizadaEm:p.verificacaoCampo?.realizadaEm||null,realizadaPor:p.verificacaoCampo?.realizadaPor||null,feedback:p.verificacaoCampo?.feedback||''}:{necessaria:false};
       changes={analiseProjeto:{...d,concluidaEm:h,concluidaPor:me.nome},validacaoGerenteOk:true,orgaosLiberacao:ol,verificacaoCampo:vc};
       const partes=[]; if(d.orgaosNecessario==='sim') partes.push('Órgãos: '+d.orgaos.join(', ')); if(d.terceiros==='sim') partes.push('terceiros necessários'); if(d.verificacaoCampo==='sim') partes.push('verificação em campo');
       ev='Análise de projeto concluída'; det=partes.join(' · ');
@@ -12297,7 +12572,7 @@ function pdRenderTimeline(){
 function pdRefreshLeve(p){
   if(!p) return;
   pdRenderSituacao(p);
-  if(p.acaoAnalista==='Enviado para Projeto'){ pdRenderEnquadramento(); pdRenderReanalise(); }
+  if(p.acaoAnalista==='Enviado para Projeto'){ pdRenderEnquadramento(); pdRenderReanalise(); pdRenderPagamento(); if(!_paDirty){ _paDraft=paMesclar(p.preAnalise); pdRenderPreAnalise(); } }
   pdRenderTimeline();
 }
 function pdRenderSecoes(p){
@@ -12305,6 +12580,8 @@ function pdRenderSecoes(p){
   const show=(id,v)=>{ const e=document.getElementById(id); if(e) e.style.display=v?'':'none'; };
   show('pdSecAnaliseRural', enviado&&pedidoEhRural(p));
   show('pdSecAnaliseProjeto', enviado);
+  show('pdSecPreAnalise', enviado);
+  show('pdSecPagamento', enviado);
   show('pdSecEnquadramento', enviado);
   show('pdSecReanalise', enviado);
   show('pdSecTimeline', !!p);
@@ -12313,7 +12590,8 @@ function pdRenderSecoes(p){
   if(enviado){
     if(pedidoEhRural(p)){ _arDraft=arMesclar(p.analiseRural); _arDirty=false; pdRenderAnaliseRural(); }
     _apDraft=apMesclar(p.analiseProjeto); _apDirty=false; pdRenderAnaliseProjeto();
-    pdRenderEnquadramento(); pdRenderReanalise();
+    _paDraft=paMesclar(p.preAnalise); _paDirty=false; pdRenderPreAnalise();
+    pdRenderEnquadramento(); pdRenderPagamento(); pdRenderReanalise();
   }
   pdRenderTimeline();
 }
@@ -12325,7 +12603,7 @@ window.openPedidoModal=function(id){
   const isEdit=!!id;
   document.getElementById('pedidoId').value=id||'';
   document.getElementById('pedidoModalTit').textContent=isEdit?'Pedido':'Novo Pedido';
-  ['pdNota','pdTipoSolicitacao','pdDataAbertura','pdMunicipio','pdAcaoAnalista','pdProjetista','pdDataEncaminhamento','pdMotivoCancelamento'].forEach(i=>{ document.getElementById(i).value=''; });
+  ['pdNota','pdTipoSolicitacao','pdDataAbertura','pdMunicipio','pdAcaoAnalista','pdProjetista','pdDataEncaminhamento','pdMotivoCancelamento','pdEquipRef'].forEach(i=>{ document.getElementById(i).value=''; });
   document.getElementById('pdFlagOrgaoPublico').checked=false;
   const medidaSec=document.getElementById('pedidoMedida34Wrap');
   const checklistSec=document.getElementById('pedidoChecklistWrap');
@@ -12342,6 +12620,7 @@ window.openPedidoModal=function(id){
       document.getElementById('pdProjetista').value=p.projetista||'';
       document.getElementById('pdDataEncaminhamento').value=p.dataEncaminhamentoProjetista||'';
       document.getElementById('pdMotivoCancelamento').value=p.motivoCancelamento||'';
+      document.getElementById('pdEquipRef').value=p.equipamentoRef||'';
     }
     medidaSec.style.display='block';
   } else { medidaSec.style.display='none'; }
@@ -12377,13 +12656,15 @@ window.openPedidoModal=function(id){
   const abre=(id,v)=>{ const e=document.getElementById(id); if(e) e.open=!!v; };
   abre('pdSecAnaliseRural', ['adm_odi','estagiario'].includes(me.perfil));
   abre('pdSecAnaliseProjeto', me.perfil==='gerente');
+  abre('pdSecPreAnalise', me.perfil==='estagiario');
+  abre('pdSecPagamento', me.perfil==='analista');
   abre('pdSecEnquadramento', me.perfil==='gerente');
   abre('pdSecReanalise', false); abre('pdSecTimeline', false);
   document.getElementById('ovPedido').classList.add('open');
 };
 window.closePedidoModal=function(force){
-  if(force!==true && (_arDirty||_apDirty) && !confirm('Há alterações não salvas na análise. Fechar mesmo assim?')) return;
-  _arDirty=false; _apDirty=false;
+  if(force!==true && (_arDirty||_apDirty||_paDirty) && !confirm('Há alterações não salvas na análise. Fechar mesmo assim?')) return;
+  _arDirty=false; _apDirty=false; _paDirty=false;
   document.getElementById('ovPedido').classList.remove('open');
 };
 window.deletePedido=async function(){
@@ -12411,6 +12692,8 @@ window.savePedido=async function(){
     if(acaoAnalista==='Enviado para Projeto' && (!document.getElementById('pdProjetista').value||!document.getElementById('pdDataEncaminhamento').value)){
       toast('Informe o projetista e a data de encaminhamento.','err'); return;
     }
+    const equipRef=parseInt(document.getElementById('pdEquipRef').value,10)||null;
+    if(acaoAnalista==='Enviado para Projeto' && !equipRef){ toast('Informe o Equipamento de Referência (obrigatório ao enviar para projeto).','err'); return; }
     const cfg=TIPOS_SOLICITACAO[tipoSolicitacao];
     const existente=id?(pedidos.find(x=>x.id===id)||{}):{};
     const dados={
@@ -12419,6 +12702,17 @@ window.savePedido=async function(){
       dataEncaminhamentoProjetista: acaoAnalista==='Enviado para Projeto'?document.getElementById('pdDataEncaminhamento').value:null,
       motivoCancelamento: acaoAnalista==='Cancelado'?document.getElementById('pdMotivoCancelamento').value.trim():null,
     };
+    // data em que o analista definiu a ação (base do indicador dos 15 dias)
+    if((existente.acaoAnalista||'')!==acaoAnalista) dados.dataAcaoAnalista=acaoAnalista?pdHojeStr():null;
+    // equipamento de referência + coordenada (para estimar a distância percorrida pelo projetista)
+    if(acaoAnalista==='Enviado para Projeto'){
+      dados.equipamentoRef=equipRef;
+      if(equipRef!==(existente.equipamentoRef||null) || existente.equipLat==null){
+        const loc=await pdLocalizarEquip(equipRef);
+        dados.equipLat=loc?loc.lat:null; dados.equipLon=loc?loc.lon:null;
+        if(!loc) toast('Equipamento '+equipRef+' não localizado no Mapa da Rede — a distância do projetista não será estimada até ser localizado.','warn');
+      }
+    }
     // checklist: gerado quando o pedido é enviado a projeto (na criação ou depois, ao editar)
     if(acaoAnalista==='Enviado para Projeto'){
       const lista=existente.checklistDocumental||[];
@@ -12441,7 +12735,8 @@ window.savePedido=async function(){
     } else {
       const novo={...dados, status:'', criadaEm:serverTimestamp(), criadaPor:me.nome,
         medida34Analista:[], medida34Gerente:[], checklistDocumental:dados.checklistDocumental||[], checklistConcluido:false,
-        reanalises:[], reprojetos:[],
+        reanalises:[], reprojetos:[], equipamentoRef:dados.equipamentoRef||null, equipLat:dados.equipLat??null, equipLon:dados.equipLon??null,
+        dataAcaoAnalista:acaoAnalista?pdHojeStr():null,
         timeline:[{ts:new Date().toISOString(),usuario:me.nome||'',perfil:me.perfil||'',evento:'Pedido criado no sistema',detalhe:'Abertura em '+fmtTxt(dataAberturaPedido)+(acaoAnalista?' · Ação: '+acaoAnalista:'')}]};
       novo.status=computeStatusPedido(novo);
       await addDoc(collection(db,'pedidos'), novo);
@@ -12452,6 +12747,464 @@ window.savePedido=async function(){
     console.error(e); toast('Erro ao salvar pedido.','err');
   } finally { btn.disabled=false; btn.textContent='Salvar'; }
 };
+
+// ══════════════════════════════════════════════════════
+//  EQUIPAMENTO DE REFERÊNCIA — obras/pedidos na mesma chave · localização
+// ══════════════════════════════════════════════════════
+function pdChaveNorm(nr){ const n=parseInt(nr,10); return isNaN(n)?'':String(n); }
+function pdObrasMesmaChave(nr){
+  const k=pdChaveNorm(nr); if(!k) return [];
+  return (obras||[]).filter(o=>pdChaveNorm(o.equipamentoRef)===k && !o.cancelado && !o.armazenado && !o.conclusao);
+}
+function pdPedidosMesmaChave(nr,idAtual){
+  const k=pdChaveNorm(nr); if(!k) return [];
+  return pedidos.filter(x=>x.id!==idAtual && pdChaveNorm(x.equipamentoRef)===k && x.acaoAnalista==='Enviado para Projeto' && !x.dataEnquadramento);
+}
+function pdEquipAvisoHtml(nr,idAtual){
+  const obs=pdObrasMesmaChave(nr), pds=pdPedidosMesmaChave(nr,idAtual);
+  if(!obs.length && !pds.length) return '';
+  let h=`<div style="padding:8px 10px;border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.08);border-radius:8px;font-size:12px">`;
+  if(obs.length){
+    h+=`<div style="font-weight:800;color:#F59E0B">🔗 Existe(m) ${obs.length} obra(s) em andamento nesta chave de referência (${pdEsc(pdChaveNorm(nr))})</div>
+      <div style="font-size:11px;margin:2px 0 4px">Verifique se a obra já atende a necessidade do cliente solicitante antes de seguir com o projeto.</div>`
+      +obs.slice(0,6).map(o=>{ let st=''; try{ st=statusOf(o); }catch(e){}
+        return `<div style="font-size:11px">• Obra <b>${pdEsc(o.numero||'—')}</b> · ${pdEsc(o.tipo||'')} · ${pdEsc(o.cidade||'')} · ${pdEsc(st||'')}${o.descricao?' · '+pdEsc(o.descricao):''}</div>`; }).join('')
+      +(obs.length>6?`<div style="font-size:10px;color:var(--muted)">+${obs.length-6} obra(s)</div>`:'');
+  }
+  if(pds.length){
+    h+=`<div style="font-weight:700;margin-top:${obs.length?6:0}px">📋 Outros pedidos em andamento na mesma chave: ${pds.slice(0,8).map(x=>pdEsc(x.nota||'—')).join(', ')}</div>`;
+  }
+  return h+'</div>';
+}
+window.pdEquipAvisoRender=function(){
+  const el=document.getElementById('pdEquipAviso'); if(!el) return;
+  const acao=document.getElementById('pdAcaoAnalista')?.value;
+  const nr=document.getElementById('pdEquipRef')?.value;
+  const html=(acao==='Enviado para Projeto' && nr)?pdEquipAvisoHtml(nr, document.getElementById('pedidoId')?.value||''):'';
+  el.innerHTML=html; el.style.display=html?'block':'none';
+};
+async function pdLocalizarEquip(nr){
+  try{
+    await _mapaCarregarRedes();
+    const l=_mapaLocalizar(nr);
+    if(l && !l.erro && l.lat!=null && l.lon!=null) return {lat:l.lat, lon:l.lon};
+  }catch(e){ console.warn('[Pedidos] localizar equipamento:',e); }
+  return null;
+}
+
+// ══════════════════════════════════════════════════════
+//  ETAPAS DO PEDIDO (barra 1→5 no topo)
+// ══════════════════════════════════════════════════════
+function pdEtapas(p){
+  const enviado=p.acaoAnalista==='Enviado para Projeto';
+  const e1=analistaDecidiu(p);
+  if(!enviado) return [{n:1,t:'Abertura e ação',dono:'Analista',ok:e1}];
+  const e2=checklistConcluidoOuDispensado(p)&&analiseDocumentalOk(p);
+  const e3=!!p.validacaoGerenteOk;
+  const e4=!!p.dataEnquadramento;
+  const e5=!!(p.pagamentoProjeto&&p.pagamentoProjeto.pagoEm)&&pagamentosPendentes(p).length===0;
+  return [
+    {n:1,t:'Abertura e ação',dono:'Analista',ok:e1},
+    {n:2,t:'Documentos',dono:pedidoEhRural(p)?'Estagiário / Adm_ODI':'Estagiário',ok:e2,ativo:e1&&!e2},
+    {n:3,t:'Projeto',dono:'Projetista → Estagiário → Gerente',ok:e3,ativo:e1&&!e3},
+    {n:4,t:'Enquadramento',dono:'Gerente',ok:e4,ativo:e2&&e3&&!e4},
+    {n:5,t:'Pagamento do projeto',dono:'Analista',ok:e5,ativo:e3&&!e5},
+  ];
+}
+function pdEtapasHtml(p){
+  const et=pdEtapas(p);
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">`+et.map(e=>{
+    const cor=e.ok?'#22C55E':((e.ativo||(!e.ok&&e.n===1))?'#F59E0B':'var(--muted)');
+    return `<div style="flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid ${e.ok?'rgba(34,197,94,.45)':((e.ativo||e.n===1)?'rgba(245,158,11,.45)':'var(--border)')};background:${e.ok?'rgba(34,197,94,.07)':'transparent'}">
+      <div style="font-size:11px;font-weight:800;color:${cor}">${e.ok?'✅':((e.ativo||e.n===1)?'●':'○')} ${e.n} · ${e.t}</div>
+      <div style="font-size:9px;color:var(--muted)">${e.dono}</div></div>`; }).join('')+`</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  ③ PRÉ-ANÁLISE DO ESTAGIÁRIO (materiais orçados + km de rede)
+// ══════════════════════════════════════════════════════
+let _paDraft=paVazio(), _paDirty=false;
+function paVazio(){ return {materiaisOk:'',materiaisErrados:[''],kmProjBT:'',kmProjMT:'',kmRetBT:'',kmRetMT:'',obs:''}; }
+function paMesclar(s){ const b=Object.assign(paVazio(),s||{}); b.materiaisErrados=Array.isArray(b.materiaisErrados)&&b.materiaisErrados.length?[...b.materiaisErrados]:['']; return b; }
+function paPodeEditar(){ return !!me && ['estagiario','gerente'].includes(me.perfil); }
+window.pdPaSet=function(k,v,rerender){ _paDraft[k]=v; _paDirty=true; if(rerender) pdRenderPreAnalise(); };
+window.pdPaMatSet=function(i,v){ _paDraft.materiaisErrados[i]=v; _paDirty=true; };
+window.pdPaMatAdd=function(){ _paDraft.materiaisErrados.push(''); _paDirty=true; pdRenderPreAnalise(); };
+window.pdPaMatDel=function(i){ const l=_paDraft.materiaisErrados; l.splice(i,1); if(!l.length) l.push(''); _paDirty=true; pdRenderPreAnalise(); };
+function pdMateriaisErradosConhecidos(){
+  const set=new Set(); pedidos.forEach(p=>((p.preAnalise&&p.preAnalise.materiaisErrados)||[]).forEach(m=>{ if(m) set.add(m); })); return [...set].sort();
+}
+function pdRenderPreAnalise(){
+  const p=_pdAtual(); const body=document.getElementById('pdPreAnaliseBody'); if(!p||!body) return;
+  if(!p.dataRetornoProjetista && !preAnaliseFeita(p) && !p.reprojetoPendente){
+    body.innerHTML='<div style="padding:10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted)">Libera quando o projetista devolver o projeto (registre a data de retorno na seção ② Documentos).</div>'; return;
+  }
+  const ro=!paPodeEditar(); const d=_paDraft; const feita=preAnaliseFeita(p);
+  const km=(k,l)=>`<div class="fg"><label>${l}</label><input type="text" inputmode="decimal" value="${pdEsc(d[k])}" ${ro?'disabled':''} placeholder="0,000" oninput="pdPaSet('${k}',this.value,false)" style="width:100%"></div>`;
+  body.innerHTML=`
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Não bloqueia a análise do Gerente. Em caso de reprojeto não precisa ser refeita (pode ser corrigida se os km mudarem). Os km servem para o Analista conferir o pagamento do projeto.</div>
+    <div class="fg-grid">
+      <div class="fg"><label>Os materiais estão orçados de maneira correta?</label>
+        <select ${ro?'disabled':''} onchange="pdPaSet('materiaisOk',this.value,true)" style="width:100%"><option value="" ${d.materiaisOk===''?'selected':''}>—</option><option value="sim" ${d.materiaisOk==='sim'?'selected':''}>Sim</option><option value="nao" ${d.materiaisOk==='nao'?'selected':''}>Não</option></select></div>
+      <div class="fg"><label>Projetista</label><div style="padding:7px 0;font-weight:700">${pdEsc(p.projetista||'—')}</div></div>
+      ${d.materiaisOk==='nao'?`<div class="fg" style="grid-column:1/-1"><label>Material(is) com código errado (pontua para o projetista)</label>
+        ${d.materiaisErrados.map((v,i)=>`<div style="display:flex;gap:6px;margin-bottom:4px"><input type="text" list="dlMatErrados" value="${pdEsc(v)}" ${ro?'disabled':''} placeholder="Código / descrição do material ${i+1}" oninput="pdPaMatSet(${i},this.value)" style="flex:1">${ro?'':`<button type="button" class="btn btn-danger btn-sm" onclick="pdPaMatDel(${i})">🗑️</button>`}</div>`).join('')}
+        <datalist id="dlMatErrados">${pdMateriaisErradosConhecidos().map(x=>`<option value="${pdEsc(x)}">`).join('')}</datalist>
+        ${ro?'':'<button type="button" class="btn btn-secondary btn-sm" onclick="pdPaMatAdd()">+ Adicionar material</button>'}</div>`:''}
+      ${km('kmProjMT','Rede PROJETADA — km de MT')}${km('kmProjBT','Rede PROJETADA — km de BT')}
+      ${km('kmRetMT','Rede RETIRADA — km de MT')}${km('kmRetBT','Rede RETIRADA — km de BT')}
+      <div class="fg" style="grid-column:1/-1"><label>Observações (opcional)</label><input type="text" value="${pdEsc(d.obs)}" ${ro?'disabled':''} oninput="pdPaSet('obs',this.value,false)" style="width:100%"></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:10px">
+      <span>${feita?`<span style="color:#22C55E;font-weight:700">✅ Pré-análise concluída em ${fmtTxt(p.preAnalise.concluidaEm)}${p.preAnalise.concluidaPor?' por '+pdEsc(p.preAnalise.concluidaPor):''}</span>`:'<span style="color:#F59E0B">⏳ Pré-análise pendente</span>'}</span>
+      ${ro?'<span style="font-size:11px;color:var(--muted)">Preenchida pelo Estagiário (ou Gerente).</span>':`<div style="display:flex;gap:6px"><button type="button" class="btn btn-secondary btn-sm" onclick="pdPaSalvar('rascunho')">💾 Salvar</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="pdPaSalvar('${feita?'reabrir':'concluir'}')">${feita?'Reabrir pré-análise':'Concluir pré-análise'}</button></div>`}
+    </div>`;
+}
+window.pdPaSalvar=async function(modo){
+  const p=_pdAtual(); if(!p) return;
+  if(!paPodeEditar()){ toast('Sem permissão para editar a pré-análise.','err'); return; }
+  const d={..._paDraft}; d.materiaisErrados=(d.materiaisErrados||[]).map(x=>String(x).trim()).filter(Boolean);
+  if(d.materiaisOk!=='nao') d.materiaisErrados=[];
+  const ant=p.preAnalise||{};
+  const dados={...d, concluidaEm:ant.concluidaEm||null, concluidaPor:ant.concluidaPor||null, projetista:ant.projetista||p.projetista||''};
+  let ev='Pré-análise do projeto salva', det='';
+  if(modo==='concluir'){
+    if(!d.materiaisOk){ toast('Responda se os materiais estão orçados corretamente.','err'); return; }
+    if(d.materiaisOk==='nao' && !d.materiaisErrados.length){ toast('Informe ao menos um material com código errado.','err'); return; }
+    for(const [k,l] of [['kmProjMT','km de MT projetado'],['kmProjBT','km de BT projetado'],['kmRetMT','km de MT retirado'],['kmRetBT','km de BT retirado']]){
+      const n=pdNumKm(d[k]); if(n===null||n<0){ toast('Informe o '+l+' (use 0 se não houver).','err'); return; }
+    }
+    dados.concluidaEm=pdHojeStr(); dados.concluidaPor=me.nome; dados.projetista=p.projetista||'';
+    ev='Pré-análise do projeto concluída';
+    det='Projetado: MT '+d.kmProjMT+' km · BT '+d.kmProjBT+' km | Retirado: MT '+d.kmRetMT+' km · BT '+d.kmRetBT+' km'+(d.materiaisOk==='nao'?' | Materiais com erro: '+d.materiaisErrados.join(', '):'');
+  } else if(modo==='reabrir'){ dados.concluidaEm=null; dados.concluidaPor=null; ev='Pré-análise do projeto reaberta'; }
+  try{
+    const np=await pdSave(p.id,{preAnalise:dados},ev,det);
+    _paDraft=paMesclar(np.preAnalise); _paDirty=false;
+    pdRenderPreAnalise(); pdRefreshLeve(np);
+    toast(modo==='concluir'?'Pré-análise concluída!':(modo==='reabrir'?'Pré-análise reaberta.':'Pré-análise salva.'));
+  }catch(e){ console.error(e); toast('Erro ao salvar a pré-análise.','err'); }
+};
+
+// ══════════════════════════════════════════════════════
+//  ⑤ PAGAMENTO DO PROJETO (Analista)
+// ══════════════════════════════════════════════════════
+function pgPodeEditar(){ return !!me && ['analista','gerente'].includes(me.perfil); }
+function pdKmResumoHtml(p){
+  const a=p.preAnalise||{}; const f=v=>(v===''||v==null)?'—':pdEsc(v)+' km';
+  const dist=pdDistEstimadaKm(p);
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:8px">
+    <div style="border:1px solid var(--border);border-radius:8px;padding:6px 10px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Projetado MT / BT</div><b>${f(a.kmProjMT)} / ${f(a.kmProjBT)}</b></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:6px 10px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Retirado MT / BT</div><b>${f(a.kmRetMT)} / ${f(a.kmRetBT)}</b></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:6px 10px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Projetista</div><b>${pdEsc(p.projetista||'—')}</b></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:6px 10px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase">Distância estimada (Lages → equip. ${pdEsc(p.equipamentoRef||'—')})</div>
+      <b>${dist==null?'—':dist.toFixed(1).replace('.',',')+' km (ida) · '+(dist*2).toFixed(1).replace('.',',')+' km ida e volta'}</b>
+      ${dist==null&&pgPodeEditar()?`<div><button type="button" class="btn btn-secondary btn-sm" style="margin-top:4px" onclick="pdRecalcularDistancia()">📍 Localizar equipamento</button></div>`:''}</div>
+  </div>${preAnaliseFeita(p)?'':'<div style="font-size:11px;color:#F59E0B;margin-bottom:8px">⚠️ A pré-análise do Estagiário (km de rede) ainda não foi concluída.</div>'}`;
+}
+function pdRenderPagamento(){
+  const p=_pdAtual(); const body=document.getElementById('pdPagamentoBody'); if(!p||!body) return;
+  const ed=pgPodeEditar(); const pg=p.pagamentoProjeto||{};
+  if(!p.validacaoGerenteOk && !pg.pagoEm){
+    body.innerHTML=pdKmResumoHtml(p)+'<div style="padding:10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted)">O pagamento libera depois que o Gerente concluir a análise de projeto (projeto OK).</div>'; return;
+  }
+  let html=pdKmResumoHtml(p);
+  html+=`<div style="padding:10px;border-radius:8px;border:1px solid ${pg.pagoEm?'rgba(34,197,94,.4)':'rgba(245,158,11,.45)'};margin-bottom:8px">
+    <b style="font-size:12px">Projeto</b> — `;
+  if(pg.pagoEm){
+    html+=`<span style="color:#22C55E;font-weight:700">✅ Pago em ${fmtTxt(pg.pagoEm)}${pg.pagoPor?' por '+pdEsc(pg.pagoPor):''}</span>${pg.obs?'<div style="font-size:11px;color:var(--muted)">'+pdEsc(pg.obs)+'</div>':''}
+      ${ed?'<div style="margin-top:6px"><button type="button" class="btn btn-secondary btn-sm" onclick="pdDesfazerPagamento(-1)">Desfazer pagamento</button></div>':''}`;
+  } else {
+    html+=`<span style="color:#F59E0B;font-weight:700">⏳ Não pago</span>
+      ${ed?`<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:6px">
+        <div class="fg" style="margin:0"><label>Data do pagamento</label><input type="date" id="pdPgData" value="${pdHojeStr()}" max="${pdHojeStr()}"></div>
+        <div class="fg" style="margin:0;flex:1;min-width:180px"><label>Observação (opcional)</label><input type="text" id="pdPgObs" placeholder="Ex.: medição nº…"></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="pdPagarProjeto(-1)">Informar que pagou o projeto</button></div>`:'<span style="font-size:11px;color:var(--muted)"> · o Analista informa o pagamento.</span>'}`;
+  }
+  html+='</div>';
+  (p.reprojetos||[]).forEach((r,i)=>{
+    html+=`<div style="padding:10px;border-radius:8px;border:1px solid var(--border);margin-bottom:8px">
+      <b style="font-size:12px">Reprojeto #${i+1}</b> <span style="font-size:11px;color:var(--muted)">· ${fmtTxt(r.data)} · ${pdEsc(r.tipo||'')}</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <label style="font-size:11px">Gera novo pagamento?</label>
+        <select ${ed&&!r.pagoEm?'':'disabled'} onchange="pdReprojetoPagar(${i},this.value)" style="width:auto">
+          <option value="" ${!r.pagar?'selected':''}>A verificar</option><option value="sim" ${r.pagar==='sim'?'selected':''}>Sim — pagar</option><option value="nao" ${r.pagar==='nao'?'selected':''}>Não gera pagamento</option></select>
+        ${r.pagar==='sim'?(r.pagoEm?`<span style="color:#22C55E;font-weight:700">✅ Pago em ${fmtTxt(r.pagoEm)}${r.pagoPor?' por '+pdEsc(r.pagoPor):''}</span>${ed?`<button type="button" class="btn btn-secondary btn-sm" onclick="pdDesfazerPagamento(${i})">Desfazer</button>`:''}`
+          :(ed?`<input type="date" id="pdPgDataR${i}" value="${pdHojeStr()}" max="${pdHojeStr()}" style="width:auto"><button type="button" class="btn btn-primary btn-sm" onclick="pdPagarProjeto(${i})">Informar pagamento</button>`:'<span style="color:#F59E0B;font-weight:700">⏳ Não pago</span>')):''}
+      </div></div>`;
+  });
+  body.innerHTML=html;
+}
+window.pdPagarProjeto=async function(idx){
+  const p=_pdAtual(); if(!p||!pgPodeEditar()) return;
+  if(!p.validacaoGerenteOk){ toast('O pagamento só pode ser informado após a análise de projeto do Gerente.','err'); return; }
+  try{
+    let np;
+    if(idx<0){
+      const data=document.getElementById('pdPgData').value; if(!data){ toast('Informe a data do pagamento.','err'); return; }
+      const obs=(document.getElementById('pdPgObs').value||'').trim();
+      np=await pdSave(p.id,{pagamentoProjeto:{pagoEm:data,pagoPor:me.nome,obs}},'Projeto pago','Data '+fmtTxt(data)+(obs?' · '+obs:''));
+    } else {
+      const data=document.getElementById('pdPgDataR'+idx).value; if(!data){ toast('Informe a data do pagamento.','err'); return; }
+      const lista=(p.reprojetos||[]).map((r,i)=>i===idx?{...r,pagar:'sim',pagoEm:data,pagoPor:me.nome}:r);
+      np=await pdSave(p.id,{reprojetos:lista},'Reprojeto #'+(idx+1)+' pago','Data '+fmtTxt(data));
+    }
+    toast('Pagamento registrado.'); pdRenderPagamento(); pdRefreshLeve(np);
+  }catch(e){ console.error(e); toast('Erro ao registrar pagamento.','err'); }
+};
+window.pdDesfazerPagamento=async function(idx){
+  const p=_pdAtual(); if(!p||!pgPodeEditar()) return;
+  if(!confirm('Desfazer o registro de pagamento?')) return;
+  try{
+    let np;
+    if(idx<0) np=await pdSave(p.id,{pagamentoProjeto:{pagoEm:null,pagoPor:null,obs:''}},'Pagamento do projeto desfeito');
+    else { const lista=(p.reprojetos||[]).map((r,i)=>i===idx?{...r,pagoEm:null,pagoPor:null}:r); np=await pdSave(p.id,{reprojetos:lista},'Pagamento do reprojeto #'+(idx+1)+' desfeito'); }
+    pdRenderPagamento(); pdRefreshLeve(np);
+  }catch(e){ console.error(e); toast('Erro ao desfazer.','err'); }
+};
+window.pdReprojetoPagar=async function(idx,v){
+  const p=_pdAtual(); if(!p||!pgPodeEditar()) return;
+  try{
+    const lista=(p.reprojetos||[]).map((r,i)=>i===idx?{...r,pagar:v}:r);
+    const np=await pdSave(p.id,{reprojetos:lista},'Reprojeto #'+(idx+1)+': '+(v==='sim'?'gera novo pagamento':v==='nao'?'não gera pagamento':'pagamento a verificar'));
+    pdRenderPagamento(); pdRefreshLeve(np);
+  }catch(e){ console.error(e); toast('Erro ao salvar.','err'); }
+};
+window.pdRecalcularDistancia=async function(){
+  const p=_pdAtual(); if(!p||!p.equipamentoRef){ toast('Pedido sem equipamento de referência.','err'); return; }
+  const loc=await pdLocalizarEquip(p.equipamentoRef);
+  if(!loc){ toast('Equipamento '+p.equipamentoRef+' não encontrado no Mapa da Rede.','warn'); return; }
+  try{ const np=await pdSave(p.id,{equipLat:loc.lat,equipLon:loc.lon},'Equipamento de referência localizado no mapa'); pdRenderPagamento(); pdRefreshLeve(np); toast('Equipamento localizado.'); }
+  catch(e){ console.error(e); toast('Erro ao salvar.','err'); }
+};
+
+// ══════════════════════════════════════════════════════
+//  ABA "PROJETOS A PAGAR" + EXCEL
+// ══════════════════════════════════════════════════════
+let _pdPg={projetista:'',pagos:false};
+function pdLinhasPagamento(incluirPagos){
+  const rows=[];
+  pedidos.forEach(p=>{
+    if(p.acaoAnalista!=='Enviado para Projeto' || !p.validacaoGerenteOk) return;
+    const a=p.preAnalise||{}; const dist=pdDistEstimadaKm(p);
+    const base={p, nota:p.nota||'', tipo:p.tipoSolicitacao||'', municipio:p.municipio||'', projetista:p.projetista||'', equip:p.equipamentoRef||'',
+      envio:p.dataEncaminhamentoProjetista||'', retorno:p.dataRetornoProjetista||'', analise:(p.analiseProjeto&&p.analiseProjeto.concluidaEm)||'',
+      kmProjMT:pdNumKm(a.kmProjMT), kmProjBT:pdNumKm(a.kmProjBT), kmRetMT:pdNumKm(a.kmRetMT), kmRetBT:pdNumKm(a.kmRetBT),
+      materiais:a.materiaisOk==='sim'?'OK':(a.materiaisOk==='nao'?'Com erro: '+(a.materiaisErrados||[]).join(', '):'—'),
+      preAnalise:preAnaliseFeita(p), dist};
+    const pg=p.pagamentoProjeto||{};
+    rows.push({...base,item:'Projeto',idx:-1,pago:!!pg.pagoEm,pagoEm:pg.pagoEm||'',situacao:pg.pagoEm?'Pago':'A pagar'});
+    (p.reprojetos||[]).forEach((r,i)=>{
+      if(r.pagar==='nao') return;
+      rows.push({...base,item:'Reprojeto #'+(i+1)+(r.tipo?' — '+r.tipo:''),idx:i,pago:!!r.pagoEm,pagoEm:r.pagoEm||'',situacao:r.pagoEm?'Pago':(r.pagar==='sim'?'A pagar':'Verificar se gera pagamento')});
+    });
+  });
+  return rows.filter(r=>(incluirPagos||!r.pago)&&(!_pdPg.projetista||r.projetista===_pdPg.projetista))
+    .sort((a,b)=>(a.projetista||'').localeCompare(b.projetista||'')||(a.analise||'').localeCompare(b.analise||''));
+}
+window.pdPgSet=function(k,v){ _pdPg[k]=v; pdRenderPagar(); };
+function pdRenderPagar(){
+  const el=document.getElementById('pdAbaPagar'); if(!el) return;
+  const rows=pdLinhasPagamento(_pdPg.pagos);
+  const n=v=>v==null?'—':String(v.toFixed(3)).replace('.',',');
+  const soma=(arr,k)=>arr.reduce((s,r)=>s+(r[k]||0),0);
+  const naoPagos=rows.filter(r=>!r.pago);
+  const porProj={}; naoPagos.forEach(r=>{ const k=r.projetista||'—'; (porProj[k]=porProj[k]||[]).push(r); });
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+      <select onchange="pdPgSet('projetista',this.value)" style="font-size:11px;padding:5px 8px"><option value="">Todos os projetistas</option>${PROJETISTAS_PEDIDO.map(x=>`<option value="${pdEsc(x)}" ${_pdPg.projetista===x?'selected':''}>${pdEsc(x)}</option>`).join('')}</select>
+      <label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" style="width:auto" ${_pdPg.pagos?'checked':''} onchange="pdPgSet('pagos',this.checked)"> Mostrar também os já pagos</label>
+      <button class="btn btn-primary btn-sm" onclick="pdExportarAPagar()">📥 Exportar Excel (projetos não pagos)</button>
+      <span style="font-size:11px;color:var(--muted)">${naoPagos.length} item(ns) não pago(s)</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">${Object.keys(porProj).sort().map(k=>{ const l=porProj[k];
+      return `<div style="border:1px solid var(--border);border-radius:10px;padding:8px 12px;min-width:170px"><div style="font-weight:800">${pdEsc(k)}</div>
+        <div style="font-size:11px">${l.length} item(ns) a pagar</div>
+        <div style="font-size:10px;color:var(--muted)">Projetado: MT ${n(soma(l,'kmProjMT'))} · BT ${n(soma(l,'kmProjBT'))} km<br>Retirado: MT ${n(soma(l,'kmRetMT'))} · BT ${n(soma(l,'kmRetBT'))} km<br>Distância (ida e volta): ${(soma(l,'dist')*2).toFixed(0)} km</div></div>`; }).join('')}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--surface2)">${['Nota','Projetista','Item','Município','Análise do Gerente','Proj. MT (km)','Proj. BT (km)','Ret. MT (km)','Ret. BT (km)','Dist. est. ida/volta (km)','Materiais','Situação'].map(t=>`<th style="padding:8px;text-align:left">${t}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(r=>`<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="openPedidoModal('${r.p.id}')">
+        <td style="padding:8px;font-weight:700">${pdEsc(r.nota)}</td><td style="padding:8px">${pdEsc(r.projetista||'—')}</td><td style="padding:8px">${pdEsc(r.item)}</td>
+        <td style="padding:8px">${pdEsc(r.municipio)}</td><td style="padding:8px">${fmtTxt(r.analise)}</td>
+        <td style="padding:8px">${n(r.kmProjMT)}</td><td style="padding:8px">${n(r.kmProjBT)}</td><td style="padding:8px">${n(r.kmRetMT)}</td><td style="padding:8px">${n(r.kmRetBT)}</td>
+        <td style="padding:8px">${r.dist==null?'—':(r.dist*2).toFixed(1).replace('.',',')}</td>
+        <td style="padding:8px;font-size:11px">${pdEsc(r.materiais)}${r.preAnalise?'':' <span style="color:#F59E0B">(sem pré-análise)</span>'}</td>
+        <td style="padding:8px;font-weight:700;color:${r.pago?'#22C55E':(r.situacao==='A pagar'?'#F59E0B':'#3B82F6')}">${pdEsc(r.situacao)}${r.pagoEm?' · '+fmtTxt(r.pagoEm):''}</td></tr>`).join('')
+        ||'<tr><td colspan="12" style="padding:16px;text-align:center;color:var(--muted)">Nenhum projeto a pagar.</td></tr>'}</tbody></table></div>`;
+}
+window.pdExportarAPagar=function(){
+  if(typeof XLSX==='undefined'){ toast('Biblioteca de Excel não carregada.','err'); return; }
+  const rows=pdLinhasPagamento(false);
+  if(!rows.length){ toast('Não há projetos não pagos para exportar.','warn'); return; }
+  const r2=v=>v==null?'':Math.round(v*1000)/1000;
+  const cab=['Nota','Projetista','Item','Situação','Tipo de solicitação','Município','Equip. de referência','Envio ao projetista','Retorno do projeto','Análise do Gerente (projeto OK)',
+    'Rede projetada MT (km)','Rede projetada BT (km)','Rede retirada MT (km)','Rede retirada BT (km)','Materiais orçados','Pré-análise concluída',
+    'Distância estimada ida (km)','Distância estimada ida e volta (km)'];
+  const linhas=rows.map(r=>[r.nota,r.projetista,r.item,r.situacao,r.tipo,r.municipio,r.equip,fmtTxt(r.envio),fmtTxt(r.retorno),fmtTxt(r.analise),
+    r2(r.kmProjMT),r2(r.kmProjBT),r2(r.kmRetMT),r2(r.kmRetBT),r.materiais,r.preAnalise?'Sim':'Não',
+    r.dist==null?'':Math.round(r.dist*10)/10, r.dist==null?'':Math.round(r.dist*20)/10]);
+  const grupos={}; rows.forEach(r=>{ const k=r.projetista||'—'; const g=grupos[k]=grupos[k]||{n:0,pm:0,pb:0,rm:0,rb:0,d:0}; g.n++; g.pm+=r.kmProjMT||0; g.pb+=r.kmProjBT||0; g.rm+=r.kmRetMT||0; g.rb+=r.kmRetBT||0; g.d+=(r.dist||0)*2; });
+  const resumo=[['Projetista','Itens não pagos','Projetada MT (km)','Projetada BT (km)','Retirada MT (km)','Retirada BT (km)','Distância estimada ida e volta (km)'],
+    ...Object.keys(grupos).sort().map(k=>{ const g=grupos[k]; return [k,g.n,r2(g.pm),r2(g.pb),r2(g.rm),r2(g.rb),Math.round(g.d*10)/10]; }),
+    [],['Distância: linha reta de Lages (base) até o equipamento de referência × fator de estrada '+String(pedidosParams.fatorEstrada||1.3).replace('.',',')+'. Valor estimado.']];
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet([cab,...linhas]); ws['!cols']=cab.map((c,i)=>({wch:i===2?34:(i===14?40:Math.max(12,Math.min(26,c.length+2)))}));
+  XLSX.utils.book_append_sheet(wb,ws,'Projetos não pagos');
+  const ws2=XLSX.utils.aoa_to_sheet(resumo); ws2['!cols']=[{wch:22},{wch:16},{wch:18},{wch:18},{wch:18},{wch:18},{wch:30}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Resumo por projetista');
+  XLSX.writeFile(wb,'projetos_nao_pagos_'+pdHojeStr()+'.xlsx');
+  toast(rows.length+' item(ns) exportado(s).');
+};
+
+// ══════════════════════════════════════════════════════
+//  ABA "DASHBOARDS" — prazos de analista, projetistas, análise e supervisores
+// ══════════════════════════════════════════════════════
+let _pdDash={periodo:'todos'};
+window.pdDashSet=function(k,v){ _pdDash[k]=v; pdRenderDash(); };
+function pdMedia(arr){ const l=arr.filter(x=>x!=null&&!isNaN(x)); return l.length?l.reduce((a,b)=>a+b,0)/l.length:null; }
+function pdFmtD(v){ return v==null?'—':(Math.round(v*10)/10).toString().replace('.',',')+' d'; }
+function pdPct(a,b){ return b?Math.round(a*100/b)+'%':'—'; }
+function pdDocsFaltantes(p){
+  if(Array.isArray(p.pendenciasIniciais)) return p.pendenciasIniciais;
+  if(p.checklistConcluido) return checklistPendentes(p).map(i=>i.documento);
+  return null; // checklist ainda em conferência — não entra na estatística
+}
+function pdRenderDash(){
+  const el=document.getElementById('pdAbaDash'); if(!el) return;
+  const hoje=pdHojeStr();
+  let base=pedidos.slice();
+  if(_pdDash.periodo!=='todos'){ const corte=pdAddDias(hoje,-parseInt(_pdDash.periodo,10)); base=base.filter(p=>(p.dataAberturaPedido||'')>=corte); }
+  const env=base.filter(p=>p.acaoAnalista==='Enviado para Projeto'&&p.dataEncaminhamentoProjetista);
+  const kpi=(t,v,cor,sub)=>`<div style="border:1px solid var(--border);border-radius:10px;padding:10px 14px;min-width:140px;flex:1"><div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700">${t}</div><div style="font-size:22px;font-weight:800;color:${cor||'var(--text)'}">${v}</div>${sub?`<div style="font-size:10px;color:var(--muted)">${sub}</div>`:''}</div>`;
+  const sec=(t,inner)=>`<div style="border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px"><div style="font-size:12px;font-weight:800;margin-bottom:8px;color:var(--accent)">${t}</div>${inner}</div>`;
+  const tabela=(cab,linhas)=>`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface2)">${cab.map(c=>`<th style="padding:6px 8px;text-align:left">${c}</th>`).join('')}</tr></thead><tbody>${linhas.map(l=>`<tr style="border-bottom:1px solid var(--border)">${l.map(c=>`<td style="padding:6px 8px">${c}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cab.length}" style="padding:12px;color:var(--muted);text-align:center">Sem dados no período.</td></tr>`}</tbody></table></div>`;
+  const barra=(a,b,corA,corB)=>{ const t=a+b; if(!t) return ''; const pa=Math.round(a*100/t); return `<div style="display:flex;height:10px;border-radius:6px;overflow:hidden;margin-top:4px;background:var(--surface2)"><div style="width:${pa}%;background:${corA}"></div><div style="width:${100-pa}%;background:${corB}"></div></div>`; };
+  const verm=(n)=>n>0?`<b style="color:#EF4444">${n}</b>`:String(n);
+
+  // ── Prazo regulatório
+  const infos=base.map(p=>({p,i:prazoInfo(p)}));
+  const enq=infos.filter(x=>x.i.tipo==='enquadrado'); const enqD=enq.filter(x=>x.i.dentro).length;
+  const venc=infos.filter(x=>x.i.tipo==='vencido').length, v7=infos.filter(x=>x.i.tipo==='ativo'&&x.i.dias<=7).length;
+  const ativos=infos.filter(x=>x.i.tipo==='ativo').length, paus=infos.filter(x=>x.i.tipo==='pausado').length;
+  // ── Analista
+  const an=base.map(p=>({p,a:prazoAnalistaInfo(p)}));
+  const anDec=an.filter(x=>x.a.tipo==='decidido'&&x.a.usados!=null); const anDentro=anDec.filter(x=>x.a.dentro).length;
+  const anPend=an.filter(x=>['ativo','vencido','pausado'].includes(x.a.tipo)); const anVenc=anPend.filter(x=>x.a.tipo==='vencido');
+  const acoesCnt={}; base.forEach(p=>{ const k=p.acaoAnalista||'(sem ação definida)'; acoesCnt[k]=(acoesCnt[k]||0)+1; });
+
+  let html=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+      <span style="font-size:11px;color:var(--muted)">Pedidos abertos em:</span>
+      <select onchange="pdDashSet('periodo',this.value)" style="font-size:11px;padding:5px 8px">${[['todos','Todo o período'],['30','Últimos 30 dias'],['90','Últimos 90 dias'],['180','Últimos 180 dias'],['365','Últimos 12 meses']].map(([v,l])=>`<option value="${v}" ${_pdDash.periodo===v?'selected':''}>${l}</option>`).join('')}</select>
+      <span style="font-size:11px;color:var(--muted)">${base.length} pedido(s)</span></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${kpi('Pedidos',base.length,'',env.length+' enviados a projeto')}
+      ${kpi('Enquadrados no prazo',pdPct(enqD,enq.length),enq.length&&enqD<enq.length?'#F59E0B':'#22C55E',enqD+' de '+enq.length+' enquadrados')}
+      ${kpi('Prazo regulatório vencido',venc,venc?'#EF4444':'#22C55E','em andamento agora')}
+      ${kpi('Vencem em até 7 dias',v7,v7?'#F97316':'#22C55E',ativos+' no prazo · '+paus+' pausados (M34)')}
+      ${kpi('Analista fora dos '+(pedidosParams.prazoAnalistaDias||15)+' d',anVenc.length,anVenc.length?'#EF4444':'#22C55E',anPend.length+' aguardando definição')}
+    </div>`;
+
+  html+=sec('🧑‍💼 Analista — prazo de '+(pedidosParams.prazoAnalistaDias||15)+' dias para definir a ação',
+    `<div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${kpi('Definidos no prazo',pdPct(anDentro,anDec.length),'#22C55E',anDentro+' de '+anDec.length)}
+      ${kpi('Tempo médio até definir',pdFmtD(pdMedia(anDec.map(x=>x.a.usados))),'','dias corridos (sem Medida 34)')}
+      ${kpi('Aguardando definição',anPend.length,'',anVenc.length+' vencido(s)')}
+    </div>${barra(anDentro,anDec.length-anDentro,'#22C55E','#EF4444')}
+    <div style="font-size:11px;margin-top:8px">${Object.keys(acoesCnt).sort().map(k=>`<span style="display:inline-block;margin:0 10px 4px 0"><b>${acoesCnt[k]}</b> ${pdEsc(k)}</span>`).join('')}</div>
+    ${anVenc.length?`<div style="font-size:11px;margin-top:6px;color:#EF4444"><b>Vencidos:</b> ${anVenc.slice(0,30).map(x=>`<a href="#" onclick="openPedidoModal('${x.p.id}');return false" style="color:#EF4444">${pdEsc(x.p.nota||'—')}</a> (${Math.abs(x.a.dias)} d)`).join(' · ')}</div>`:''}`);
+
+  // ── Projetistas
+  const ref=pedidosParams.prazoProjetistaDias;
+  const projs=[...new Set(env.map(p=>p.projetista||'—'))].sort();
+  const linhasP=projs.map(nome=>{
+    const l=env.filter(p=>(p.projetista||'—')===nome);
+    const emProj=l.filter(p=>!p.dataRetornoProjetista&&!p.dataEnquadramento);
+    const atras=emProj.filter(p=>!p.reprojetoPendente&&diff(p.dataEncaminhamentoProjetista,hoje)>ref);
+    const tempos=l.map(p=>{ const r=p.primeiroRetornoProjetista||((p.reprojetos||[]).length?null:p.dataRetornoProjetista); return r?diff(p.dataEncaminhamentoProjetista,r):null; });
+    const entregues=tempos.filter(x=>x!=null); const noPrazo=entregues.filter(x=>x<=ref).length;
+    const repro=l.reduce((s,p)=>s+(p.reprojetos||[]).length,0);
+    const matErr=l.filter(p=>p.preAnalise&&p.preAnalise.materiaisOk==='nao').length;
+    const matAval=l.filter(p=>p.preAnalise&&p.preAnalise.materiaisOk).length;
+    const km=k=>l.reduce((s,p)=>s+(pdNumKm(p.preAnalise&&p.preAnalise[k])||0),0);
+    return [`<b>${pdEsc(nome)}</b>`,l.length,emProj.length,verm(atras.length),pdFmtD(pdMedia(entregues)),entregues.length?pdPct(noPrazo,entregues.length):'—',verm(repro),matAval?verm(matErr)+' de '+matAval:'—',km('kmProjMT').toFixed(2).replace('.',','),km('kmProjBT').toFixed(2).replace('.',',')];
+  });
+  const cnt=(arr)=>{ const m={}; arr.forEach(x=>{ if(x) m[x]=(m[x]||0)+1; }); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+  const probs=cnt(env.flatMap(p=>(p.reprojetos||[]).map(r=>r.tipo)));
+  const mats=cnt(env.flatMap(p=>(p.preAnalise&&p.preAnalise.materiaisErrados)||[]));
+  html+=sec('📐 Projetistas — prazo de referência de '+ref+' dias',
+    tabela(['Projetista','Pedidos','Em projeto agora','Atrasados (> '+ref+' d)','Tempo médio de entrega','Entregues no prazo','Reprojetos','Projetos c/ material errado','km MT projetado','km BT projetado'],linhasP)
+    +`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+      <div><div style="font-size:11px;font-weight:700;margin-bottom:4px">Principais problemas de reprojeto</div>${probs.length?probs.slice(0,8).map(([k,n])=>`<div style="font-size:11px">${n}× ${pdEsc(k)}</div>`).join(''):'<div style="font-size:11px;color:var(--muted)">Nenhum reprojeto registrado.</div>'}</div>
+      <div><div style="font-size:11px;font-weight:700;margin-bottom:4px">Materiais com código errado mais frequentes</div>${mats.length?mats.slice(0,8).map(([k,n])=>`<div style="font-size:11px">${n}× ${pdEsc(k)}</div>`).join(''):'<div style="font-size:11px;color:var(--muted)">Nenhum registrado.</div>'}</div></div>`);
+
+  // ── Estagiário / Adm_ODI
+  const ckPend=env.filter(p=>!p.dataEnquadramento&&!checklistConcluidoOuDispensado(p)).length;
+  const ckT=pdMedia(env.map(p=>p.checklistConcluidoEm?diff(p.dataEncaminhamentoProjetista,p.checklistConcluidoEm):null));
+  const rur=env.filter(pedidoEhRural);
+  const adPend=rur.filter(p=>!p.dataEnquadramento&&!p.analiseDocumentalConcluida).length;
+  const adT=pdMedia(rur.map(p=>(p.analiseDocumentalConcluida&&p.analiseDocumentalEm)?diff(p.dataEncaminhamentoProjetista,p.analiseDocumentalEm):null));
+  const paPend=env.filter(preAnalisePendente).length;
+  const paT=pdMedia(env.map(p=>{ const r=p.primeiroRetornoProjetista||p.dataRetornoProjetista; return (preAnaliseFeita(p)&&r)?Math.max(0,diff(r,p.preAnalise.concluidaEm)):null; }));
+  const reab=base.filter(p=>reanaliseAberta(p)); const reVenc=reab.filter(p=>reanalisePrazo(reanaliseAberta(p))<hoje).length;
+  const reT=pdMedia(base.flatMap(p=>(p.reanalises||[]).filter(r=>r.concluidaEm).map(r=>diff(r.abertaEm,r.concluidaEm))));
+  html+=sec('📑 Estagiário / Adm_ODI — análise documental',
+    tabela(['Atividade','Responsável','Pendentes agora','Tempo médio'],[
+      ['Checklist documental','Estagiário',verm(ckPend),pdFmtD(ckT)+' <span style="color:var(--muted);font-size:10px">(do envio a projeto até concluir)</span>'],
+      ['Análise documental detalhada (rural)','Adm_ODI / Estagiário',verm(adPend),pdFmtD(adT)+' <span style="color:var(--muted);font-size:10px">(do envio a projeto até concluir)</span>'],
+      ['Pré-análise do projeto','Estagiário',verm(paPend),pdFmtD(paT)+' <span style="color:var(--muted);font-size:10px">(do retorno do projeto até concluir)</span>'],
+      ['Reanálises documentais','Adm_ODI / Estagiário',reab.length+(reVenc?` (<b style="color:#EF4444">${reVenc} vencida(s)</b>)`:''),pdFmtD(reT)+' <span style="color:var(--muted);font-size:10px">(da abertura à conclusão)</span>'],
+    ]));
+
+  // ── Supervisores (Gerentes por município)
+  const linhasG=Object.keys(GERENTES_MUNICIPIOS).map(g=>{
+    const l=env.filter(p=>gerenteDoMunicipio(p.municipio)===g);
+    const agAn=l.filter(p=>p.dataRetornoProjetista&&!p.validacaoGerenteOk&&!p.reprojetoPendente&&!p.dataEnquadramento);
+    const parado=pdMedia(agAn.map(p=>diff(p.dataRetornoProjetista,hoje)));
+    const tAn=pdMedia(l.map(p=>{ const c=p.analiseProjeto&&p.analiseProjeto.concluidaEm; return (c&&p.dataRetornoProjetista)?Math.max(0,diff(p.dataRetornoProjetista,c)):null; }));
+    const agEnq=l.filter(p=>!p.dataEnquadramento&&p.validacaoGerenteOk&&checklistConcluidoOuDispensado(p)&&analiseDocumentalOk(p)).length;
+    const org=l.filter(p=>orgaosPendentes(p).length).length, campo=l.filter(campoPendente).length;
+    const vencG=l.filter(p=>prazoInfo(p).tipo==='vencido').length;
+    const enqG=l.filter(p=>p.dataEnquadramento); const enqDG=enqG.filter(p=>prazoInfo(p).dentro).length;
+    return [`<b>${pdEsc(g)}</b>`,l.filter(p=>!p.dataEnquadramento).length,verm(agAn.length)+(agAn.length?` <span style="color:var(--muted);font-size:10px">(parados em média ${pdFmtD(parado)})</span>`:''),pdFmtD(tAn),verm(agEnq),org,campo,verm(vencG),enqG.length?pdPct(enqDG,enqG.length)+` <span style="color:var(--muted);font-size:10px">(${enqDG}/${enqG.length})</span>`:'—'];
+  });
+  html+=sec('🧭 Supervisores (Gerentes por município)',
+    tabela(['Supervisor','Pedidos em andamento','Aguardando análise de projeto','Tempo médio da análise','Aguardando enquadramento','Órgão pendente','Campo pendente','Prazo regulatório vencido','Enquadrados no prazo'],linhasG));
+
+  // ── Documentos que mais faltam, por cidade
+  const porMun={};
+  env.forEach(p=>{ const f=pdDocsFaltantes(p); if(f===null) return; const m=porMun[p.municipio||'—']=porMun[p.municipio||'—']||{n:0,comFalta:0,docs:{}}; m.n++; if(f.length) m.comFalta++; f.forEach(d=>{ m.docs[d]=(m.docs[d]||0)+1; }); });
+  const linhasM=Object.keys(porMun).sort((a,b)=>porMun[b].comFalta-porMun[a].comFalta||a.localeCompare(b)).map(mu=>{ const m=porMun[mu];
+    const top=Object.entries(m.docs).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([d,n])=>`${pdEsc(d)} <b>(${n} · ${pdPct(n,m.n)})</b>`).join('<br>');
+    return [`<b>${pdEsc(mu)}</b>`,m.n,verm(m.comFalta)+' · '+pdPct(m.comFalta,m.n),top||'<span style="color:#22C55E">Sem faltas</span>']; });
+  html+=sec('🏙️ Documentos que mais faltam na abertura — por cidade',
+    `<div style="font-size:10px;color:var(--muted);margin-bottom:6px">Conta o que estava faltando quando o checklist foi concluído pela 1ª vez (mesmo que o documento tenha chegado depois). Use para orientar o atendimento de cada cidade.</div>`
+    +tabela(['Município','Pedidos conferidos','Com documento faltando','Documentos que mais faltam'],linhasM));
+
+  el.innerHTML=html;
+}
+
+// ── Abas da página de Pedidos ──────────────────────────
+let _pdAba='fila';
+window.pdSetAba=function(a){
+  _pdAba=a;
+  if(a==='fila') _pdF.vista='minha';
+  else if(a==='todos' && _pdF.vista==='minha') _pdF.vista='ativos';
+  pdRenderLista();
+};
+function pdRenderAbas(todos){
+  const el=document.getElementById('pdAbas'); if(!el) return;
+  const nFila=todos.filter(it=>pdMinhaFila(it.acoes)).length;
+  const nPagar=pedidos.reduce((s,p)=>s+pagamentosPendentes(p).length,0);
+  const abas=[['fila','👤 Minha fila',nFila],['todos','📋 Todos',pedidos.length]];
+  if(['analista','gerente'].includes(me.perfil)) abas.push(['pagar','💰 Projetos a pagar',nPagar]);
+  abas.push(['dash','📊 Dashboards',null]);
+  if(!abas.some(a=>a[0]===_pdAba)) _pdAba='fila';
+  el.innerHTML=abas.map(([k,t,n])=>`<button type="button" onclick="pdSetAba('${k}')" style="cursor:pointer;padding:8px 14px;border:none;border-bottom:3px solid ${_pdAba===k?'var(--accent)':'transparent'};background:transparent;color:${_pdAba===k?'var(--accent)':'var(--muted)'};font-weight:${_pdAba===k?800:600};font-size:12px">${t}${n!=null?` <span style="font-size:10px;padding:1px 7px;border-radius:10px;background:var(--surface2)">${n}</span>`:''}</button>`).join('');
+  const show=(id,v)=>{ const e=document.getElementById(id); if(e) e.style.display=v?'':'none'; };
+  show('pdAbaLista',_pdAba==='fila'||_pdAba==='todos'); show('pdAbaPagar',_pdAba==='pagar'); show('pdAbaDash',_pdAba==='dash');
+  const c=document.getElementById('pdCards'); if(c) c.style.display=_pdAba==='todos'?'flex':'none';
+}
 
 
 // ══════════════════════════════════════════════════════════════════════
@@ -13916,3 +14669,41 @@ window.saveObra=async function(){const pend=_plPend;const novo=!document.getElem
   if(pend&&novo&&fechou&&numero){_plPend=null;try{await _plConcluirVinculo(pend,numero);}catch(e){console.error(e);toast('R2 salva, mas houve erro ao vincular: '+e.message,'err');}}
   return r;};
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='oEquipRef'&&me&&me.perfil==='gerente'){const id=document.getElementById('obraId')?.value;if(!_plPend)_plAvisoObra(id||null);}});
+
+
+// ══════════════════════════════════════════════════════
+//  VIA DA OBRA DEIXADA PARA FECHAMENTO (fiscal marca; fiscal ou gerente desmarca)
+// ══════════════════════════════════════════════════════
+function renderViaFechamento(obra){
+  const el=document.getElementById('viaFechWrap'); if(!el) return;
+  const perfisVe=['fiscal','fiscal_adm','gerente','adm_odi','estagiario'];
+  if(!obra || !me || !perfisVe.includes(me.perfil)){ el.style.display='none'; el.innerHTML=''; return; }
+  const pode=['fiscal','fiscal_adm','gerente'].includes(me.perfil);
+  const on=!!obra.viaFechamento;
+  el.style.display='block';
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid ${on?'rgba(34,197,94,.4)':'var(--border)'};background:${on?'rgba(34,197,94,.07)':'transparent'}">
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;cursor:${pode?'pointer':'default'}">
+      <input type="checkbox" style="width:auto" ${on?'checked':''} ${pode?'':'disabled'} onchange="toggleViaFechamento('${obra.id}',this.checked)">
+      📁 Via da obra deixada para fechamento
+    </label>
+    <span style="font-size:11px;color:var(--muted)">${on?('Marcado em '+fmtTxt(obra.viaFechamentoEm)+(obra.viaFechamentoPor?' por '+String(obra.viaFechamentoPor).replace(/</g,'&lt;'):'')):(pode?'Marque quando deixar a via física da obra para fechamento.':'Ainda não deixada pelo fiscal.')}</span>
+  </div>`;
+}
+window.toggleViaFechamento=async function(obraId,marcar){
+  if(!['fiscal','fiscal_adm','gerente'].includes(me.perfil)){ toast('Somente o fiscal ou o gerente altera esta marcação.','err'); return; }
+  const o=obras.find(x=>x.id===obraId); if(!o) return;
+  const patch=marcar?{viaFechamento:true,viaFechamentoEm:pdHojeStr(),viaFechamentoPor:me.nome||me.email||''}
+                    :{viaFechamento:false,viaFechamentoEm:null,viaFechamentoPor:null};
+  try{
+    await updateDoc(doc(db,'obras',obraId),{...patch,atualizadaEm:serverTimestamp()});
+    Object.assign(o,patch); renderViaFechamento(o);
+    toast(marcar?'Via marcada como deixada para fechamento.':'Marcação removida.');
+    try{ window.renderObras(); }catch(e){}
+  }catch(e){ console.error(e); toast('Erro ao salvar: '+e.message,'err'); renderViaFechamento(o); }
+};
+const _viaOpenOrig=window.openObraModal;
+window.openObraModal=function(obraId){
+  const r=_viaOpenOrig.apply(this,arguments);
+  try{ renderViaFechamento(obraId?obras.find(o=>o.id===obraId):null); }catch(e){ console.warn('[via fechamento]',e); }
+  return r;
+};
