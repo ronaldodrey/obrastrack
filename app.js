@@ -4595,17 +4595,17 @@ window.abrirBulk = function(modo){
   document.getElementById('bulkBar').style.display = 'block';
   document.getElementById('bulkData').value = '';
   document.getElementById('bulkCount').textContent = '0 obras selecionadas';
-  // Colar lista de obras: disponível nas Medidas em Lote (70 / 230 / 280)
-  const _bc=document.getElementById('btnBulkColar'); if(_bc) _bc.style.display=(modo==='medidas')?'inline-flex':'none';
+  // Colar lista de obras: disponível em todas as operações em lote
+  const _bc=document.getElementById('btnBulkColar'); if(_bc) _bc.style.display='inline-flex';
   const _bw=document.getElementById('bulkColarWrap'); if(_bw) _bw.style.display='none';
   const _bt=document.getElementById('bulkColarTxt'); if(_bt) _bt.value='';
   const _bi=document.getElementById('bulkColarInfo'); if(_bi) _bi.innerHTML='';
   window.renderObras();
 };
-// ── Medidas em lote: obras coladas em coluna ──────────────────────────
+// ── Operações em lote: obras coladas em coluna ──────────────────────────
 function bulkColadas(){
   const w=document.getElementById('bulkColarWrap'); const t=document.getElementById('bulkColarTxt');
-  if(!w||!t||w.style.display==='none'||window._bulkMode!=='medidas') return {ids:[],naoAchadas:[],total:0};
+  if(!w||!t||w.style.display==='none'||!window._bulkMode) return {ids:[],naoAchadas:[],total:0};
   const nums=[...new Set((t.value||'').split(/[^0-9A-Za-z]+/).map(x=>x.trim()).filter(Boolean))];
   const vis=visibleObras(); const ids=[], naoAchadas=[];
   nums.forEach(n=>{ const o=vis.find(x=>String(x.numero||'').trim()===n); if(o) ids.push(o.id); else naoAchadas.push(n); });
@@ -12603,6 +12603,9 @@ window.openPedidoModal=function(id){
   const isEdit=!!id;
   document.getElementById('pedidoId').value=id||'';
   document.getElementById('pedidoModalTit').textContent=isEdit?'Pedido':'Novo Pedido';
+  // O modal de OBRA esconde todas as ".modal-section" da página ao abrir (inclusive as deste modal).
+  // Reexibe aqui as seções fixas do pedido (identificação e ação do analista).
+  document.querySelectorAll('#ovPedido .modal-section:not([id])').forEach(el=>{ el.style.display=''; });
   ['pdNota','pdTipoSolicitacao','pdDataAbertura','pdMunicipio','pdAcaoAnalista','pdProjetista','pdDataEncaminhamento','pdMotivoCancelamento','pdEquipRef'].forEach(i=>{ document.getElementById(i).value=''; });
   document.getElementById('pdFlagOrgaoPublico').checked=false;
   const medidaSec=document.getElementById('pedidoMedida34Wrap');
