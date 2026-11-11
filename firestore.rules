@@ -31,16 +31,29 @@ service cloud.firestore {
     }
 
     match /usuarios/{uid} {
+      // adm_odi lê a lista para administrar os usuários de empreiteira
       allow read: if request.auth != null &&
-        (request.auth.uid == uid || perfil() == 'gerente');
-      // uid check FIRST to avoid perfil() call failing on own-document updates
-      allow write: if request.auth != null && (request.auth.uid == uid || perfil() == 'gerente');
+        (request.auth.uid == uid || perfil() == 'gerente' || perfil() == 'adm_odi');
+      // Gerente: controle total.
+      allow write: if request.auth != null && perfil() == 'gerente';
+      // O próprio usuário pode atualizar seus dados, mas NÃO pode trocar o próprio perfil nem o vínculo
+      // (antes qualquer usuário conseguia se promover a gerente).
+      allow update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.perfil == resource.data.perfil
+        && request.resource.data.get('vinculo', '') == resource.data.get('vinculo', '');
+      // adm_odi: cria / edita / remove SOMENTE usuários com perfil "empreiteira"
+      allow create: if request.auth != null && perfil() == 'adm_odi'
+        && request.resource.data.perfil == 'empreiteira';
+      allow update: if request.auth != null && perfil() == 'adm_odi'
+        && resource.data.perfil == 'empreiteira' && request.resource.data.perfil == 'empreiteira';
+      allow delete: if request.auth != null && perfil() == 'adm_odi'
+        && resource.data.perfil == 'empreiteira';
     }
 
     match /empreiteiras/{id} {
       allow read: if request.auth != null;
-      // uid check FIRST to avoid perfil() call failing on own-document updates
-      allow write: if request.auth != null && (request.auth.uid == uid || perfil() == 'gerente');
+      // gerente e adm_odi cadastram empreiteiras
+      allow write: if request.auth != null && (perfil() == 'gerente' || perfil() == 'adm_odi');
     }
 
     match /notificacoes/{id} {
@@ -58,7 +71,7 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && perfil() == 'gerente';
     }
-    // Gerenciamento de Pedidos (Etapa 3): adm_odi passa a poder atualizar (análise documental)
+    // Gerenciamento de Pedidos: analista/gerente criam e excluem; estagiario e adm_odi atualizam (análises)
     match /pedidos/{id} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && (perfil() == 'analista' || perfil() == 'gerente');
