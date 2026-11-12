@@ -925,6 +925,7 @@
       <option value="genesis">Genesis</option>
               <option value="adm_odi">Adm. ODI</option>
       <option value="estagiario">Estagiário</option>
+      <option value="analista">Analista (Pedidos)</option>
     </select>
   </div>
   <div class="fg" id="fgVincEmp" style="display:none">
@@ -950,6 +951,7 @@
  <div class="modal" style="max-width:900px;width:96vw">
   <h2 id="pedidoModalTit">Novo Pedido</h2>
   <input type="hidden" id="pedidoId">
+  <div id="pdMelhBanner" style="display:none"></div>
   <div id="pdSituacao"></div>
   <div class="modal-section">
     <div class="modal-section-title">① Abertura — Identificação do Pedido (Analista)</div>
@@ -1049,6 +1051,12 @@
         <input type="number" id="pdEquipRef" placeholder="Nº do equipamento (mesmo campo das obras)" oninput="pdEquipAvisoRender()">
       </div>
       <div id="pdEquipAviso" style="grid-column:1/-1;display:none"></div>
+      <div class="pdLvSlot" data-ctx="analista" style="grid-column:1/-1"></div>
+      <div id="pdOportBox" style="grid-column:1/-1;display:none"></div>
+      <div class="fg" id="fgEscopoProjeto" style="display:none;grid-column:1/-1">
+        <label>Escopo do projeto — o que deve ser projetado *</label>
+        <textarea id="pdEscopoProjeto" rows="3" style="width:100%;resize:vertical" placeholder="Descreva o que o projetista deve projetar (ex.: extensão de rede MT monofásica até o ponto do cliente, instalação de trafo 10 kVA, ramal BT…). O supervisor usa este texto para conferir se o projeto cumpriu o escopo."></textarea>
+      </div>
       <div class="fg" id="fgMotivoCancelamento" style="display:none">
         <label>Motivo do Cancelamento</label>
         <input type="text" id="pdMotivoCancelamento" placeholder="Descreva o motivo">
@@ -1140,6 +1148,9 @@
     <div class="fg"><label>Prazo do Analista para definir a ação (dias)</label><input type="number" id="prmPrazoAnalista" min="1"></div>
     <div class="fg"><label>Fator de estrada (distância do projetista)</label><input type="number" id="prmFatorEstrada" min="1" step="0.05"></div>
     <div class="fg"><label>Matrícula: avisar se atualizada há mais de (dias)</label><input type="number" id="prmMatriculaDias" min="1"></div>
+    <div class="fg"><label>Linha Viva: UC desligadas — limite URBANO</label><input type="number" id="prmLvUrb" min="1"></div>
+    <div class="fg"><label>Linha Viva: UC desligadas — limite RURAL</label><input type="number" id="prmLvRur" min="1"></div>
+    <div class="fg"><label>Avisar para verificar MANOBRA acima de (UC)</label><input type="number" id="prmLvManobra" min="1"></div>
   </div>
   <button type="button" class="btn btn-primary btn-sm" onclick="pdSalvarPrazos()">Salvar prazos</button>
   <div class="modal-section-title" style="margin-top:16px">Justificativas de 2º ponto (pré-definidas)</div>
