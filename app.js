@@ -304,7 +304,7 @@ async function iniciarApp(){
     ['pgObras','🏗️ Obras'],
     ...(canSeePedidos?[['pgPedidos','📋 Pedidos']]:[]),
     ...(['gerente','fiscal','fiscal_adm','empreiteira'].includes(me.perfil)?[['pgMapa','🗺️ Mapa']]:[]), // v2612: Mapa da Rede
-    ...(me.perfil==='gerente'?[['pgPlanejamento','🧭 Planejamento']]:[]), // v2613: Planejamento da Rede
+    ...((me.perfil==='gerente'||me.perfil==='analista')?[['pgPlanejamento','🧭 Planejamento']]:[]), // v2613: Planejamento da Rede (analista: consulta)
     ...(canSeeAbertura?[['pgAbertura','📊 Abertura de Obras']]:[]),
     ...(canSeeFinanceiro?[['pgAnalise','💰 Análise Financeira']]:[]),
     ...(canSeeProgramas?[['pgProgramas','📋 Programas']]:[]),
@@ -331,6 +331,7 @@ async function iniciarApp(){
   document.getElementById('btnBulkDelete').style.display='none'; // shown by filtroRapido when encerradas selected
   const btnApagarTodas=document.getElementById('btnApagarTodas');
   if(btnApagarTodas) btnApagarTodas.style.display=me.perfil==='gerente'?'inline-flex':'none';
+  const btnLimpEnc=document.getElementById('btnLimparEncerradas'); if(btnLimpEnc) btnLimpEnc.style.display=me.perfil==='gerente'?'inline-flex':'none';
   // Fix #2: bulk medidas button
   // Botões de operação em lote por perfil
   const isFiscalAll = ['gerente','fiscal','fiscal_adm'].includes(me.perfil);
@@ -2094,6 +2095,7 @@ function renderObras(){
   else if(_filtroRapidoAtivo === 'prob_executivo')      baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.impedimento&&!o.conclusao);
   else if(_filtroRapidoAtivo === 'ag_armazenar')        baseList = baseList.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
   else if(_filtroRapidoAtivo === 'via_fechamento')      baseList = baseList.filter(o=>o.viaFechamento&&!o.cancelado);
+  else if(_filtroRapidoAtivo === 'via_simo')            baseList = baseList.filter(o=>o.viaCadastroSimo&&!o.cancelado);
   let list = aplicarFiltros(baseList);
   // Fix #6: apply column sort
   if(_sortCol){
@@ -2176,7 +2178,7 @@ function renderObras(){
           onchange="(()=>{ const n=document.querySelectorAll('.chk-obra:checked').length; const el=document.getElementById('bulkCount'); if(el) el.textContent=n+' obra(s) selecionada(s)'; })()">
       </td>
       <td style="${stk};left:0;min-width:120px">${statusHtml(o)}${procCancBadge}</td>
-      <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong>${chatBadge}${o.viaFechamento?`<span title="Via deixada para fechamento em ${fmtTxt(o.viaFechamentoEm)}${o.viaFechamentoPor?' por '+o.viaFechamentoPor:''}" style="margin-left:4px;cursor:help">📁</span>`:''}</td>
+      <td style="${stk};left:120px;min-width:100px"><strong style="color:var(--accent);cursor:pointer" onclick="openObraModal('${o.id}')">${o.numero||'—'}</strong>${chatBadge}${o.viaFechamento?`<span title="Via deixada para fechamento em ${fmtTxt(o.viaFechamentoEm)}${o.viaFechamentoPor?' por '+o.viaFechamentoPor:''}" style="margin-left:4px;cursor:help">📁</span>`:''}${o.viaCadastroSimo?`<span title="Via enviada para cadastro SIMO em ${fmtTxt(o.viaCadastroSimoEm)}${o.viaCadastroSimoPor?' por '+o.viaCadastroSimoPor:''}" style="margin-left:4px;cursor:help">🗂️</span>`:''}</td>
       <td>${o.tipo?`<span class="chip">${o.tipo}</span>`:'—'}</td>
       <td style="font-size:10px;color:var(--muted)">${o.enquadramento||'—'}</td>
       <td style="font-size:10px">${o.programa?`<span style="background:${{'PODI':'#7c6af7','Mono-Tri':'#F59E0B','Regulatório':'#22C55E','Melhoria':'#3B82F6'}[o.programa]||'#6b7280'};color:#fff;padding:1px 7px;border-radius:8px;font-size:9px">${o.programa}</span>`:'—'}</td>
@@ -3087,8 +3089,12 @@ window.abrirNovoKaffa = function(){
   // Inicializa listas de equipamentos
   if(me.perfil==='empreiteira'){
     const obraAtualEq=obras.find(o=>o.id===document.getElementById('obraId')?.value);
-    initEquipFromObra(obraAtualEq);
+    // só recarrega do cadastro se não houver alteração ainda não salva (antes, abrir um 2º kaffa
+    // na mesma tela apagava os transformadores digitados e ainda não salvos)
+    if(!_equipModificado) initEquipFromObra(obraAtualEq);
+    else { renderEquipInstalados(); renderEquipRetirados(); }
   }
+  _equipEditRestaurar();
   // Campos do transformador: só para empreiteira, só no 1° kaffa
   if(me.perfil==='empreiteira'){
     const secExtra=document.getElementById('secConclusaoExtra');
@@ -3885,6 +3891,11 @@ window.saveObra=async function(){
         const dataReg=obraAntiga?.regularizacaoData;
         if(prazoLim&&dataReg) patch.pendenciaDentroPrazo=(dataReg<=prazoLim);
       }
+      // E-mail quando a empreiteira informa (ou altera) um problema executivo
+      if(me.perfil==='empreiteira' && patch.impedimento &&
+         (!obraAntiga?.impedimento || (obraAntiga?.tipoImpedimento||'')!==(patch.tipoImpedimento||'') || (obraAntiga?.impedimentoOutro||'')!==(patch.impedimentoOutro||''))){
+        try{ await enviarEmailImpedimento({...obraAntiga,...patch}, !!obraAntiga?.impedimento); }catch(e){ console.warn('[Email Problema Executivo]',e); }
+      }
       // E-mail quando empreiteira regulariza pendência
       if(me.perfil==='empreiteira'&&!obraAntiga?.regularizacaoData&&patch.regularizacaoData){
         console.log('[Email] Disparando enviarEmailRegularizacao');
@@ -4290,6 +4301,29 @@ Acesse o sistema SPPC ARLAG para regularizar.`,
   // (sem marcarEnviado)
 }
 
+// Problema executivo informado pela empreiteira → fiscal, com cópia para o gerente da região e o gerente geral
+async function enviarEmailImpedimento(obra, alteracao){
+  const emFiscal = await emailDoFiscal(obra.fiscal);
+  const emReg    = await emailGerenteRegional(obra.cidade);
+  const geral    = EMAILJS_CONFIG?.emailGerente;
+  const para     = emFiscal || emReg || geral;
+  if(!para){ console.warn('[Email Problema Executivo] nenhum destinatário.'); return; }
+  const cc=[...new Set([emReg, geral].filter(Boolean))].filter(x=>x.toLowerCase()!==String(para).toLowerCase()).join(',');
+  const tipo = obra.tipoImpedimento==='Outro' ? ('Outro'+(obra.impedimentoOutro?' — '+obra.impedimentoOutro:'')) : (obra.tipoImpedimento||'não especificado');
+  await enviarEmail(
+    `SPPC ARLAG – Problema Executivo ${alteracao?'alterado':'informado'} | Obra ${obra.numero}`,
+    `A empreiteira ${obra.empreiteira} ${alteracao?'alterou o':'informou um'} problema executivo que impede/dificulta a execução da obra.
+
+• Obra: ${obra.numero}
+• Cidade: ${obra.cidade}
+• Tipo do problema: ${tipo}
+• Fiscal: ${obra.fiscal||'—'}${emFiscal?'':' (e-mail do fiscal não localizado — aviso enviado à gerência)'}
+• Informado em: ${fmtTxt(pdHojeStr())} por ${me?.nome||obra.empreiteira}
+
+Verifique no sistema SPPC ARLAG e dê a tratativa necessária.`,
+    para, cc
+  );
+}
 async function enviarEmailRegularizacao(obra){
   const _emFR = await emailDoFiscal(obra.fiscal);
   const fiscal = _emFR?{email:_emFR}:null;
@@ -4560,7 +4594,7 @@ window.filtroRapido=function(tipo){
   const btnLimpar=document.getElementById('btnLimparFiltros');
   if(btnLimpar) btnLimpar.style.display=tipo?'inline-flex':'none';
   const resumo=document.getElementById('filtrosResumo');
-  const labels={'via_fechamento':'Via deixada para fechamento','sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','ag_armazenar':'Ag. Armazenar','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
+  const labels={'via_fechamento':'Via deixada para fechamento','via_simo':'Via enviada para cadastro SIMO','sem_medida70':'Sem Medida 70','sem_medida230':'Sem Medida 230','med230_sem280':'Med.230 sem 280','ag_armazenar':'Ag. Armazenar','encerradas':'Encerradas completas','proc_cancelamento':'Processo de Cancelamento'};
   if(resumo) resumo.textContent=tipo?'Filtro rápido: '+(labels[tipo]||tipo):'';
   renderObras();
 };
@@ -5020,13 +5054,14 @@ function renderEquipRetirados(){
 window.syncEquip = function(tipo, id, campo, valor){
   const arr = tipo==='ins'?_equipInstalados:_equipRetirados;
   const item = arr.find(e=>e.id===id);
-  if(item) item[campo]=valor;
+  if(item){ item[campo]=valor; _equipModificado = true; }
 };
 
 function initEquipFromObra(obra){
   _equipModificado = false;  // reset: user hasn't touched equipment yet
-  _equipInstalados = obra?.equipamentosInstalados?.length ? [...obra.equipamentosInstalados] : [];
-  _equipRetirados  = obra?.equipamentosRetirados?.length  ? [...obra.equipamentosRetirados]  : [];
+  // cópias independentes: editar na tela não altera o dado da obra em memória antes de salvar
+  _equipInstalados = obra?.equipamentosInstalados?.length ? obra.equipamentosInstalados.map(e=>({...e})) : [];
+  _equipRetirados  = obra?.equipamentosRetirados?.length  ? obra.equipamentosRetirados.map(e=>({...e}))  : [];
   // Se obra tem os campos antigos (único equip), migra para array
   if(!_equipInstalados.length && (obra?.sap||obra?.potencia)){
     _equipInstalados = [{id:'ei_legacy',placas:obra.placas||'',potencia:obra.potencia||'',sap:obra.sap||'',serie:obra.serie||'',fabricante:obra.fabricante||'',dataTransf:obra.dataTransf||''}];
@@ -6587,6 +6622,7 @@ window.exportXLSXFiltrado=function(){
   else if(_filtroRapidoAtivo==='med230_sem280') base=base.filter(o=>o.medida230&&!o.medida280);
   else if(_filtroRapidoAtivo==='ag_armazenar')        base=base.filter(o=>!o.cancelado&&!o.armazenado&&o.medida280);
   else if(_filtroRapidoAtivo==='via_fechamento')      base=base.filter(o=>o.viaFechamento&&!o.cancelado);
+  else if(_filtroRapidoAtivo==='via_simo')            base=base.filter(o=>o.viaCadastroSimo&&!o.cancelado);
   else if(_filtroRapidoAtivo==='encerradas')          base=base.filter(o=>o.armazenado);
   else if(_filtroRapidoAtivo==='proc_cancelamento')   base=base.filter(o=>o.processoCancelamento&&!o.cancelado);
   gerarXLSX(aplicarFiltros(base),'obras_filtradas.xlsx');
@@ -6611,7 +6647,7 @@ window.exportarBaseHistorica = async function(){
 
     // ── Aba RD ─────────────────────────────────────────────────────
     const rdHeader=[
-      'Número','Cidade','Tipo Obra','Data Abertura','Data Conclusão','Data Fiscalização',
+      'Número','Cidade','Tipo Obra','Empreiteira Executora','Fiscal','Data Abertura','Data Conclusão','Data Fiscalização',
       'Medida 70','Medida 230','Medida 280',
       'Qtd KAFFAs','Qtd KAFFA Parcial','Data Último KAFFA Parcial','Data KAFFA Final',
       'Qtd Medições','Qtd Medições Parcial','Data Última Medição Parcial','Data Medição Final',
@@ -6638,7 +6674,7 @@ window.exportarBaseHistorica = async function(){
       const cConfP  = cConf.filter(c=>c.tipo==='parcial');
       const cConfF  = cConf.filter(c=>c.tipo==='final');
       return [
-        n(o.numero), n(o.cidade), n(o.tipo)||'RD', d(o.abertura), d(o.conclusao), d(o.fiscalizacao),
+        n(o.numero), n(o.cidade), n(o.tipo)||'RD', n(o.empreiteira), n(o.fiscal), d(o.dataAbertura||o.abertura), d(o.conclusao), d(o.fiscalizacao),
         d(o.medida70), d(o.medida230), d(o.medida280),
         kaffas.length, kParcial.length,
         kParcial.length ? d(kParcial.sort((a,b)=>a.data>b.data?-1:1)[0].data) : '',
@@ -6674,7 +6710,7 @@ window.exportarBaseHistorica = async function(){
 
     // ── Aba ODI ────────────────────────────────────────────────────
     const odiHeader=[
-      'Número','Cidade','Data Abertura','Data Fiscalização','Data KAFFA ODI',
+      'Número','Cidade','Empreiteira Executora','Fiscal','Data Abertura','Data Fiscalização','Data KAFFA ODI',
       'NF Enviada','Data NF Enviada','Data NF Lançada',
       'Medida 70','Medida 230','Medida 280',
       'Qtd Envios Cadastro','Qtd Env.Cadastro Parcial','Data Último Env.Parcial','Data Env.Final',
@@ -6690,7 +6726,7 @@ window.exportarBaseHistorica = async function(){
       const cConfP= cConf.filter(c=>c.tipo==='parcial');
       const cConfF= cConf.filter(c=>c.tipo==='final');
       return [
-        n(o.numero), n(o.cidade), d(o.abertura), d(o.fiscalizacao), d(o.kaffaODI),
+        n(o.numero), n(o.cidade), n(o.empreiteira), n(o.fiscal), d(o.dataAbertura||o.abertura), d(o.fiscalizacao), d(o.kaffaODI),
         o.nfEnviadaFlag ? 'Sim' : 'Não', d(o.nfEnviadaData), d(o.nfLancadaData),
         d(o.medida70), d(o.medida230), d(o.medida280),
         cEnv.length, cEnvP.length,
@@ -6714,9 +6750,20 @@ window.exportarBaseHistorica = async function(){
     XLSX.utils.book_append_sheet(wb, wsRD,  'RD Encerradas');
     XLSX.utils.book_append_sheet(wb, wsODI, 'ODI Encerradas');
 
+    // ── Aba Obras Canceladas ───────────────────────────────────────
+    const canceladas = obras.filter(o => o.cancelado);
+    const cancHeader=['Número','Tipo Obra','Cidade','Empreiteira Executora','Fiscal','Descrição','Equip. Referência',
+      'Data Abertura','Data Cancelamento','Motivo do Cancelamento','Data Conclusão','Data Fiscalização','Medida 70','Medida 230','Medida 280'];
+    const cancRows = canceladas.map(o=>[
+      n(o.numero), n(o.tipo), n(o.cidade), n(o.empreiteira), n(o.fiscal), n(o.descricao), n(o.equipamentoRef),
+      d(o.dataAbertura||o.abertura), d(o.dataCancelamento), n(o.motivoCancelamento), d(o.conclusao), d(o.fiscalizacao), d(o.medida70), d(o.medida230), d(o.medida280)
+    ]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([cancHeader, ...cancRows]), 'Obras Canceladas');
+
     const today=hojeStr().replace(/-/g,'');
     XLSX.writeFile(wb, `historico_obras_${today}.xlsx`);
-    toast(`✓ ${encerradas.length} obras encerradas exportadas (${rdList.length} RD + ${odiList.length} ODI).`);
+    toast(`✓ Histórico exportado: ${encerradas.length} encerradas (${rdList.length} RD + ${odiList.length} ODI) e ${canceladas.length} canceladas.`);
+    return {ok:true, encerradas:encerradas.length, canceladas:canceladas.length};
   } catch(e){
     console.error('exportarBaseHistorica error:',e);
     toast('Erro ao gerar histórico: '+e.message,'err');
@@ -6766,6 +6813,32 @@ window.apagarTodasObras = async function(){
   }
   if(erros) toast(`${count} excluídas, ${erros} com erro.`,'warn');
   else toast(`✓ ${count} obras excluídas com sucesso.`,'warn');
+};
+
+// ══ LIMPEZA MENSAL: exclui as obras ENCERRADAS (Medida 280 + armazenada) e CANCELADAS ══
+// Sempre exporta o histórico antes (mesmo critério do "Exportar Histórico"), para guardar no SharePoint.
+window.limparEncerradasCanceladas=async function(){
+  if(me?.perfil!=='gerente'){ toast('Somente o gerente pode excluir obras encerradas/canceladas.','err'); return; }
+  const enc=obras.filter(o=>o.medida280&&o.armazenado&&!o.cancelado);
+  const canc=obras.filter(o=>o.cancelado);
+  if(!enc.length&&!canc.length){ toast('Não há obras encerradas nem canceladas para excluir.','warn'); return; }
+  if(!confirm(`Limpeza de obras sem movimentação\n\n• ${enc.length} obra(s) ENCERRADA(S) (Medida 280 + armazenada)\n• ${canc.length} obra(s) CANCELADA(S)\n\nPrimeiro o sistema vai baixar o histórico em Excel (para guardar no SharePoint).\nDepois pedirá a confirmação da exclusão.\n\nContinuar?`)) return;
+  let exp=null;
+  try{ exp=await window.exportarBaseHistorica(); }catch(e){ console.error(e); }
+  if(!exp||!exp.ok){ toast('O histórico não foi exportado — nada foi excluído.','err'); return; }
+  const opcao=prompt(`O arquivo de histórico foi baixado. Confira se ele abriu e foi salvo.\n\nO que deseja excluir do sistema? Digite:\n\n  TUDO  → ${enc.length} encerrada(s) + ${canc.length} cancelada(s)\n  ENCERRADAS  → somente as ${enc.length} encerrada(s)\n  CANCELADAS  → somente as ${canc.length} cancelada(s)\n\nEsta ação NÃO pode ser desfeita.`);
+  const op=(opcao||'').trim().toUpperCase();
+  const lista=op==='TUDO'?[...enc,...canc]:op==='ENCERRADAS'?enc:op==='CANCELADAS'?canc:null;
+  if(!lista){ toast('Exclusão cancelada (nada foi excluído).','warn'); return; }
+  if(!lista.length){ toast('Nenhuma obra nessa opção.','warn'); return; }
+  const btn=document.getElementById('btnLimparEncerradas'); if(btn){ btn.disabled=true; btn.textContent='Excluindo…'; }
+  let count=0, err=0;
+  for(const o of lista){
+    try{ await deleteDoc(doc(db,'obras',o.id)); count++; if(count%25===0 && btn) btn.textContent=`Excluindo… ${count}/${lista.length}`; }
+    catch(e){ console.error('Erro ao excluir',o.numero,e.message); err++; }
+  }
+  if(btn){ btn.disabled=false; btn.textContent='🗑️ Excluir encerradas/canceladas'; }
+  toast(err?`${count} obra(s) excluída(s), ${err} com erro.`:`✓ ${count} obra(s) excluída(s) do sistema.`,'warn');
 };
 
 window.bulkDeleteEncerradas=async function(){
@@ -10697,8 +10770,8 @@ function renderAcoesODI(obra){
   if(isFisc||isAdm){
     // Initialize from obra data
     if(!_equipModificado){
-      _equipInstalados = obra?.equipamentosInstalados?.length ? [...obra.equipamentosInstalados] : [];
-      _equipRetirados  = obra?.equipamentosRetirados?.length  ? [...obra.equipamentosRetirados]  : [];
+      _equipInstalados = obra?.equipamentosInstalados?.length ? obra.equipamentosInstalados.map(e=>({...e})) : [];
+      _equipRetirados  = obra?.equipamentosRetirados?.length  ? obra.equipamentosRetirados.map(e=>({...e}))  : [];
     }
     const equipBody = `
       <div style="margin-bottom:8px">
@@ -13110,8 +13183,9 @@ function pdRenderPagar(){
         <td style="padding:8px;font-weight:700;color:${r.pago?'#22C55E':(r.situacao==='A pagar'?'#F59E0B':'#3B82F6')}">${pdEsc(r.situacao)}${r.pagoEm?' · '+fmtTxt(r.pagoEm):''}</td></tr>`).join('')
         ||'<tr><td colspan="12" style="padding:16px;text-align:center;color:var(--muted)">Nenhum projeto a pagar.</td></tr>'}</tbody></table></div>`;
 }
-window.pdExportarAPagar=function(){
-  if(typeof XLSX==='undefined'){ toast('Biblioteca de Excel não carregada.','err'); return; }
+window.pdExportarAPagar=async function(){
+  let XLSX; try{ XLSX=await loadSheetJS(); }catch(e){}
+  if(!XLSX){ toast('Biblioteca de Excel não carregada — verifique a conexão e tente de novo.','err'); return; }
   const rows=pdLinhasPagamento(false);
   if(!rows.length){ toast('Não há projetos não pagos para exportar.','warn'); return; }
   const r2=v=>v==null?'':Math.round(v*1000)/1000;
@@ -14366,7 +14440,7 @@ function _plHTML(){return `
   <div class="page-title">🧭 Planejamento da Rede</div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <span id="plMeta" style="font-size:11px;color:var(--muted)"></span>
-    <button class="btn btn-secondary btn-sm" onclick="plToggle('plBases')">⚙️ Atualizar bases</button>
+    ${me.perfil==='gerente'?`<button class="btn btn-secondary btn-sm" onclick="plToggle('plBases')">⚙️ Atualizar bases</button>`:'<span style="font-size:10px;color:var(--muted)">modo consulta</span>'}
     <button class="btn btn-secondary btn-sm" onclick="plToggle('plParams')">🎚️ Parâmetros</button>
   </div>
 </div>
@@ -14413,7 +14487,7 @@ function _plHTML(){return `
 </div>`;}
 
 window.renderPlanejamento=async function(){
-  if(me.perfil!=='gerente')return;const pg=document.getElementById('pgPlanejamento');if(!pg)return;
+  if(me.perfil!=='gerente'&&me.perfil!=='analista')return;const pg=document.getElementById('pgPlanejamento');if(!pg)return;
   if(typeof L==='undefined'){pg.innerHTML='<div class="empty"><p>Biblioteca de mapas não carregou.</p></div>';return;}
   if(!_pl.map){pg.innerHTML=_plHTML();_pl.P=_plParams();
     _pl.map=L.map('plMap',{preferCanvas:true}).setView([-27.8,-50.3],9);
@@ -14904,36 +14978,99 @@ document.addEventListener('change',e=>{if(e.target&&e.target.id==='oEquipRef'&&m
 // ══════════════════════════════════════════════════════
 //  VIA DA OBRA DEIXADA PARA FECHAMENTO (fiscal marca; fiscal ou gerente desmarca)
 // ══════════════════════════════════════════════════════
+const VIAS_OBRA={
+  fech:{campo:'viaFechamento',  rot:'📁 Via da obra deixada para fechamento',      dica:'Marque quando deixar a via física da obra para fechamento.', ok:'Via marcada como deixada para fechamento.'},
+  simo:{campo:'viaCadastroSimo',rot:'🗂️ Via da obra enviada para cadastro SIMO',   dica:'Marque quando enviar a via da obra para o cadastro SIMO.',   ok:'Via marcada como enviada para cadastro SIMO.'},
+};
 function renderViaFechamento(obra){
   const el=document.getElementById('viaFechWrap'); if(!el) return;
-  const perfisVe=['fiscal','fiscal_adm','gerente','adm_odi','estagiario'];
+  const perfisVe=['fiscal','fiscal_adm','gerente','adm_odi','estagiario','genesis'];
   if(!obra || !me || !perfisVe.includes(me.perfil)){ el.style.display='none'; el.innerHTML=''; return; }
   const pode=['fiscal','fiscal_adm','gerente'].includes(me.perfil);
-  const on=!!obra.viaFechamento;
   el.style.display='block';
-  el.innerHTML=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid ${on?'rgba(34,197,94,.4)':'var(--border)'};background:${on?'rgba(34,197,94,.07)':'transparent'}">
+  el.innerHTML=Object.entries(VIAS_OBRA).map(([k,v])=>{ const on=!!obra[v.campo]; const em=obra[v.campo+'Em'], por=obra[v.campo+'Por'];
+    return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid ${on?'rgba(34,197,94,.4)':'var(--border)'};background:${on?'rgba(34,197,94,.07)':'transparent'}">
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;cursor:${pode?'pointer':'default'}">
-      <input type="checkbox" style="width:auto" ${on?'checked':''} ${pode?'':'disabled'} onchange="toggleViaFechamento('${obra.id}',this.checked)">
-      📁 Via da obra deixada para fechamento
+      <input type="checkbox" style="width:auto" ${on?'checked':''} ${pode?'':'disabled'} onchange="toggleViaObra('${obra.id}','${k}',this.checked)">
+      ${v.rot}
     </label>
-    <span style="font-size:11px;color:var(--muted)">${on?('Marcado em '+fmtTxt(obra.viaFechamentoEm)+(obra.viaFechamentoPor?' por '+String(obra.viaFechamentoPor).replace(/</g,'&lt;'):'')):(pode?'Marque quando deixar a via física da obra para fechamento.':'Ainda não deixada pelo fiscal.')}</span>
-  </div>`;
+    <span style="font-size:11px;color:var(--muted)">${on?('Marcado em '+fmtTxt(em)+(por?' por '+String(por).replace(/</g,'&lt;'):'')):(pode?v.dica:'Ainda não marcado pelo fiscal.')}</span>
+  </div>`; }).join('');
 }
-window.toggleViaFechamento=async function(obraId,marcar){
+window.toggleViaObra=async function(obraId,qual,marcar){
+  const v=VIAS_OBRA[qual]; if(!v) return;
   if(!['fiscal','fiscal_adm','gerente'].includes(me.perfil)){ toast('Somente o fiscal ou o gerente altera esta marcação.','err'); return; }
   const o=obras.find(x=>x.id===obraId); if(!o) return;
-  const patch=marcar?{viaFechamento:true,viaFechamentoEm:pdHojeStr(),viaFechamentoPor:me.nome||me.email||''}
-                    :{viaFechamento:false,viaFechamentoEm:null,viaFechamentoPor:null};
+  const patch=marcar?{[v.campo]:true,[v.campo+'Em']:pdHojeStr(),[v.campo+'Por']:me.nome||me.email||''}
+                    :{[v.campo]:false,[v.campo+'Em']:null,[v.campo+'Por']:null};
   try{
     await updateDoc(doc(db,'obras',obraId),{...patch,atualizadaEm:serverTimestamp()});
     Object.assign(o,patch); renderViaFechamento(o);
-    toast(marcar?'Via marcada como deixada para fechamento.':'Marcação removida.');
+    toast(marcar?v.ok:'Marcação removida.');
     try{ window.renderObras(); }catch(e){}
   }catch(e){ console.error(e); toast('Erro ao salvar: '+e.message,'err'); renderViaFechamento(o); }
+};
+window.toggleViaFechamento=function(obraId,marcar){ return window.toggleViaObra(obraId,'fech',marcar); };
+
+// ══════════════════════════════════════════════════════
+//  EMPREITEIRA: corrigir / completar os equipamentos já informados (obras RD)
+// ══════════════════════════════════════════════════════
+let _equipHome=null;   // posição original do bloco de equipamentos (dentro do formulário de novo kaffa)
+function _equipEditRestaurar(){
+  const blk=document.getElementById('secConclusaoExtra'); const wrap=document.getElementById('equipEditWrap');
+  if(blk && _equipHome && blk.parentNode!==_equipHome.pai){ _equipHome.pai.insertBefore(blk,_equipHome.prox); blk.style.display='none'; }
+  if(wrap) wrap.style.display='none';
+}
+function _equipPodeEditar(obra){
+  return !!obra && !!me && me.perfil==='empreiteira' && obra.tipo!=='ODI' && !obra.cancelado && !obra.armazenado
+    && ((obra.kaffaEntries||[]).length>0 || !!obra.kaffa || (obra.equipamentosInstalados||[]).length>0 || (obra.equipamentosRetirados||[]).length>0 || !!obra.sap || !!obra.placas);
+}
+function _equipBtnAtualizar(obra){
+  const b=document.getElementById('btnEditarEquip'); if(b) b.style.display=_equipPodeEditar(obra)?'inline-flex':'none';
+}
+window.abrirEdicaoEquip=function(){
+  const obra=obras.find(o=>o.id===document.getElementById('obraId')?.value); if(!_equipPodeEditar(obra)) return;
+  const blk=document.getElementById('secConclusaoExtra'), slot=document.getElementById('equipEditSlot'), wrap=document.getElementById('equipEditWrap');
+  if(!blk||!slot||!wrap) return;
+  try{ window.cancelarNovoKaffa(); }catch(e){}
+  if(!_equipHome) _equipHome={pai:blk.parentNode,prox:blk.nextSibling};
+  slot.appendChild(blk); blk.style.display='block';
+  const nota=document.getElementById('transDataNota'); if(nota) nota.innerHTML='🔩 Equipamentos informados — corrija, adicione ou remova.';
+  initEquipFromObra(obra);
+  wrap.style.display='block';
+  document.getElementById('btnEditarEquip').style.display='none';
+};
+window.cancelarEdicaoEquip=function(){
+  const obra=obras.find(o=>o.id===document.getElementById('obraId')?.value);
+  _equipEditRestaurar(); if(obra) initEquipFromObra(obra); _equipBtnAtualizar(obra);
+};
+window.salvarEdicaoEquip=async function(){
+  const obra=obras.find(o=>o.id===document.getElementById('obraId')?.value); if(!_equipPodeEditar(obra)) return;
+  try{ document.activeElement && document.activeElement.blur(); }catch(e){}
+  const limpa=l=>l.map(e=>{ const c={...e}; Object.keys(c).forEach(k=>{ if(typeof c[k]==='string') c[k]=c[k].trim(); if(c[k]===undefined) c[k]=''; }); return c; });
+  const ins=limpa(_equipInstalados), ret=limpa(_equipRetirados);
+  const vazio=e=>!['placas','potencia','sap','serie','fabricante','dataTransf'].some(k=>String(e[k]??'').trim());
+  if(ins.some(vazio)||ret.some(vazio)){ toast('Há um transformador sem nenhum dado preenchido — preencha ou remova (✕).','err'); return; }
+  const p0=ins[0]||{}, r0=ret[0]||{};
+  const patch={equipamentosInstalados:ins, equipamentosRetirados:ret,
+    // campos antigos (1º equipamento) mantidos em sincronia para relatórios e telas que ainda os usam
+    placas:p0.placas||'', sap:p0.sap||'', serie:p0.serie||'', fabricante:p0.fabricante||'', potencia:p0.potencia?parseFloat(p0.potencia)||null:null, dataTransf:p0.dataTransf||null,
+    temRetirado:ret.length>0, potenciaRet:r0.potencia?parseFloat(r0.potencia)||null:null, sapRet:r0.sap||null, serieRet:r0.serie||null, fabricanteRet:r0.fabricante||null,
+    equipAtualizadoEm:pdHojeStr(), equipAtualizadoPor:me.nome||me.email||''};
+  const btn=document.getElementById('btnSalvarEquipEdit'); if(btn){ btn.disabled=true; btn.textContent='Salvando…'; }
+  try{
+    await updateDoc(doc(db,'obras',obra.id),{...patch,atualizadaEm:serverTimestamp()});
+    Object.assign(obra,patch); _equipModificado=false;
+    _equipEditRestaurar(); initEquipFromObra(obra); _equipBtnAtualizar(obra);
+    toast('Equipamentos atualizados.');
+  }catch(e){ console.error(e); toast('Erro ao salvar equipamentos: '+e.message,'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='💾 Salvar equipamentos'; } }
 };
 const _viaOpenOrig=window.openObraModal;
 window.openObraModal=function(obraId){
   const r=_viaOpenOrig.apply(this,arguments);
-  try{ renderViaFechamento(obraId?obras.find(o=>o.id===obraId):null); }catch(e){ console.warn('[via fechamento]',e); }
+  const _ob=obraId?obras.find(o=>o.id===obraId):null;
+  try{ renderViaFechamento(_ob); }catch(e){ console.warn('[via fechamento]',e); }
+  try{ _equipEditRestaurar(); _equipBtnAtualizar(_ob); }catch(e){ console.warn('[editar equipamentos]',e); }
   return r;
 };
