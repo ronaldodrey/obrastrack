@@ -5,6 +5,10 @@ service cloud.firestore {
     function perfil() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.perfil;
     }
+    // perfis que trabalham no Gerenciamento de Pedidos (consultam o planejamento da rede no pedido)
+    function perfilPedidos() {
+      return perfil() == 'gerente' || perfil() == 'analista' || perfil() == 'estagiario' || perfil() == 'adm_odi';
+    }
     function vinculo() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.vinculo;
     }
@@ -87,20 +91,25 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && perfil() == 'gerente';
     }
-    // v2613: Planejamento da Rede — somente gerente lê e grava
+    // v2613: Planejamento da Rede — gerente grava; perfis de Pedidos apenas leem
+    // (oportunidades de melhoria e cálculo de Linha Viva dentro do pedido)
     match /plan_base/{id} {
-      allow read, write: if request.auth != null && perfil() == 'gerente';
+      allow read: if request.auth != null && perfilPedidos();
+      allow write: if request.auth != null && perfil() == 'gerente';
     }
     match /plan_meta/{id} {
-      allow read, write: if request.auth != null && perfil() == 'gerente';
+      allow read: if request.auth != null && perfilPedidos();
+      allow write: if request.auth != null && perfil() == 'gerente';
     }
     // v2614: atuações (mapa de calor) — somente gerente
     match /plan_atu/{id} {
       allow read, write: if request.auth != null && perfil() == 'gerente';
     }
-    // v2616: oportunidades de melhoria (decisões do gerente: vincular a R2 ou descartar)
+    // v2616: oportunidades de melhoria — gerente decide (vincular a R2 / descartar);
+    // analista marca quando gera um pedido de projeto de melhoria
     match /oportunidades/{id} {
-      allow read, write: if request.auth != null && perfil() == 'gerente';
+      allow read: if request.auth != null && perfilPedidos();
+      allow write: if request.auth != null && (perfil() == 'gerente' || perfil() == 'analista');
     }
     // Comentários/avisos por obra
     match /obras/{obraId}/comentarios/{commentId} {
