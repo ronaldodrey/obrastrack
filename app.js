@@ -281,7 +281,7 @@ async function iniciarApp(){
   document.getElementById('appScreen').style.display='block';
   document.getElementById('hName').textContent=me.nome;
   const rb=document.getElementById('hRole');
-  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário'};
+  const perfilLabels={'gerente':'Gerente','fiscal':'Fiscal','empreiteira':'Empreiteira','genesis':'Genesis','estagiario':'Estagiário','analista':'Analista','adm_odi':'Adm. ODI','fiscal_adm':'Fiscal Adm.'};
   rb.textContent=perfilLabels[me.perfil]||me.perfil;
   rb.className='role-badge role-'+me.perfil;
   // Ensure role badge color for new profiles
@@ -358,7 +358,7 @@ async function iniciarApp(){
 
   loadEquipDBFromStorage(); // Restore equipment database from localStorage
   aplicarTemaSalvo(); // Restore theme preference
-  showPage('pgDash');
+  showPage(me.perfil==='analista'?'pgPedidos':'pgDash'); // analista trabalha só com Pedidos
 }
 window.showPage=function(id){
   if(id==='pgObras') _obrasTipoTab='RD';
@@ -2812,7 +2812,7 @@ function renderChatMsgs(msgs){
     box.innerHTML = '<div style="font-size:10px;color:var(--muted);text-align:center;padding:12px">Nenhum aviso ainda. Seja o primeiro a comentar.</div>';
     return;
   }
-  const perfColors = {gerente:'#7c6af7',fiscal:'#3B82F6',fiscal_adm:'#3B82F6',empreiteira:'#F59E0B',estagiario:'#22C55E'};
+  const perfColors = {gerente:'#7c6af7',fiscal:'#3B82F6',fiscal_adm:'#3B82F6',empreiteira:'#F59E0B',estagiario:'#22C55E',analista:'#06B6D4'};
   box.innerHTML = msgs.map(m=>{
     const ts = m.criadoEm?.toDate ? m.criadoEm.toDate() : new Date(m.criadoEm||Date.now());
     const tsStr = ts.toLocaleDateString('pt-BR')+' '+ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -4136,9 +4136,38 @@ async function syncDiretorioFiscais(){
     await loadUsers();
     const lista=users.filter(u=>(u.perfil==='fiscal'||u.perfil==='fiscal_adm')&&u.vinculo&&u.email)
       .map(u=>({nome:u.vinculo,email:u.email}));
-    await setDoc(doc(db,'config','diretorioFiscais'),{lista,atualizadoEm:serverTimestamp()});
-    _dirFiscais=lista;
+    // Gerentes regionais (mesma divisão por município usada nos Pedidos): acha o usuário gerente pelo nome
+    const gerentes=[];
+    Object.keys(GERENTES_MUNICIPIOS).forEach(g=>{
+      const u=users.find(x=>x.perfil==='gerente'&&x.email&&pdNorm(x.nome).split(' ').includes(pdNorm(g)));
+      if(u) gerentes.push({regiao:g,nome:u.nome||g,email:u.email});
+    });
+    await setDoc(doc(db,'config','diretorioFiscais'),{lista,gerentes,atualizadoEm:serverTimestamp()});
+    _dirFiscais=lista; _dirGerentes=gerentes;
   }catch(e){ console.warn('[SPPC Email] syncDiretorioFiscais:',e.message); }
+}
+let _dirGerentes=null;
+function gerenteDaCidade(cidade){
+  const c=pdNorm(cidade);
+  for(const [g,l] of Object.entries(GERENTES_MUNICIPIOS)) if(l.some(m=>pdNorm(m)===c)) return g;
+  return null;
+}
+async function emailGerenteRegional(cidade){
+  const g=gerenteDaCidade(cidade); if(!g) return null;
+  if(!_dirGerentes){
+    try{ const s=await getDoc(doc(db,'config','diretorioFiscais')); _dirGerentes=s.exists()?(s.data().gerentes||[]):[]; }
+    catch(e){ console.warn('[SPPC Email] diretório de gerentes:',e.message); _dirGerentes=[]; }
+  }
+  const d=_dirGerentes.find(x=>x.regiao===g);
+  return d?d.email:null;
+}
+// Cópias dos avisos ao fiscal: empreiteira responsável pela obra + gerente da região (pela cidade) + gerente geral
+async function ccAvisoFiscal(obra, para){
+  const emp=empreiteiras.find(e=>(e.nome||'').toUpperCase()===(obra.empreiteira||'').toUpperCase());
+  const reg=await emailGerenteRegional(obra.cidade);
+  const alvo=String(para||'').toLowerCase();
+  return [...new Set([emp?.email, reg, EMAILJS_CONFIG?.emailGerente].filter(Boolean).map(x=>String(x).trim()))]
+    .filter(x=>x.toLowerCase()!==alvo).join(',');
 }
 async function emailDoFiscal(nome){
   if(!nome) return null;
@@ -4190,7 +4219,7 @@ ${_quemInformou(obra)} registrou o seguinte:
 • Cidade: ${obra.cidade}
 
 Aguarda medição correspondente.`,
-    fiscal.email, EMAILJS_CONFIG.emailGerente
+    fiscal.email, await ccAvisoFiscal(obra, fiscal.email)
   );
   // (kaffa tipo+data é naturalmente único — sem marcarEnviado)
 }
@@ -4223,7 +4252,7 @@ ${_quemInformou(obra)} informou a conclusão da obra${obra.tipo==='ODI'?' (ODI)'
 • Data de Conclusão: ${fmtTxt(obra.conclusao)}
 
 Aguarda fiscalização.`,
-    fiscal.email, EMAILJS_CONFIG.emailGerente
+    fiscal.email, await ccAvisoFiscal(obra, fiscal.email)
   );
   // (sem marcarEnviado — condição !obraAntiga?.conclusao previne reenvio)
 }
@@ -4242,7 +4271,8 @@ async function enviarEmailPendencia(obra){
   // (usa o diretório de fiscais — a lista "users" fica vazia para o perfil fiscal — e o e-mail de quem está logado)
   const _emFiscObra = await emailDoFiscal(obra.fiscal);
   const _emQuemRegistrou = (me?.perfil==='fiscal'||me?.perfil==='fiscal_adm') ? (me.email||'') : '';
-  const ccEmails = [...new Set([_emQuemRegistrou, _emFiscObra, EMAILJS_CONFIG.emailGerente].filter(Boolean))].join(',');
+  const _emGerReg = await emailGerenteRegional(obra.cidade);
+  const ccEmails = [...new Set([_emQuemRegistrou, _emFiscObra, _emGerReg, EMAILJS_CONFIG.emailGerente].filter(Boolean))].join(',');
   await enviarEmail(
     `SPPC ARLAG – Pendência registrada | Obra ${obra.numero} – ${obra.cidade}`,
     `Atenção, Empreiteira!
@@ -4278,7 +4308,7 @@ A empreiteira regularizou a pendência da obra.
 • Regularizada em: ${fmtTxt(obra.regularizacaoData)}
 
 Verifique no sistema SPPC ARLAG.`,
-    fiscal.email, EMAILJS_CONFIG.emailGerente
+    fiscal.email, await ccAvisoFiscal(obra, fiscal.email)
   );
   await marcarEnviado(chave);
 }
@@ -11201,6 +11231,9 @@ const PEDIDOS_PARAMS_PADRAO = {
   prazoAnalistaDias: 15,     // prazo (dias corridos da abertura) para o Analista definir: projeto / liberar sem obra / etc.
   fatorEstrada: 1.3,         // correção da distância em linha reta (Lages → equipamento) para estimar o percurso por estrada
   matriculaValidadeDias: 365,// matrícula atualizada há mais que isso gera aviso
+  lvUcUrb: 300,              // Linha Viva: acima disso (UC desligadas, área urbana) é obrigatório verificar LV
+  lvUcRur: 200,              // idem, área rural
+  lvUcManobra: 1000,         // acima disso avisa para verificar possibilidade de manobra
   justificativasPrimeiroPonto: [
     'Possui outra unidade consumidora nº X em nome de Y dentro da matrícula',
     'O ponto de solicitação do projeto ficou fora da matrícula apresentada',
@@ -11912,6 +11945,7 @@ window.onAcaoAnalistaChange=function(){
   document.getElementById('fgProjetista').style.display=a==='Enviado para Projeto'?'flex':'none';
   document.getElementById('fgDataEncaminhamento').style.display=a==='Enviado para Projeto'?'flex':'none';
   document.getElementById('fgEquipRef').style.display=a==='Enviado para Projeto'?'flex':'none';
+  document.getElementById('fgEscopoProjeto').style.display=a==='Enviado para Projeto'?'flex':'none';
   pdEquipAvisoRender();
   document.getElementById('fgMotivoCancelamento').style.display=a==='Cancelado'?'flex':'none';
 };
@@ -12097,6 +12131,9 @@ window.pdAbrirParams=function(){
   document.getElementById('prmPrazoAnalista').value=pedidosParams.prazoAnalistaDias;
   document.getElementById('prmFatorEstrada').value=pedidosParams.fatorEstrada;
   document.getElementById('prmMatriculaDias').value=pedidosParams.matriculaValidadeDias;
+  document.getElementById('prmLvUrb').value=pedidosParams.lvUcUrb;
+  document.getElementById('prmLvRur').value=pedidosParams.lvUcRur;
+  document.getElementById('prmLvManobra').value=pedidosParams.lvUcManobra;
   pdRenderParamsJust();
   document.getElementById('ovPedidoParams').classList.add('open');
 };
@@ -12113,8 +12150,11 @@ window.pdSalvarPrazos=async function(){
   const c=parseInt(document.getElementById('prmPrazoAnalista').value,10), f=parseFloat(String(document.getElementById('prmFatorEstrada').value).replace(',','.')), md=parseInt(document.getElementById('prmMatriculaDias').value,10);
   if(!(a>0)||!(b>0)||!(c>0)||!(md>0)){ toast('Informe prazos em dias (números maiores que zero).','err'); return; }
   if(!(f>=1)){ toast('O fator de estrada deve ser 1 ou maior (ex.: 1,3).','err'); return; }
-  Object.assign(pedidosParams,{prazoProjetistaDias:a,prazoReanaliseDias:b,prazoAnalistaDias:c,fatorEstrada:f,matriculaValidadeDias:md});
-  try{ await setDoc(doc(db,'config','pedidosParametros'),{prazoProjetistaDias:a,prazoReanaliseDias:b,prazoAnalistaDias:c,fatorEstrada:f,matriculaValidadeDias:md},{merge:true}); toast('Parâmetros salvos!'); pdRenderLista(); }
+  const lu=parseInt(document.getElementById('prmLvUrb').value,10), lr=parseInt(document.getElementById('prmLvRur').value,10), lm=parseInt(document.getElementById('prmLvManobra').value,10);
+  if(!(lu>0)||!(lr>0)||!(lm>0)){ toast('Informe os limites de UC da Linha Viva (números maiores que zero).','err'); return; }
+  const _prm={prazoProjetistaDias:a,prazoReanaliseDias:b,prazoAnalistaDias:c,fatorEstrada:f,matriculaValidadeDias:md,lvUcUrb:lu,lvUcRur:lr,lvUcManobra:lm};
+  Object.assign(pedidosParams,_prm);
+  try{ await setDoc(doc(db,'config','pedidosParametros'),_prm,{merge:true}); toast('Parâmetros salvos!'); pdRenderLista(); }
   catch(e){ console.error(e); toast('Erro ao salvar prazos.','err'); }
 };
 window.pdAddJust=async function(){
@@ -12314,7 +12354,9 @@ window.pdArSalvar=async function(modo){
 //  ANÁLISE DE PROJETO (Gerente) — libera quando o projetista devolve o projeto
 // ══════════════════════════════════════════════════════
 let _apDraft=apVazio(), _apDirty=false;
-function apVazio(){ return {orgaosNecessario:'',orgaos:[],terceiros:'',reprojeto:'',reprojetoTipo:'',reprojetoDescricao:'',verificacaoCampo:''}; }
+function apVazio(){ return {orgaosNecessario:'',orgaos:[],terceiros:'',reprojeto:'',reprojetoTipo:'',reprojetoDescricao:'',verificacaoCampo:'',lv:'',lvOrcada:'',lvJust:''}; }
+// A decisão do Gerente contraria a sugestão do sistema? (exige justificativa)
+function apLvContraria(d,c){ if(!c||!c.achou||!d.lv) return false; return (c.resultado==='obrigatorio'&&d.lv==='nao')||(c.resultado==='nao_aplicavel'&&d.lv==='sim'); }
 function apMesclar(s){ const b=Object.assign(apVazio(),s||{}); b.orgaos=Array.isArray(b.orgaos)?[...b.orgaos]:[]; return b; }
 
 window.pdApSet=function(k,v,rerender){ _apDraft[k]=v; _apDirty=true; if(rerender) pdRenderAnaliseProjeto(); };
@@ -12326,6 +12368,11 @@ function pdProblemasReprojetoConhecidos(){
   return [...set].sort();
 }
 
+function pdEscopoHtml(p){
+  return `<div style="padding:8px 10px;margin-bottom:10px;border-left:3px solid var(--accent);background:var(--surface2);border-radius:6px">
+    <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700">Escopo definido pelo Analista — o que deveria ser projetado</div>
+    <div style="font-size:12px;white-space:pre-wrap">${p.escopoProjeto?pdEsc(p.escopoProjeto):'<span style="color:var(--muted)">Não informado pelo Analista.</span>'}</div></div>`;
+}
 function pdRenderAnaliseProjeto(){
   const p=_pdAtual(); const body=document.getElementById('pdAnaliseProjetoBody'); if(!p||!body) return;
   const ed=pdEhGerente(); const ro=!ed; const d=_apDraft; const rural=pedidoEhRural(p);
@@ -12345,7 +12392,11 @@ function pdRenderAnaliseProjeto(){
     html+=`<div style="padding:10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--muted)">Libera quando o projetista devolver o projeto (o Estagiário registra a data de retorno no checklist).</div>`;
     body.innerHTML=html; return;
   }
-  html+=`<div class="fg-grid">
+  const _lvContra=apLvContraria(d,_pdLvAtual||p.linhaVivaCalc);
+  html+=pdEscopoHtml(p)+`<div class="pdLvSlot" data-ctx="gerente" style="margin-bottom:10px">${pdLvHtml(_pdLvAtual||p.linhaVivaCalc||null,'gerente')}</div><div class="fg-grid">
+    ${F('Definição do Gerente: a obra terá equipe de Linha Viva?',SEL('lv',d.lv,[['','—'],['sim','Sim — com Linha Viva'],['nao','Não — sem Linha Viva']]))}
+    ${d.lv==='sim'?F('A Linha Viva foi orçada no projeto?',SEL('lvOrcada',d.lvOrcada,[['','—'],['sim','Sim'],['nao','Não foi orçada']])):'<div></div>'}
+    ${(_lvContra||d.lvJust)?F('Justificativa da definição de Linha Viva'+(_lvContra?' * (contraria a indicação do sistema)':''),`<input type="text" value="${pdEsc(d.lvJust)}" ${ro?'disabled':''} oninput="pdApSet('lvJust',this.value,false)" style="width:100%">`,true):''}
     ${F('A obra necessita aprovação de órgão competente?',SEL('orgaosNecessario',d.orgaosNecessario,[['','—'],['nao','Não precisa'],['sim','Sim']]))}
     ${d.orgaosNecessario==='sim'?F('Quais órgãos?',ORGAOS_COMPETENTES.map(o=>`<label style="display:inline-flex;gap:4px;align-items:center;margin-right:12px;font-size:12px"><input type="checkbox" style="width:auto" ${ro?'disabled':''} ${d.orgaos.includes(o)?'checked':''} onchange="pdApToggleOrgao('${o}',this.checked)">${o}</label>`).join('')):'<div></div>'}
     ${rural?F('O projeto torna necessária autorização de passagem de terceiros?',SEL('terceiros',d.terceiros,[['','—'],['nao','Não'],['sim','Sim']])):''}
@@ -12438,6 +12489,11 @@ window.pdApConcluir=async function(modo){
   if(pedidoEhRural(p)&&!d.terceiros){ toast('Responda se é necessária autorização de passagem de terceiros.','err'); return; }
   if(!d.verificacaoCampo){ toast('Responda se é necessária verificação em campo.','err'); return; }
   if(!d.reprojeto){ toast('Responda se é necessário reprojetar.','err'); return; }
+  if(d.reprojeto!=='sim'){
+    if(!d.lv){ toast('Defina se a obra terá equipe de Linha Viva.','err'); return; }
+    if(d.lv==='sim' && !d.lvOrcada){ toast('Informe se a Linha Viva foi orçada no projeto.','err'); return; }
+    if(apLvContraria(d,_pdLvAtual||p.linhaVivaCalc) && !(d.lvJust||'').trim()){ toast('A definição de Linha Viva contraria a indicação do sistema — informe a justificativa.','err'); pdRenderAnaliseProjeto(); return; }
+  }
   if(d.reprojeto==='sim'&&!(d.reprojetoTipo||'').trim()){ toast('Informe o problema que motivou o reprojeto.','err'); return; }
   try{
     let changes, ev, det='', msg;
@@ -12455,7 +12511,7 @@ window.pdApConcluir=async function(modo){
       Object.keys(antigo).forEach(o=>{ if(!ol[o]&&antigo[o].liberadoEm) ol[o]=antigo[o]; });
       const vc=d.verificacaoCampo==='sim'?{necessaria:true,realizadaEm:p.verificacaoCampo?.realizadaEm||null,realizadaPor:p.verificacaoCampo?.realizadaPor||null,feedback:p.verificacaoCampo?.feedback||''}:{necessaria:false};
       changes={analiseProjeto:{...d,concluidaEm:h,concluidaPor:me.nome},validacaoGerenteOk:true,orgaosLiberacao:ol,verificacaoCampo:vc};
-      const partes=[]; if(d.orgaosNecessario==='sim') partes.push('Órgãos: '+d.orgaos.join(', ')); if(d.terceiros==='sim') partes.push('terceiros necessários'); if(d.verificacaoCampo==='sim') partes.push('verificação em campo');
+      const partes=[]; if(d.orgaosNecessario==='sim') partes.push('Órgãos: '+d.orgaos.join(', ')); if(d.terceiros==='sim') partes.push('terceiros necessários'); if(d.verificacaoCampo==='sim') partes.push('verificação em campo'); partes.push('Linha Viva: '+(d.lv==='sim'?'SIM'+(d.lvOrcada==='sim'?' (orçada)':' (NÃO orçada)'):'não')+(d.lvJust?' — '+d.lvJust.trim():''));
       ev='Análise de projeto concluída'; det=partes.join(' · ');
       msg=d.orgaosNecessario==='sim'?'Análise concluída. ⚠️ Lance a Medida 34 e informe o cliente (necessita liberação de órgão).':'Análise de projeto concluída!';
     }
@@ -12606,7 +12662,7 @@ window.openPedidoModal=function(id){
   // O modal de OBRA esconde todas as ".modal-section" da página ao abrir (inclusive as deste modal).
   // Reexibe aqui as seções fixas do pedido (identificação e ação do analista).
   document.querySelectorAll('#ovPedido .modal-section:not([id])').forEach(el=>{ el.style.display=''; });
-  ['pdNota','pdTipoSolicitacao','pdDataAbertura','pdMunicipio','pdAcaoAnalista','pdProjetista','pdDataEncaminhamento','pdMotivoCancelamento','pdEquipRef'].forEach(i=>{ document.getElementById(i).value=''; });
+  ['pdNota','pdTipoSolicitacao','pdDataAbertura','pdMunicipio','pdAcaoAnalista','pdProjetista','pdDataEncaminhamento','pdMotivoCancelamento','pdEquipRef','pdEscopoProjeto'].forEach(i=>{ document.getElementById(i).value=''; });
   document.getElementById('pdFlagOrgaoPublico').checked=false;
   const medidaSec=document.getElementById('pedidoMedida34Wrap');
   const checklistSec=document.getElementById('pedidoChecklistWrap');
@@ -12624,6 +12680,7 @@ window.openPedidoModal=function(id){
       document.getElementById('pdDataEncaminhamento').value=p.dataEncaminhamentoProjetista||'';
       document.getElementById('pdMotivoCancelamento').value=p.motivoCancelamento||'';
       document.getElementById('pdEquipRef').value=p.equipamentoRef||'';
+      document.getElementById('pdEscopoProjeto').value=p.escopoProjeto||'';
     }
     medidaSec.style.display='block';
   } else { medidaSec.style.display='none'; }
@@ -12646,13 +12703,17 @@ window.openPedidoModal=function(id){
     document.getElementById('btnSalvarChecklist').style.display=editavel?'inline-flex':'none';
     refreshChecklistSection(p);
   } else { checklistSec.style.display='none'; }
+  { const _ob=document.getElementById('pdOportBox'); if(_ob){ _ob.innerHTML=''; _ob.style.display='none'; } document.querySelectorAll('#ovPedido .pdLvSlot').forEach(x=>{ x.innerHTML=''; }); _pdLvAtual=null; }
   onTipoSolicitacaoChange(); onAcaoAnalistaChange(); renderMedida34Status(p);
   pdRenderSecoes(p);
+  pdMelhAplicarPendente();
+  pdPlanAtualizar(true);
   const podeEditar=podeGerenciarPedidos();
   document.querySelectorAll('#ovPedido input, #ovPedido select').forEach(el=>{
     if(el.closest('#pedidoChecklistWrap, .pd-own-perm')) return;   // seções com permissão própria
     el.disabled=!podeEditar;
   });
+  document.getElementById('pdEscopoProjeto').disabled=!podeEditar;
   document.getElementById('btnSalvarPedido').style.display=podeEditar?'inline-flex':'none';
   document.getElementById('btnExcluirPedido').style.display=(isEdit&&podeEditar)?'inline-flex':'none';
   // abre por padrão a seção do perfil de quem entrou
@@ -12666,6 +12727,7 @@ window.openPedidoModal=function(id){
   document.getElementById('ovPedido').classList.add('open');
 };
 window.closePedidoModal=function(force){
+  if(force!==true && _pdMelhPend && !document.getElementById('pedidoId').value) _pdMelhPend=null;   // desistiu do pedido de melhoria
   if(force!==true && (_arDirty||_apDirty||_paDirty) && !confirm('Há alterações não salvas na análise. Fechar mesmo assim?')) return;
   _arDirty=false; _apDirty=false; _paDirty=false;
   document.getElementById('ovPedido').classList.remove('open');
@@ -12697,6 +12759,8 @@ window.savePedido=async function(){
     }
     const equipRef=parseInt(document.getElementById('pdEquipRef').value,10)||null;
     if(acaoAnalista==='Enviado para Projeto' && !equipRef){ toast('Informe o Equipamento de Referência (obrigatório ao enviar para projeto).','err'); return; }
+    const escopoProjeto=(document.getElementById('pdEscopoProjeto').value||'').trim();
+    if(acaoAnalista==='Enviado para Projeto' && !escopoProjeto){ toast('Descreva o escopo do projeto (o que deve ser projetado).','err'); return; }
     const cfg=TIPOS_SOLICITACAO[tipoSolicitacao];
     const existente=id?(pedidos.find(x=>x.id===id)||{}):{};
     const dados={
@@ -12709,7 +12773,10 @@ window.savePedido=async function(){
     if((existente.acaoAnalista||'')!==acaoAnalista) dados.dataAcaoAnalista=acaoAnalista?pdHojeStr():null;
     // equipamento de referência + coordenada (para estimar a distância percorrida pelo projetista)
     if(acaoAnalista==='Enviado para Projeto'){
+      dados.escopoProjeto=escopoProjeto;
       dados.equipamentoRef=equipRef;
+      // fotografia do cálculo de Linha Viva (fica no pedido mesmo se a base de planejamento mudar depois)
+      try{ if(await pdBasePlanejamento()){ const _c=pdCalcLV(equipRef); if(_c){ dados.linhaVivaCalc={..._c,calculadoEm:pdHojeStr()}; dados.linhaVivaObs=pdLvTexto(_c); } } }catch(e){ console.warn('[Pedidos] LV:',e); }
       if(equipRef!==(existente.equipamentoRef||null) || existente.equipLat==null){
         const loc=await pdLocalizarEquip(equipRef);
         dados.equipLat=loc?loc.lat:null; dados.equipLon=loc?loc.lon:null;
@@ -12727,6 +12794,7 @@ window.savePedido=async function(){
     if(id){
       const ev=[];
       if((existente.acaoAnalista||'')!==acaoAnalista) ev.push('Ação do analista: '+(acaoAnalista||'—'));
+      if(acaoAnalista==='Enviado para Projeto' && (existente.escopoProjeto||'')!==escopoProjeto) ev.push((existente.escopoProjeto?'Escopo do projeto alterado: ':'Escopo do projeto: ')+escopoProjeto);
       if(acaoAnalista==='Enviado para Projeto' && (existente.projetista!==dados.projetista||existente.dataEncaminhamentoProjetista!==dados.dataEncaminhamentoProjetista))
         ev.push('Encaminhado ao projetista '+dados.projetista+' em '+fmtTxt(dados.dataEncaminhamentoProjetista));
       if(acaoAnalista==='Cancelado' && existente.motivoCancelamento!==dados.motivoCancelamento) ev.push('Motivo do cancelamento: '+dados.motivoCancelamento);
@@ -12738,12 +12806,17 @@ window.savePedido=async function(){
     } else {
       const novo={...dados, status:'', criadaEm:serverTimestamp(), criadaPor:me.nome,
         medida34Analista:[], medida34Gerente:[], checklistDocumental:dados.checklistDocumental||[], checklistConcluido:false,
-        reanalises:[], reprojetos:[], equipamentoRef:dados.equipamentoRef||null, equipLat:dados.equipLat??null, equipLon:dados.equipLon??null,
+        reanalises:[], reprojetos:[], escopoProjeto:dados.escopoProjeto||'', equipamentoRef:dados.equipamentoRef||null, equipLat:dados.equipLat??null, equipLon:dados.equipLon??null,
         dataAcaoAnalista:acaoAnalista?pdHojeStr():null,
         timeline:[{ts:new Date().toISOString(),usuario:me.nome||'',perfil:me.perfil||'',evento:'Pedido criado no sistema',detalhe:'Abertura em '+fmtTxt(dataAberturaPedido)+(acaoAnalista?' · Ação: '+acaoAnalista:'')}]};
+      const _pendM=_pdMelhPend;
+      if(dados.linhaVivaCalc){ novo.linhaVivaCalc=dados.linhaVivaCalc; novo.linhaVivaObs=dados.linhaVivaObs||''; }
+      if(_pendM){ novo.pedidoOrigem=_pendM.origem; novo.oportunidadesPlanejamento=_pendM.itens.map(i=>i.key); novo.oportunidadesInfo=_pendM.itens.map(i=>({key:i.key,tipo:i.tipo,titulo:i.titulo,det:i.det||''}));
+        novo.timeline[0].detalhe+=' · Pedido de melhoria vinculado ao pedido '+_pendM.origem.nota; }
       novo.status=computeStatusPedido(novo);
-      await addDoc(collection(db,'pedidos'), novo);
-      toast('Pedido criado!');
+      const _ref=await addDoc(collection(db,'pedidos'), novo);
+      if(_pendM){ _pdMelhPend=null; try{ await pdMelhConcluirVinculo(_pendM,_ref.id,nota); toast('Pedido de melhoria '+nota+' criado e vinculado ao pedido '+_pendM.origem.nota+'.'); }catch(e){ console.error(e); toast('Pedido criado, mas houve erro ao vincular: '+e.message,'err'); } }
+      else toast('Pedido criado!');
       closePedidoModal(true);
     }
   }catch(e){
@@ -12785,6 +12858,7 @@ window.pdEquipAvisoRender=function(){
   const nr=document.getElementById('pdEquipRef')?.value;
   const html=(acao==='Enviado para Projeto' && nr)?pdEquipAvisoHtml(nr, document.getElementById('pedidoId')?.value||''):'';
   el.innerHTML=html; el.style.display=html?'block':'none';
+  pdPlanAtualizar(false);   // Linha Viva + oportunidades de melhoria (com pequeno atraso enquanto digita)
 };
 async function pdLocalizarEquip(nr){
   try{
@@ -12844,7 +12918,7 @@ function pdRenderPreAnalise(){
   }
   const ro=!paPodeEditar(); const d=_paDraft; const feita=preAnaliseFeita(p);
   const km=(k,l)=>`<div class="fg"><label>${l}</label><input type="text" inputmode="decimal" value="${pdEsc(d[k])}" ${ro?'disabled':''} placeholder="0,000" oninput="pdPaSet('${k}',this.value,false)" style="width:100%"></div>`;
-  body.innerHTML=`
+  body.innerHTML=pdEscopoHtml(p)+`<div class="pdLvSlot" data-ctx="estagiario" style="margin-bottom:10px">${pdLvHtml(_pdLvAtual||p.linhaVivaCalc||null,'estagiario')}</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Não bloqueia a análise do Gerente. Em caso de reprojeto não precisa ser refeita (pode ser corrigida se os km mudarem). Os km servem para o Analista conferir o pagamento do projeto.</div>
     <div class="fg-grid">
       <div class="fg"><label>Os materiais estão orçados de maneira correta?</label>
@@ -13185,6 +13259,156 @@ function pdRenderDash(){
     +tabela(['Município','Pedidos conferidos','Com documento faltando','Documentos que mais faltam'],linhasM));
 
   el.innerHTML=html;
+}
+
+// ══════════════════════════════════════════════════════
+//  PLANEJAMENTO NO PEDIDO — oportunidades de melhoria no trecho · necessidade de Linha Viva
+// ══════════════════════════════════════════════════════
+function pdPodeVerPlanejamento(){ return !!me && ['analista','gerente','estagiario','adm_odi'].includes(me.perfil); }
+async function pdBasePlanejamento(){
+  if(!pdPodeVerPlanejamento()) return false;
+  try{ return await _plGarantirBase(); }catch(e){ console.warn('[Pedidos] base de planejamento indisponível:',e.message); return false; }
+}
+// Cálculo da necessidade de Linha Viva a partir do equipamento de referência (requer a base carregada)
+function pdCalcLV(nr){
+  const B=_pl.B,R=_pl.R; if(!B||!R) return null;
+  const loc=planLocalizarEquip(B,nr); if(!loc) return {achou:false};
+  // nó de trabalho: para trafo é o próprio ponto; para chave/religador é o trecho protegido por ela (a jusante)
+  const n0=(loc.nos&&loc.nos.length)?loc.nos[0]:loc.ref;
+  const V=B.V,X=B._p,blk=R._blk; const b=blk[n0]; const bl=R._blocos[b]; const head=bl.head;
+  if(!R._nosBloco){R._nosBloco=new Map();for(let i=0;i<B.N;i++){const bb=blk[i];if(!R._nosBloco.has(bb))R._nosBloco.set(bb,[]);R._nosBloco.get(bb).push(i);}}
+  let uc=0,ucu=0; for(const i of (R._nosBloco.get(b)||[])) for(const ti of (X.tdAt.get(i)||[])){ const t=B.td[ti]; uc+=t.uc; if(t.urb) ucu+=t.uc; }
+  const urbano=uc>0?(ucu/uc>=0.5):V.urb[head]===1;                 // mesma regra do planejamento
+  const ucJus=Math.round(X.sUC[head]);                             // tudo que apaga ao abrir a chave que isola o trecho
+  const cabo=B.cabos[V.cab[n0]]||'';
+  const finos=(R.P&&R.P.cabosPequenos)||PLAN_PARAM_PADRAO.cabosPequenos;
+  const caboFino=finos.includes(cabo);
+  const lim=urbano?(pedidosParams.lvUcUrb||300):(pedidosParams.lvUcRur||200);
+  const acima=ucJus>lim;
+  const manobra=ucJus>(pedidosParams.lvUcManobra||1000);
+  const resultado=caboFino?'nao_aplicavel':(acima?'obrigatorio':'nao_obrigatorio');
+  return {achou:true, ucJus, area:urbano?'Urbana':'Rural', cabo, caboFino, limite:lim, acima, manobra, resultado, chave:bl.rot, al:bl.al, tipoEquip:loc.tipo};
+}
+function pdLvTexto(c){
+  if(!c) return 'Necessidade de Linha Viva não calculada (base de planejamento indisponível).';
+  if(!c.achou) return 'Equipamento de referência não localizado na base de planejamento — necessidade de Linha Viva não calculada.';
+  const base=`Trecho isolado por ${c.chave} (${c.al}) · área ${c.area} · ${c.ucJus} UC desligadas ao abrir a chave · cabo ${c.cabo||'não identificado'}`;
+  let r=c.resultado==='nao_aplicavel'?`Linha Viva NÃO APLICÁVEL: cabo ${c.cabo} não permite atividade com LV.`+(c.acima?` Atenção: o desligamento atinge ${c.ucJus} UC (acima do limite de ${c.limite} para área ${c.area.toLowerCase()}).`:'')
+    :c.resultado==='obrigatorio'?`OBRIGATÓRIO VERIFICAR LINHA VIVA: ${c.ucJus} UC desligadas (limite ${c.limite} para área ${c.area.toLowerCase()}).`
+    :`Linha Viva não obrigatória: ${c.ucJus} UC desligadas (limite ${c.limite} para área ${c.area.toLowerCase()}).`;
+  if(c.manobra) r+=` Abertura muito grande (${c.ucJus} UC) — VERIFICAR POSSIBILIDADE DE MANOBRA.`;
+  return r+' — '+base;
+}
+function pdLvHtml(c,contexto){
+  if(!c||!c.achou) return `<div style="padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:11px;color:var(--muted)">⚡ ${pdEsc(pdLvTexto(c))}</div>`;
+  const cor=c.resultado==='obrigatorio'?'#EF4444':(c.resultado==='nao_aplicavel'?'#F59E0B':'#22C55E');
+  const tit=c.resultado==='obrigatorio'?'⚡ Obrigatório verificar Linha Viva':(c.resultado==='nao_aplicavel'?'⚡ Linha Viva não aplicável (cabo fino)':'⚡ Linha Viva não obrigatória');
+  return `<div style="padding:8px 10px;border:1px solid ${cor}66;background:${cor}14;border-radius:8px;font-size:12px">
+    <div style="font-weight:800;color:${cor}">${tit}</div>
+    <div style="font-size:11px;margin-top:2px">Trecho isolado por <b>${pdEsc(c.chave)}</b> · ${pdEsc(c.al)} · área <b>${c.area}</b> · <b>${c.ucJus} UC</b> desligadas ao abrir a chave (limite ${c.limite}) · cabo no equipamento: <b>${pdEsc(c.cabo||'—')}</b>${c.caboFino?' <span style="color:#F59E0B;font-weight:700">(não permite LV)</span>':''}</div>
+    ${c.resultado==='nao_aplicavel'&&c.acima?`<div style="font-size:11px;color:#EF4444;font-weight:700;margin-top:2px">Atenção: sem LV, o desligamento atinge ${c.ucJus} UC (acima do limite).</div>`:''}
+    ${c.manobra?`<div style="font-size:11px;color:#EF4444;font-weight:700;margin-top:2px">🔀 Abertura muito grande (${c.ucJus} UC) — verificar possibilidade de manobra.</div>`:''}
+    ${contexto==='analista'?`<div style="font-size:10px;color:var(--muted);margin-top:4px">Observação para repassar ao projetista. A definição final (tem LV / foi orçada) é do Gerente na análise de projeto.</div>`:''}
+  </div>`;
+}
+// Preenche os quadros de Linha Viva (ação do analista, pré-análise e análise do Gerente)
+let _pdLvAtual=null, _pdPlanSeq=0;
+async function pdLvPreencher(nr){
+  const slots=[...document.querySelectorAll('#ovPedido .pdLvSlot')]; const p=_pdAtual();
+  if(!nr){ slots.forEach(s=>{ s.innerHTML=''; }); _pdLvAtual=null; return; }
+  const seq=++_pdPlanSeq;
+  slots.forEach(s=>{ if(!s.innerHTML) s.innerHTML='<div style="font-size:10px;color:var(--muted)">⚡ Calculando necessidade de Linha Viva…</div>'; });
+  const ok=await pdBasePlanejamento(); if(seq!==_pdPlanSeq) return;
+  let c=ok?pdCalcLV(nr):null;
+  if(!c && p && p.linhaVivaCalc && pdChaveNorm(p.equipamentoRef)===pdChaveNorm(nr)) c=p.linhaVivaCalc;   // usa o último cálculo salvo
+  _pdLvAtual=c;
+  document.querySelectorAll('#ovPedido .pdLvSlot').forEach(s=>{ s.innerHTML=pdLvHtml(c,s.dataset.ctx||''); });
+}
+
+// ── Oportunidades de melhoria no trecho do equipamento (mesma análise mostrada na obra) ──
+let _pdOport={itens:[],loc:null,nr:''}, _pdMelhPend=null;
+async function pdOportRender(nr){
+  const box=document.getElementById('pdOportBox'); if(!box) return;
+  if(!nr || !pdPodeVerPlanejamento()){ box.innerHTML=''; box.style.display='none'; return; }
+  const seq=_pdPlanSeq;
+  box.style.display='block';
+  if(!box.innerHTML) box.innerHTML='<div style="font-size:10px;color:var(--muted)">Verificando oportunidades de melhoria no trecho…</div>';
+  const ok=await pdBasePlanejamento(); if(seq!==_pdPlanSeq) return;
+  if(!ok){ box.innerHTML='<div style="font-size:10px;color:var(--muted)">Base de planejamento indisponível — oportunidades de melhoria não verificadas.</div>'; return; }
+  const p=_pdAtual();
+  const r=planOportunidadesNoTrecho(_pl.B,_pl.R,nr); const tr=r.loc?planTrechoEquip(_pl.B,_pl.R,nr):null;
+  const pv=tr?_plPvntNoTrecho(tr.bs):[];
+  _pdOport={itens:r.itens,loc:r.loc,nr:String(nr)};
+  const pvHtml=pv.length?`<div style="background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.45);border-radius:8px;padding:6px 10px;margin-bottom:6px;font-size:11px">📌 <b>PVNT prevista neste trecho:</b> ${pv.map(x=>`nota ${pdEsc(x.nota)} (equip. ${pdEsc(x.equip)}${x.desc?' · '+pdEsc(String(x.desc).slice(0,60)):''}${x.sppc?' · já no SPPC: '+pdEsc(x.sppc):''})`).join('; ')}</div>`:'';
+  if(!r.loc){ box.innerHTML=pvHtml+`<div style="font-size:10px;color:var(--muted)">Equipamento ${pdEsc(nr)} não localizado na base de planejamento.</div>`; return; }
+  if(!r.itens.length){ box.innerHTML=pvHtml+`<div style="font-size:10px;color:var(--muted)">✓ Nenhuma oportunidade de melhoria apontada no trecho ${pdEsc(r.loc.trecho)} (${pdEsc(r.loc.al)}).</div>`; return; }
+  const podeGerar=podeGerenciarPedidos() && !!p;
+  const linhas=r.itens.map((it,i)=>{ const s=_plStatusOp(it.key); const livre=s.base==='Planejada';
+    return `<label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-top:1px solid var(--border);font-size:11px;cursor:${livre&&podeGerar?'pointer':'default'}">
+      <input type="checkbox" class="pdOpChk" data-i="${i}" ${livre&&podeGerar?'checked':'disabled'} style="width:auto;margin-top:2px">
+      <span style="flex:1"><b>${pdEsc(it.tipo)}</b> — ${pdEsc(it.titulo)}<br><span style="color:var(--muted);font-size:10px">${pdEsc(it.det)}</span></span>
+      <span style="font-size:10px;white-space:nowrap;color:${livre?'#ef4444':s.base==='Descartada'?'var(--muted)':'#3b82f6'}">${pdEsc(s.txt)}</span></label>`; }).join('');
+  box.innerHTML=pvHtml+`<details open style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.45);border-radius:8px;padding:8px 10px">
+    <summary style="cursor:pointer;font-size:12px;font-weight:700;color:#d97706">⚠️ ${r.itens.length} oportunidade${r.itens.length>1?'s':''} de melhoria no trecho ${pdEsc(r.loc.trecho)} · ${pdEsc(r.loc.al)}</summary>
+    <div style="margin-top:6px">${linhas}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      ${podeGerar?`<button type="button" class="btn btn-primary btn-sm" onclick="pdGerarPedidoMelhoria()">➕ Gerar pedido de projeto de melhoria com as selecionadas</button>
+        <span style="font-size:10px;color:var(--muted)">Abre um novo pedido (você escolhe o enquadramento: Melhorias, Equipamentos Especiais, Alimentadores…) já vinculado a este.</span>`
+      :(p?'<span style="font-size:10px;color:var(--muted)">O Analista ou o Gerente pode gerar um pedido de projeto de melhoria a partir destas oportunidades.</span>':'<span style="font-size:10px;color:var(--muted)">Salve o pedido para poder gerar um pedido de projeto de melhoria vinculado.</span>')}
+    </div></details>`;
+}
+let _pdPlanTimer=null;
+function pdPlanAtualizar(imediato){
+  clearTimeout(_pdPlanTimer);
+  const run=()=>{ const acao=document.getElementById('pdAcaoAnalista')?.value; const nr=acao==='Enviado para Projeto'?(document.getElementById('pdEquipRef')?.value||'').trim():'';
+    pdLvPreencher(nr).then(()=>pdOportRender(nr)).catch(e=>console.warn('[Pedidos] planejamento:',e)); };
+  if(imediato) run(); else _pdPlanTimer=setTimeout(run,600);
+}
+window.pdGerarPedidoMelhoria=function(){
+  const p=_pdAtual(); if(!p||!podeGerenciarPedidos()) return;
+  const sel=[...document.querySelectorAll('#pdOportBox .pdOpChk:checked')].map(c=>_pdOport.itens[+c.dataset.i]).filter(Boolean);
+  if(!sel.length){ toast('Selecione ao menos uma oportunidade.','warn'); return; }
+  if((_arDirty||_apDirty||_paDirty) && !confirm('Há alterações não salvas na análise deste pedido. Continuar mesmo assim?')) return;
+  _pdMelhPend={origem:{id:p.id,nota:p.nota||''},municipio:p.municipio||'',equipamentoRef:p.equipamentoRef||_pdOport.nr,loc:_pdOport.loc||{al:'',trecho:''},
+    itens:sel.map(s=>({key:s.key,tipo:s.tipo,titulo:s.titulo,det:s.det,pos:s.pos||null}))};
+  closePedidoModal(true);
+  window.openPedidoModal();
+};
+function pdMelhAplicarPendente(){
+  const box=document.getElementById('pdMelhBanner'); if(!box) return;
+  const p=_pdAtual(); const pend=_pdMelhPend;
+  if(!p && pend){
+    const set=(id,v)=>{ const el=document.getElementById(id); if(el && v!=null && v!=='') el.value=v; };
+    set('pdNota','M-'+pend.origem.nota); set('pdTipoSolicitacao','Melhorias'); set('pdDataAbertura',pdHojeStr()); set('pdMunicipio',pend.municipio);
+    set('pdAcaoAnalista','Enviado para Projeto'); set('pdEquipRef',pend.equipamentoRef);
+    set('pdEscopoProjeto','Melhoria vinculada ao pedido '+pend.origem.nota+' (trecho '+(pend.loc.trecho||'—')+' · '+(pend.loc.al||'—')+'):\n'+pend.itens.map(i=>'• '+i.tipo+' — '+i.titulo+(i.det?' ('+i.det+')':'')).join('\n'));
+    onTipoSolicitacaoChange(); onAcaoAnalistaChange();
+    box.style.display='block';
+    box.innerHTML=`<div style="background:rgba(124,106,247,.12);border:1px solid #7c6af7;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:11px">🔗 Novo <b>pedido de projeto de melhoria</b> vinculado ao pedido <b>${pdEsc(pend.origem.nota)}</b> (${pend.itens.length} oportunidade${pend.itens.length>1?'s':''}). Ajuste a nota, o <b>tipo de solicitação</b> (enquadramento), o projetista e a data de encaminhamento e salve. <a href="#" onclick="pdMelhCancelar();return false" style="color:#7c6af7">Cancelar vínculo</a></div>`;
+    return;
+  }
+  let h='';
+  if(p && p.pedidoOrigem) h+=`<div style="background:rgba(124,106,247,.10);border:1px solid rgba(124,106,247,.5);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:11px">🔗 Pedido de projeto de melhoria gerado a partir do pedido <a href="#" onclick="pdAbrirOutro('${pdEsc(p.pedidoOrigem.id)}');return false" style="color:#7c6af7;font-weight:700">${pdEsc(p.pedidoOrigem.nota)}</a>${(p.oportunidadesInfo||[]).length?' · '+p.oportunidadesInfo.map(i=>pdEsc(i.tipo)).join(', '):''}</div>`;
+  if(p && (p.pedidosMelhoriaVinculados||[]).length) h+=`<div style="background:rgba(124,106,247,.10);border:1px solid rgba(124,106,247,.5);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:11px">🔗 Pedido(s) de projeto de melhoria gerado(s) a partir deste: ${p.pedidosMelhoriaVinculados.map(x=>`<a href="#" onclick="pdAbrirOutro('${pdEsc(x.id)}');return false" style="color:#7c6af7;font-weight:700">${pdEsc(x.nota)}</a>`).join(', ')}</div>`;
+  box.innerHTML=h; box.style.display=h?'block':'none';
+}
+window.pdMelhCancelar=function(){ _pdMelhPend=null; closePedidoModal(true); };
+window.pdAbrirOutro=function(id){ if(!pedidos.some(x=>x.id===id)){ toast('Pedido não encontrado (pode ter sido excluído).','warn'); return; } closePedidoModal(true); window.openPedidoModal(id); };
+// Depois de salvar o novo pedido de melhoria: vincula ao pedido de origem e marca as oportunidades
+async function pdMelhConcluirVinculo(pend,novoId,novaNota){
+  const orig=pedidos.find(x=>x.id===pend.origem.id);
+  const lista=[...((orig&&orig.pedidosMelhoriaVinculados)||[]),{id:novoId,nota:novaNota}];
+  await updateDoc(doc(db,'pedidos',pend.origem.id),{pedidosMelhoriaVinculados:lista,
+    timeline:arrayUnion({ts:new Date().toISOString(),usuario:me.nome||'',perfil:me.perfil||'',evento:'Pedido de projeto de melhoria gerado',detalhe:novaNota+' · '+pend.itens.map(i=>i.tipo).join(', ')})});
+  if(orig) orig.pedidosMelhoriaVinculados=lista;
+  if(!_pl.ops) _pl.ops=new Map();
+  for(const it of pend.itens){
+    const reg={key:it.key,tipo:it.tipo,titulo:it.titulo,det:it.det,pos:it.pos||null,al:pend.loc.al||'',trecho:pend.loc.trecho||'',decisao:'pedido',
+      pedidoId:novoId,pedidoNota:novaNota,pedidoOrigemId:pend.origem.id,pedidoOrigemNota:pend.origem.nota,em:serverTimestamp(),por:me.nome||me.email||''};
+    try{ await setDoc(doc(db,'oportunidades',_plIdOp(it.key)),reg); _pl.ops.set(it.key,reg); }
+    catch(e){ console.warn('[Pedidos] não foi possível marcar a oportunidade:',e.message); }
+  }
+  _pl.oportResumo=null;
 }
 
 // ── Abas da página de Pedidos ──────────────────────────
@@ -14575,6 +14799,9 @@ window._plGerarR2Avulsa=function(obraId){const tipo=document.getElementById('plA
 function _plIdOp(key){return key.replace(/[\/\s]+/g,'_').slice(0,700);}
 function _plStatusOp(key){const d=_pl.ops&&_pl.ops.get(key);if(!d)return{base:'Planejada',txt:'Planejada'};
   if(d.decisao==='descartada')return{base:'Descartada',txt:'Descartada'+(d.motivo?` (${d.motivo})`:''),d};
+  if(d.decisao==='pedido'){const pp=(typeof pedidos!=='undefined'?pedidos:[]).find(x=>x.id===d.pedidoId);
+    if(pp&&(pp.acaoAnalista==='Cancelado'||pp.acaoAnalista==='Liberado sem Obra'))return{base:'Planejada',txt:`Planejada (pedido ${pp.nota||''} ${pp.acaoAnalista==='Cancelado'?'cancelado':'liberado sem obra'})`,d};
+    return{base:'Em pedido',txt:`Em pedido de projeto (${d.pedidoNota||''})`,d};}
   const o=(typeof obras!=='undefined'?obras:[]).find(x=>x.id===d.obraMelhoriaId);
   if(!o)return{base:'Vinculada',txt:`Vinculada à R2 ${d.obraMelhoriaNum||''}`,d};
   if(o.cancelado)return{base:'Planejada',txt:`Planejada (R2 ${o.numero} cancelada)`,d};
