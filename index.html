@@ -63,7 +63,8 @@
         <button class="btn btn-primary btn-sm" id="btnNovaObra" style="display:none" onclick="openObraModal()">+ Nova Obra</button>
         <button class="btn btn-secondary btn-sm" id="btnImport" style="display:none" onclick="openImportModal()">📥 Importar Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportXLSX()">⬇ Exportar Excel</button>
-        <button class="btn btn-secondary btn-sm" id="btnExportHistorico" onclick="exportarBaseHistorica()" title="Exporta obras encerradas (280 + armazenado) em dois tabs: RD e ODI">📦 Exportar Histórico</button>
+        <button class="btn btn-secondary btn-sm" id="btnExportHistorico" onclick="exportarBaseHistorica()" title="Exporta as obras encerradas (280 + armazenada) nas abas RD e ODI, e as canceladas na aba Obras Canceladas">📦 Exportar Histórico</button>
+        <button class="btn btn-sm" id="btnLimparEncerradas" style="display:none;background:rgba(239,68,68,.08);color:#EF4444;border:1px solid rgba(239,68,68,.3)" onclick="limparEncerradasCanceladas()" title="Exporta o histórico e exclui do sistema as obras encerradas e canceladas">🗑️ Excluir encerradas/canceladas</button>
         <button class="btn btn-secondary btn-sm" id="btnEquipDB" onclick="uploadEquipDB()" title="Carregar base de equipamentos para otimização" style="font-size:10px">📡 Base Equipamentos</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkMedidas" style="display:none" onclick="abrirBulk('medidas')">📐 Medidas em Lote</button>
         <button class="btn btn-secondary btn-sm" id="btnBulkFisc" style="display:none" onclick="abrirBulk('fisc')">🔍 Fiscalização em Lote</button>
@@ -218,6 +219,7 @@
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_medida230')">📋 Sem Med. 230</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('med230_sem280')">📋 Med.230 s/ 280</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('via_fechamento')" style="color:#22C55E;border-color:rgba(34,197,94,.4)">📁 Via p/ Fechamento</button>
+        <button class="btn btn-secondary btn-sm" onclick="filtroRapido('via_simo')" style="color:#06B6D4;border-color:rgba(6,182,212,.4)">🗂️ Via p/ Cadastro SIMO</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('ag_armazenar')" style="color:#F59E0B;border-color:rgba(245,158,11,.4)">📦 Ag. Armazenar</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('sem_conclusao')">🔲 Sem Conclusão</button>
         <button class="btn btn-secondary btn-sm" onclick="filtroRapido('fisc_sem_cad')">📋 Fisc. s/ Cadastro</button>
@@ -562,6 +564,16 @@
         </div>
       </div>
       <button class="btn btn-secondary btn-sm" id="btnNovoKaffa" onclick="abrirNovoKaffa()">+ Registrar Kaffa</button>
+      <button class="btn btn-secondary btn-sm" id="btnEditarEquip" style="display:none;margin-left:6px" onclick="abrirEdicaoEquip()">✏️ Editar equipamentos informados</button>
+      <div id="equipEditWrap" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:8px">
+        <div style="font-size:11px;font-weight:800;margin-bottom:4px">✏️ Corrigir / completar os equipamentos informados</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Corrija um número errado, adicione um transformador que faltou (instalado ou retirado) ou remova um lançado por engano. A alteração só vale depois de clicar em "Salvar equipamentos".</div>
+        <div id="equipEditSlot"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button type="button" class="btn btn-primary btn-sm" id="btnSalvarEquipEdit" onclick="salvarEdicaoEquip()">💾 Salvar equipamentos</button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="cancelarEdicaoEquip()">Cancelar</button>
+        </div>
+      </div>
     </div>
   </div>
   <div class="modal-section" id="secImpedimento">
