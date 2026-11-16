@@ -15051,27 +15051,27 @@ document.addEventListener('change',e=>{if(e.target&&e.target.id==='oEquipRef'&&m
 //  VIA DA OBRA DEIXADA PARA FECHAMENTO (fiscal marca; fiscal ou gerente desmarca)
 // ══════════════════════════════════════════════════════
 const VIAS_OBRA={
-  fech:{campo:'viaFechamento',  rot:'📁 Via da obra deixada para fechamento',      dica:'Marque quando deixar a via física da obra para fechamento.', ok:'Via marcada como deixada para fechamento.'},
-  simo:{campo:'viaCadastroSimo',rot:'🗂️ Via da obra enviada para cadastro SIMO',   dica:'Marque quando enviar a via da obra para o cadastro SIMO.',   ok:'Via marcada como enviada para cadastro SIMO.'},
+  fech:{perfis:['fiscal','fiscal_adm','gerente'],              quem:'o fiscal ou o gerente',              campo:'viaFechamento',  rot:'📁 Via da obra deixada para fechamento',      dica:'Marque quando deixar a via física da obra para fechamento.', ok:'Via marcada como deixada para fechamento.'},
+  simo:{perfis:['fiscal','fiscal_adm','gerente','estagiario'], quem:'o fiscal, o estagiário ou o gerente', campo:'viaCadastroSimo',rot:'🗂️ Via da obra enviada para cadastro SIMO',   dica:'Marque quando enviar a via da obra para o cadastro SIMO.',   ok:'Via marcada como enviada para cadastro SIMO.'},
 };
 function renderViaFechamento(obra){
   const el=document.getElementById('viaFechWrap'); if(!el) return;
   const perfisVe=['fiscal','fiscal_adm','gerente','adm_odi','estagiario','genesis'];
   if(!obra || !me || !perfisVe.includes(me.perfil)){ el.style.display='none'; el.innerHTML=''; return; }
-  const pode=['fiscal','fiscal_adm','gerente'].includes(me.perfil);
   el.style.display='block';
   el.innerHTML=Object.entries(VIAS_OBRA).map(([k,v])=>{ const on=!!obra[v.campo]; const em=obra[v.campo+'Em'], por=obra[v.campo+'Por'];
+    const pode=v.perfis.includes(me.perfil);
     return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid ${on?'rgba(34,197,94,.4)':'var(--border)'};background:${on?'rgba(34,197,94,.07)':'transparent'}">
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;cursor:${pode?'pointer':'default'}">
       <input type="checkbox" style="width:auto" ${on?'checked':''} ${pode?'':'disabled'} onchange="toggleViaObra('${obra.id}','${k}',this.checked)">
       ${v.rot}
     </label>
-    <span style="font-size:11px;color:var(--muted)">${on?('Marcado em '+fmtTxt(em)+(por?' por '+String(por).replace(/</g,'&lt;'):'')):(pode?v.dica:'Ainda não marcado pelo fiscal.')}</span>
+    <span style="font-size:11px;color:var(--muted)">${on?('Marcado em '+fmtTxt(em)+(por?' por '+String(por).replace(/</g,'&lt;'):'')):(pode?v.dica:'Ainda não marcado ('+v.quem+').')}</span>
   </div>`; }).join('');
 }
 window.toggleViaObra=async function(obraId,qual,marcar){
   const v=VIAS_OBRA[qual]; if(!v) return;
-  if(!['fiscal','fiscal_adm','gerente'].includes(me.perfil)){ toast('Somente o fiscal ou o gerente altera esta marcação.','err'); return; }
+  if(!v.perfis.includes(me.perfil)){ toast('Somente '+v.quem+' altera esta marcação.','err'); return; }
   const o=obras.find(x=>x.id===obraId); if(!o) return;
   const patch=marcar?{[v.campo]:true,[v.campo+'Em']:pdHojeStr(),[v.campo+'Por']:me.nome||me.email||''}
                     :{[v.campo]:false,[v.campo+'Em']:null,[v.campo+'Por']:null};
