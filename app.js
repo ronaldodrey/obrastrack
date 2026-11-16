@@ -718,6 +718,7 @@ function renderDashGerente(list, listAll){
   }
 
   html += renderMonitorPrazos(list.filter(o=>o.tipo!=='ODI'));
+  html += renderKpiConclusaoMedicao(list.filter(o=>o.tipo!=='ODI'));
   html += '<div class="sect-title" style="margin-bottom:12px;margin-top:20px">Velocidade Média por Fiscal</div>';
   html += '<div class="vel-grid">' + velCards(list) + '</div>';
   // Gráfico mensal de pendências
@@ -1414,7 +1415,7 @@ function renderDashEstagiario(list){
     if(!obras.length) return '<div class="empty" style="padding:16px"><div class="ico" style="font-size:18px">✅</div><p style="font-size:12px">Nenhuma obra pendente.</p></div>';
     const rows = obras.map(o=>{
       const itens = [
-        o.contratosAssinado?null:'Contratos',
+        (precisaContrato(o)&&!o.contratosAssinado)?'Contratos':null,
         (!isODI && !o.medicoesAssinadas)?'Medições':null,
         o.projetosAsBuilt?null:'As-Built',
         o.caixaArmazenada?null:'Caixa',
@@ -1485,7 +1486,7 @@ function renderDashEstagiario(list){
     function pendDoc(o, isODI){
       // Retorna array de docs pendentes igual ao tblArmazenamento
       return [
-        o.contratosAssinado?null:'Contratos',
+        (precisaContrato(o)&&!o.contratosAssinado)?'Contratos':null,
         (!isODI && !o.medicoesAssinadas)?'Medições':null,
         o.projetosAsBuilt?null:'As-Built',
         o.caixaArmazenada?null:'Caixa',
@@ -1512,7 +1513,7 @@ function renderDashEstagiario(list){
         const prazo = prazoMedida280(o);
         const vencido = prazo && prazo < hoje;
         const itensContr = [
-          o.contratosAssinado?null:'⚠️ Contratos',
+          (precisaContrato(o)&&!o.contratosAssinado)?'⚠️ Contratos':null,
           (!isODI && !o.medicoesAssinadas)?'⚠️ Medições':null,
           o.projetosAsBuilt?null:'⚠️ As-Built',
         ].filter(Boolean);
@@ -1602,6 +1603,59 @@ function kpiCard(lbl,val,sub,cor){
     <div class="kpi-val">${val}</div>
     <div class="kpi-sub">${sub}</div>
   </div>`;
+}
+
+// ── KPI: tempo do processo de medição (conclusão da obra → medição informada), por empreiteira ──
+function _medicaoFinalData(o){
+  const fin=(o.medicoes||[]).filter(m=>m.tipo==='final'&&m.data).map(m=>m.data).sort();
+  if(fin.length) return fin[fin.length-1];
+  if(!(o.medicoes||[]).length && o.medicao) return o.medicao;   // formato antigo (medição única)
+  return null;
+}
+function _medicaoPrimeiraData(o){
+  const t=(o.medicoes||[]).filter(m=>m.data).map(m=>m.data).sort();
+  return t.length?t[0]:(o.medicao||null);
+}
+function renderKpiConclusaoMedicao(list){
+  const base=list.filter(o=>!o.cancelado && o.conclusao);
+  if(!base.length) return '';
+  const hoje=pdHojeStr(); const g={};
+  base.forEach(o=>{
+    const k=o.empreiteira||'(sem empreiteira)'; const x=g[k]=g[k]||{fin:[],pri:[],pend:[]};
+    const mf=_medicaoFinalData(o), mp=_medicaoPrimeiraData(o);
+    if(mp){ const d=diff(o.conclusao,mp); if(d!==null&&d>=0) x.pri.push(d); }
+    if(mf){ const d=diff(o.conclusao,mf); if(d!==null&&d>=0) x.fin.push(d); }
+    else if(!o.armazenado){ const d=diff(o.conclusao,hoje); if(d!==null&&d>=0) x.pend.push({o,d}); }   // obra já armazenada não conta como "aguardando"
+  });
+  const med=a=>a.length?Math.round(a.reduce((s,v)=>s+v,0)/a.length):null;
+  const cor=v=>v===null?'var(--muted)':(v<=30?'#22C55E':(v<=60?'#F59E0B':'#EF4444'));
+  const cel=v=>v===null?'<span style="color:var(--muted)">—</span>':`<strong style="color:${cor(v)}">${v}d</strong>`;
+  const nomes=Object.keys(g).sort((a,b)=>(med(g[b].fin)??-1)-(med(g[a].fin)??-1));
+  const tot={fin:[],pri:[],pend:[]}; nomes.forEach(n=>{ tot.fin.push(...g[n].fin); tot.pri.push(...g[n].pri); tot.pend.push(...g[n].pend); });
+  const linha=(nome,x,negrito)=>{ const pendMax=x.pend.length?Math.max(...x.pend.map(p=>p.d)):null;
+    return `<tr style="border-bottom:1px solid var(--border)${negrito?';background:var(--surface2);font-weight:700':''}">
+      <td style="padding:6px 10px">${nome}</td>
+      <td style="padding:6px 10px;text-align:center">${x.fin.length}</td>
+      <td style="padding:6px 10px;text-align:center">${cel(med(x.fin))}</td>
+      <td style="padding:6px 10px;text-align:center">${x.fin.length?Math.min(...x.fin)+'d / '+Math.max(...x.fin)+'d':'—'}</td>
+      <td style="padding:6px 10px;text-align:center">${cel(med(x.pri))}</td>
+      <td style="padding:6px 10px;text-align:center">${x.pend.length?`<strong style="color:#EF4444">${x.pend.length}</strong>`:'0'}</td>
+      <td style="padding:6px 10px;text-align:center">${x.pend.length?cel(med(x.pend.map(p=>p.d)))+` <span style="font-size:9px;color:var(--muted)">(máx. ${pendMax}d)</span>`:'—'}</td></tr>`; };
+  return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px">
+    <div style="font-weight:800;font-size:13px;margin-bottom:2px">📐 Tempo do Processo de Medição — por Empreiteira</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Dias entre a conclusão da obra e a medição informada (obras RD concluídas e não canceladas). Verde ≤ 30 d · amarelo ≤ 60 d · vermelho &gt; 60 d.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr style="background:var(--surface2)">
+        <th style="padding:6px 10px;text-align:left">Empreiteira</th>
+        <th style="padding:6px 10px;text-align:center">Obras com medição final</th>
+        <th style="padding:6px 10px;text-align:center">Tempo médio<br><span style="font-size:9px;font-weight:400;color:var(--muted)">conclusão → medição final</span></th>
+        <th style="padding:6px 10px;text-align:center">Menor / maior</th>
+        <th style="padding:6px 10px;text-align:center">Até a 1ª medição<br><span style="font-size:9px;font-weight:400;color:var(--muted)">(parcial ou final)</span></th>
+        <th style="padding:6px 10px;text-align:center">Concluídas sem medição final</th>
+        <th style="padding:6px 10px;text-align:center">Aguardando há (média)</th>
+      </tr></thead>
+      <tbody>${nomes.map(n=>linha(n,g[n],false)).join('')}${nomes.length>1?linha('TOTAL',tot,true):''}</tbody>
+    </table></div></div>`;
 }
 
 // ── KPI: tempo médio kaffa parcial/final → medição parcial/final ──────
@@ -1785,8 +1839,9 @@ window._exportMonitorCSV = function(btn){
 
   // Build clean CSV from stored data (not DOM)
   const esc = v => '"'+String(v||'').replace(/"/g,'""')+'"';
-  const header = 'Nota,Prazo,Situação,Cidade,Fiscal,Empreiteira';
-  const rows   = dados.map(r=>[r.numero,r.prazo,r.situacao,r.cidade,r.fiscal,r.empreiteira].map(esc).join(','));
+  const _cf = dados.some(r=>r.fiscalizada!==undefined);
+  const header = 'Nota,Prazo,Situação,'+(_cf?'Fiscalizada,Pendência,':'')+'Cidade,Fiscal,Empreiteira';
+  const rows   = dados.map(r=>[r.numero,r.prazo,r.situacao,...(_cf?[r.fiscalizada||'',r.pendencia||'']:[]),r.cidade,r.fiscal,r.empreiteira].map(esc).join(','));
   const csv    = '\uFEFF' + header + '\n' + rows.join('\n');
 
   const filename = 'monitor_'+titulo.replace(/[^a-zA-Z0-9]/g,'_').toLowerCase()+'.csv';
@@ -1797,6 +1852,8 @@ window._exportMonitorCSV = function(btn){
   toast('✓ Exportado '+dados.length+' obras — '+filename,'ok');
 };
 
+// Contrato assinado só é exigido em obras R1 e ODI (R2 é obra da própria Celesc — não tem contrato)
+function precisaContrato(o){ return (o?.tipo||'') !== 'R2'; }
 function renderMonitorPrazos(list){
   const ativas    = list.filter(o => !o.cancelado && !o.armazenado);
   const ativasRD  = ativas.filter(o => o.tipo !== 'ODI');
@@ -1851,7 +1908,10 @@ function renderMonitorPrazosTipo_inner(list){
     return { venc, hoje, breve, total: lista.length };
   }
 
-  function renderPainelMonitor(titulo, subtitulo, lista, tipo, cor, fnPrazo){
+  // pendência ativa da obra (registrada pelo fiscal e ainda não dada como resolvida)
+  const _pendAtiva = o => !!(o.pendencia && !o.pendenciaResolvida);
+  const _pendTxt = o => { const l=(Array.isArray(o.tiposPendencia)&&o.tiposPendencia.length?o.tiposPendencia:(o.tipoPendencia?[o.tipoPendencia]:[])).map(x=>x==='Outro'&&o.pendenciaOutro?o.pendenciaOutro:x); const t=l.length?l.join(', '):'Pendência'; return t+(o.regularizacaoData?' (empreiteira regularizou em '+fmtTxt(o.regularizacaoData)+' — aguarda o fiscal)':''); };
+  function renderPainelMonitor(titulo, subtitulo, lista, tipo, cor, fnPrazo, comFisc){
     if(!lista.length) return '';
     const cnt = contadores(lista);
     const badges = [
@@ -1869,7 +1929,8 @@ function renderMonitorPrazosTipo_inner(list){
       situacao: x.dias<0 ? 'Vencida há '+Math.abs(x.dias)+'d' : x.dias===0 ? 'Vence hoje' : x.dias+'d restantes',
       cidade: x.o.cidade||'',
       fiscal: x.o.fiscal||'',
-      empreiteira: x.o.empreiteira||''
+      empreiteira: x.o.empreiteira||'',
+      ...(comFisc?{fiscalizada: x.o.fiscalizacao ? 'Sim — '+fmtTxt(x.o.fiscalizacao) : 'Não', pendencia: _pendAtiva(x.o) ? 'Sim — '+_pendTxt(x.o) : 'Não'}:{})
     }));
     const mkRow = x => {
       const d = x.dias;
@@ -1880,6 +1941,8 @@ function renderMonitorPrazosTipo_inner(list){
         <td style="padding:5px 10px;font-size:11px;font-weight:600;color:var(--accent);white-space:nowrap">${x.o.numero}</td>
         <td style="padding:5px 10px;font-weight:700;font-size:12px;color:${cor2};white-space:nowrap">${prazoFmt}</td>
         <td style="padding:5px 10px;font-size:10px;color:${cor2};white-space:nowrap">${txt}</td>
+        ${comFisc?`<td style="padding:5px 10px;font-size:10px;font-weight:700;white-space:nowrap;color:${x.o.fiscalizacao?'#22C55E':'#EF4444'}">${x.o.fiscalizacao?'✅ '+fmtTxt(x.o.fiscalizacao):'❌ Não fiscalizada'}</td>
+        <td style="padding:5px 10px;font-size:10px;font-weight:700;color:${_pendAtiva(x.o)?'#EF4444':'var(--muted)'}" title="${_pendAtiva(x.o)?String(_pendTxt(x.o)).replace(/"/g,'&quot;'):''}">${_pendAtiva(x.o)?'⚠️ '+String(_pendTxt(x.o)).replace(/</g,'&lt;'):'—'}</td>`:''}
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.cidade||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.fiscal||'—'}</td>
         <td style="padding:5px 10px;font-size:10px;color:var(--muted)">${x.o.empreiteira||'—'}</td>
@@ -1887,7 +1950,7 @@ function renderMonitorPrazosTipo_inner(list){
     };
     const linhas = lista.slice(0, ROW_LIMIT).map(mkRow).join('');
     const maisTxt = lista.length > ROW_LIMIT
-      ? `<tr><td colspan="6" style="padding:0">
+      ? `<tr><td colspan="${comFisc?8:6}" style="padding:0">
           <details style="padding:0">
             <summary style="padding:6px 10px;font-size:10px;color:var(--accent);cursor:pointer;list-style:none">
               ▼ Ver mais ${lista.length - ROW_LIMIT} obra(s)
@@ -1908,6 +1971,7 @@ function renderMonitorPrazosTipo_inner(list){
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             ${badges}
+            ${comFisc&&lista.some(x=>_pendAtiva(x.o))?`<span style="background:#EF4444;color:#fff;padding:1px 7px;border-radius:10px;font-size:9px">⚠️ ${lista.filter(x=>_pendAtiva(x.o)).length} com pendência</span>`:''}
             ${me.perfil==='gerente'?`<button onclick="window._exportMonitorCSV(this)" data-titulo="${titulo}" data-tipo="${_cardId}" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:var(--surface);cursor:pointer;white-space:nowrap">⬇️ Exportar CSV</button>`:''}
           </div>
         </div>
@@ -1918,6 +1982,7 @@ function renderMonitorPrazosTipo_inner(list){
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Nº Obra</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase;color:#EF4444">Data Lim.</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Situação</th>
+                ${comFisc?'<th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Fiscalizada?</th><th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Pendência</th>':''}
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Cidade</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Fiscal</th>
                 <th style="padding:7px 10px;text-align:left;font-size:9px;color:var(--muted);text-transform:uppercase">Empreiteira</th>
@@ -1942,7 +2007,7 @@ function renderMonitorPrazosTipo_inner(list){
           <span style="font-size:9px;color:var(--muted);font-weight:400">Ação urgente necessária</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-bottom:20px">
-          ${renderPainelMonitor('Medida 70','Prazo = Data Limite',sp70.atual,'med70','#14B8A6',prazoMedida70e230)}
+          ${renderPainelMonitor('Medida 70','Prazo = Data Limite · '+sp70.atual.filter(x=>x.o.fiscalizacao).length+' fiscalizada(s), '+sp70.atual.filter(x=>!x.o.fiscalizacao).length+' não',sp70.atual,'med70','#14B8A6',prazoMedida70e230,true)}
           ${renderPainelMonitor('Medida 230','Prazo = Data Limite',sp230.atual,'med230','#10B981',prazoMedida70e230)}
           ${renderPainelMonitor('Medida 280','Prazo = último dia mês seguinte à Med.230',sp280.atual,'med280','#22C55E',prazoMedida280)}
         </div>
@@ -2976,6 +3041,11 @@ window.checkArmazenamentoDeps = function(){
   const isODI = obra?.tipo === 'ODI';
   const rowMed = document.getElementById('rowMedicoesAssinadas');
   if(rowMed) rowMed.style.display = isODI ? 'none' : '';
+  // R2 (obra da própria Celesc) não tem contrato — oculta a linha e não exige para armazenar
+  const _tipoObra = obra?.tipo || document.getElementById('oTipo')?.value || '';
+  const semContrato = _tipoObra === 'R2';
+  const rowContr = document.getElementById('rowContratosAssinado');
+  if(rowContr) rowContr.style.display = semContrato ? 'none' : '';
 
   // Garante elemento de mensagem de aviso junto ao checkbox
   let msgEl = document.getElementById('msgCadastroBlock');
@@ -2995,9 +3065,9 @@ window.checkArmazenamentoDeps = function(){
   }
   msgEl.style.display = 'none';
   // ODI: sem Medições Assinadas; RD: com Medições Assinadas
-  const deps = isODI
+  const deps = (isODI
     ? ['oContratosAssinado','oProjetosAsBuilt']
-    : ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt'];
+    : ['oContratosAssinado','oMedicoesAssinadas','oProjetosAsBuilt']).filter(id=>!(semContrato && id==='oContratosAssinado'));
   const allChk = deps.every(id => { const el=document.getElementById(id); return el&&el.checked; });
   const caixa  = (document.getElementById('oCaixaArmazenada')?.value||'').trim();
   final.disabled = !(allChk && caixa);
@@ -9370,15 +9440,17 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
           <span style="font-size:9px;color:var(--muted)">Ordenar por:</span>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='fiscal'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='fiscal'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='fiscal'?'#fff':'inherit')}">👤 Fiscal</button>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='usc'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='usc'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='usc'?'#fff':'inherit')}">📊 USC ↓</button>
+          <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='conclusao'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='conclusao'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='conclusao'?'#fff':'inherit')}">Conclusão</button>
           <button onclick="window._analiseSort=window._analiseSort||{}; window._analiseSort['${nome}']='kaffa'; renderAnaliseFinanceira();" style="font-size:9px;padding:2px 8px;border-radius:4px;border:1px solid var(--border);background:${((window._analiseSort||{})['${nome}']==='kaffa'?'var(--accent)':'var(--surface)')};cursor:pointer;color:${((window._analiseSort||{})['${nome}']==='kaffa'?'#fff':'inherit')}">✅ Kaffa</button>
         </div>
         <div style="overflow-x:auto;margin-top:2px"><table style="width:100%;border-collapse:collapse;font-size:9px">
-          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Kaffa Execução</th><th style="padding:4px 6px;text-align:center">Fisc.</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
+          <thead><tr style="background:var(--surface2)"><th style="padding:4px 6px;text-align:left">Nº</th><th style="padding:4px 6px;text-align:left">Fiscal</th><th style="padding:4px 6px;text-align:center">Conclusão</th><th style="padding:4px 6px;text-align:center">Kaffa Execução</th><th style="padding:4px 6px;text-align:center">Fisc.</th><th style="padding:4px 6px">Tipo</th><th style="padding:4px 6px">Prog.</th><th style="padding:4px 6px;text-align:right">USC Prev.</th><th style="padding:4px 6px;text-align:right">Parc.Med.</th><th style="padding:4px 6px;text-align:right;color:#EF4444">Pendente</th><th style="padding:4px 6px;text-align:right">LM(R$)</th></tr></thead>
           <tbody>${(()=>{
             const sortKey = ((window._analiseSort||{})[''+nome])||'';
             const sorted = [...devOp].sort((a,b)=>{
               if(sortKey==='fiscal') return (a.fiscal||'zzz').localeCompare(b.fiscal||'zzz');
               if(sortKey==='usc') return (parseFloat(b.usc)||0)-(parseFloat(a.usc)||0); // maior USC primeiro
+              if(sortKey==='conclusao') return (a.conclusao||'9999').localeCompare(b.conclusao||'9999'); // concluída há mais tempo primeiro
               if(sortKey==='kaffa'){
                 const aK=((a.kaffa&&a.kaffa!=='')||(a.kaffaEntries||[]).some(k=>k.tipo==='final'))?1:0;
                 const bK=((b.kaffa&&b.kaffa!=='')||(b.kaffaEntries||[]).some(k=>k.tipo==='final'))?1:0;
@@ -9387,7 +9459,7 @@ function renderBlocoEmpreiteira(nome, cor, obrasPool, p){
               return 0;
             });
             return sorted;
-          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)">`+window._ovTag(o)+`<td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${window._fiscIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
+          })().map(o=>{const bruto=parseFloat(o.usc)||0;const parcs=(o.medicoes||[]).filter(m=>m.tipo==='parcial').reduce((a,m)=>a+(parseFloat(m.uscMedido)||0),0);const jaMed=Math.min(parcs,bruto);const pend=Math.max(0,bruto-jaMed);return `<tr style="border-bottom:1px solid var(--border)">`+window._ovTag(o)+`<td style="padding:3px 6px;font-size:9px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.fiscal||'—'}">${(o.fiscal||'—').split(' ')[0]}</td><td style="padding:3px 6px;text-align:center;white-space:nowrap">${o.conclusao?fmtTxt(o.conclusao):'<span style="color:var(--muted)">não concluída</span>'}</td><td style="padding:3px 6px;text-align:center">${window._kaffaIcon(o)}</td><td style="padding:3px 6px;text-align:center">${window._fiscIcon(o)}</td><td style="padding:3px 6px;text-align:center">${o.tipo||'—'}</td><td style="padding:3px 6px">${o.programa||'—'}</td><td style="padding:3px 6px;text-align:right">${bruto.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#7c6af7">${jaMed>0?jaMed.toFixed(1):'—'}</td><td style="padding:3px 6px;text-align:right;color:#EF4444;font-weight:700">${pend.toFixed(1)}</td><td style="padding:3px 6px;text-align:right;color:#EF4444">${pend>0?brlFmt(pend*p.valorUSC*(1+p.ajusteLM/100)):'—'}</td></tr>`;}).join('')}</tbody>
         </table></div></details>`:''}
 
       <!-- Gráfico financeiro 12 meses -->
